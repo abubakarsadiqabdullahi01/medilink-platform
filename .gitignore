@@ -25,3 +25,5 @@ yarn.lock
 *.docx
 *.zip
 probe.txt
+
+.pnpm-store/
