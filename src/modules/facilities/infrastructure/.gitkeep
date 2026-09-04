@@ -1,0 +1,1 @@
+# facilities — infrastructure: Repositories and provider adapters. The only layer that talks to Prisma or vendors.

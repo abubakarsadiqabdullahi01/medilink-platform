@@ -1,0 +1,36 @@
+{
+  "root": true,
+  "extends": [
+    "next/core-web-vitals",
+    "plugin:@typescript-eslint/recommended",
+    "prettier"
+  ],
+  "parser": "@typescript-eslint/parser",
+  "plugins": [
+    "@typescript-eslint"
+  ],
+  "rules": {
+    "@typescript-eslint/no-explicit-any": "error",
+    "@typescript-eslint/no-floating-promises": "off",
+    "no-console": [
+      "warn",
+      {
+        "allow": [
+          "warn",
+          "error",
+          "log"
+        ]
+      }
+    ],
+    "eqeqeq": [
+      "error",
+      "always"
+    ]
+  },
+  "ignorePatterns": [
+    "node_modules/",
+    ".next/",
+    "coverage/",
+    "playwright-report/"
+  ]
+}

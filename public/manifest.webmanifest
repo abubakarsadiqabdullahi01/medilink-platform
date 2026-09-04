@@ -1,0 +1,10 @@
+{
+  "name": "Medilink",
+  "short_name": "Medilink",
+  "description": "Verified healthcare workforce and locum management for Nigeria.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f6f2",
+  "theme_color": "#01696f",
+  "icons": []
+}

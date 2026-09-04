@@ -1,0 +1,27 @@
+node_modules/
+.next/
+out/
+build/
+coverage/
+playwright-report/
+test-results/
+.env
+.env.local
+.env.*.local
+*.log
+.DS_Store
+.vscode/
+!.vscode/extensions.json
+prisma/dev.db*
+
+# Build and editor artefacts
+tsconfig.tsbuildinfo
+
+# This project uses pnpm; npm and yarn lockfiles must not appear
+package-lock.json
+yarn.lock
+
+# Documents and archives belong outside the repository
+*.docx
+*.zip
+probe.txt

@@ -1,0 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 40 20% 97%;
+    --foreground: 40 14% 13%;
+    --muted: 40 6% 48%;
+    --border: 40 10% 82%;
+    --primary: 184 82% 22%;
+    --primary-foreground: 0 0% 100%;
+    --destructive: 320 58% 40%;
+    --radius: 0.5rem;
+  }
+
+  * {
+    border-color: hsl(var(--border));
+  }
+}

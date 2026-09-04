@@ -1,0 +1,46 @@
+import { z } from 'zod';
+
+/**
+ * Environment is validated once, at boot. A missing or malformed variable
+ * fails the process immediately rather than surfacing as a runtime error in
+ * the middle of a shift check-in.
+ */
+const schema = z.object({
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  APP_ENV: z.enum(['local', 'staging', 'production']).default('local'),
+  APP_URL: z.string().url(),
+
+  DATABASE_URL: z.string().url(),
+  SESSION_SECRET: z.string().min(32),
+
+  STORAGE_ENDPOINT: z.string().url(),
+  STORAGE_REGION: z.string().default('auto'),
+  STORAGE_BUCKET: z.string().min(1),
+  STORAGE_ACCESS_KEY_ID: z.string().min(1),
+  STORAGE_SECRET_ACCESS_KEY: z.string().min(1),
+  STORAGE_FORCE_PATH_STYLE: z.coerce.boolean().default(true),
+  STORAGE_SIGNED_URL_TTL_SECONDS: z.coerce.number().int().positive().max(3600).default(300),
+
+  SMS_PROVIDER: z.enum(['console', 'termii', 'africastalking']).default('console'),
+  SMS_API_KEY: z.string().optional(),
+  SMTP_URL: z.string().optional(),
+
+  PAYMENT_PROVIDER: z.enum(['paystack', 'remita', 'none']).default('none'),
+  PAYSTACK_SECRET_KEY: z.string().optional(),
+  PAYSTACK_WEBHOOK_SECRET: z.string().optional(),
+
+  NIN_VERIFICATION_PROVIDER: z.enum(['sandbox', 'live', 'none']).default('sandbox'),
+  NIN_VERIFICATION_API_KEY: z.string().optional(),
+
+  LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+});
+
+const parsed = schema.safeParse(process.env);
+
+if (!parsed.success) {
+  console.error('Invalid environment:', parsed.error.flatten().fieldErrors);
+  throw new Error('Environment validation failed. Copy .env.example to .env and fill it in.');
+}
+
+export const env = parsed.data;
+export type Env = typeof env;

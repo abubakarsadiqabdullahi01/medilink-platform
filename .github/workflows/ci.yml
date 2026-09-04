@@ -1,0 +1,135 @@
+name: CI
+
+# The pipeline is the gate (Section 2.5). A commit that cannot pass every job
+# here does not reach staging, and nobody deploys by hand.
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DATABASE_URL: postgresql://medilink:medilink@localhost:5432/medilink?schema=public
+  APP_URL: http://localhost:3000
+  SESSION_SECRET: ci-session-secret-value-at-least-32-chars
+  STORAGE_ENDPOINT: http://localhost:9000
+  STORAGE_BUCKET: medilink-documents
+  STORAGE_ACCESS_KEY_ID: medilink
+  STORAGE_SECRET_ACCESS_KEY: medilink-secret
+
+jobs:
+  quality:
+    name: Lint, types, unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm prisma generate
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+
+  migrations:
+    name: Migrations and seed on an empty database
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: medilink
+          POSTGRES_PASSWORD: medilink
+          POSTGRES_DB: medilink
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U medilink" --health-interval 5s
+          --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Stage 4.1: up, down, up again. A migration that cannot roll back is
+      # planned across two releases, not merged as one.
+      - name: migrate up
+        run: pnpm prisma migrate deploy
+      - name: migrate down and up again
+        run: pnpm prisma migrate reset --force --skip-seed && pnpm prisma migrate deploy
+      # Stage 3.7: seed data loads into an empty database by migration alone.
+      - name: seed and assert row counts
+        run: pnpm db:seed
+
+  security:
+    name: Dependency and secret scanning
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: dependency audit
+        run: pnpm audit --audit-level high
+      - name: secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  e2e:
+    name: End-to-end
+    runs-on: ubuntu-latest
+    needs: [quality]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: medilink
+          POSTGRES_PASSWORD: medilink
+          POSTGRES_DB: medilink
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U medilink" --health-interval 5s
+          --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm prisma migrate deploy && pnpm db:seed
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm build
+      - name: start and test
+        run: |
+          pnpm start &
+          npx wait-on http://localhost:3000/api/v1/health --timeout 60000
+          pnpm test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
