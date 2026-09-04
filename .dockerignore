@@ -7,3 +7,7 @@ test-results
 .env
 .env.local
 *.log
+
+*.zip
+*.docx
+Medilink Foundations scaffold
