@@ -1,5 +1,5 @@
 # Multi-stage build. Stage names are referenced by docker-compose.yml targets.
-FROM node:20-bookworm-slim AS base
+FROM node:22-bookworm-slim AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable && apt-get update \
@@ -10,7 +10,7 @@ WORKDIR /app
 # ---- dependencies -----------------------------------------------------------
 FROM base AS deps
 COPY package.json pnpm-lock.yaml* ./
-RUN pnpm install --no-frozen-lockfile
+RUN pnpm install --frozen-lockfile
 
 # ---- development (used by docker-compose) -----------------------------------
 FROM base AS development
