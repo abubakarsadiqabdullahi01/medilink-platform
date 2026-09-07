@@ -7,7 +7,18 @@ export interface RouteDefinition {
   method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   path: string;
   permission: Permission;
+  /**
+   * The scope types this route accepts. The caller names one per request and
+   * must hold the permission over it; a grant at PLATFORM covers them all.
+   */
   scopeType: ScopeType;
 }
 
-export const ROUTES: RouteDefinition[] = [];
+export const ROUTES: RouteDefinition[] = [
+  { method: 'GET', path: '/api/v1/audit', permission: 'audit.read', scopeType: 'PLATFORM' },
+  { method: 'GET', path: '/api/v1/audit', permission: 'audit.read', scopeType: 'FACILITY_GROUP' },
+  { method: 'GET', path: '/api/v1/audit', permission: 'audit.read', scopeType: 'FACILITY' },
+  { method: 'GET', path: '/api/v1/audit', permission: 'audit.read', scopeType: 'BRANCH' },
+  { method: 'GET', path: '/api/v1/audit', permission: 'audit.read', scopeType: 'DEPARTMENT' },
+  { method: 'GET', path: '/api/v1/audit', permission: 'audit.read', scopeType: 'SELF' },
+];

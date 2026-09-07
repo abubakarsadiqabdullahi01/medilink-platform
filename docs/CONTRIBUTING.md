@@ -53,6 +53,28 @@ a write leaves no audit row. See `docs/stage-4-5-audit-coverage.md`, and add
 any new model to `AUDITED_MODELS` or `EXEMPT_MODELS` in
 `src/lib/audit-coverage.ts` — a model in neither fails the suite.
 
+## Writing an authenticated endpoint
+
+Route handlers go through `handleGuardedRequest`, which will not hand over the
+session without a permission and the scope of the record being touched:
+
+```ts
+export async function GET(request: Request) {
+  return handleGuardedRequest(request, {
+    source: 'query',
+    schema: someQuerySchema,
+    permission: 'facility.read',
+    scope: (query) => ({ type: 'FACILITY', id: query.facilityId }),
+    action: async ({ input, session, context }) => readSomething(input),
+  });
+}
+```
+
+Add the route to the module's `routes.ts` table, which is what a reviewer
+reads instead of every route file, and add the 403 cases to
+`tests/integration/authorization.test.ts` — one for the permission, one for a
+grant scoped elsewhere. See `docs/stage-4-3-4-4-authorization.md`.
+
 ## Money
 
 Integers in kobo, never floats. Column names end in `_kobo`.

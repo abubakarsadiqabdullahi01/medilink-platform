@@ -22,7 +22,7 @@ internal shape: `domain/`, `application/`, `infrastructure/`, `presentation/`,
 | `disputes` | 14. Disputes | 8 | Folder only |
 | `clinical-incidents` | 15. Clinical incidents | 5 | Folder only |
 | `notifications` | 16. Notifications | 4 | Adapter stub |
-| `audit-compliance` | 17. Audit, consent and compliance | 4 | Foundations in `src/lib` |
+| `audit-compliance` | 17. Audit, consent and compliance | 4 | Scoped audit-trail read |
 | `suggestions` | 18. Suggestion log | 9 | Folder only |
 
 Rules: a module never reads another module's tables; cross-module reactions go

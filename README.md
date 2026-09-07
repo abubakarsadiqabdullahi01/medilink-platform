@@ -76,6 +76,7 @@ prisma/seed.ts            controlled vocabularies, each with a named owner
 src/app/                  routes; API under src/app/api/v1
 src/modules/<module>/      one folder per specification module (Section 8.1)
 src/lib/authz/            permissions and the permission-plus-scope guard
+src/lib/http/             request context, responses, the guarded-route handler
 src/lib/audit.ts          the audited-write helper
 src/lib/audit-coverage.ts which tables must be audited, and the test harness
 src/lib/outbox.ts         transactional event publishing
