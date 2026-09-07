@@ -1,4 +1,3 @@
-import { prisma } from '../db';
 import type { Permission } from './permissions';
 
 /**
@@ -21,6 +20,18 @@ export interface Grant {
   scopeType: ScopeType;
   scopeId: string | null;
 }
+
+type UserRoleGrantRow = {
+  scopeType: string;
+  scopeId: string | null;
+  role: {
+    permissions: {
+      permission: {
+        key: string;
+      };
+    }[];
+  };
+};
 
 export class AuthorizationError extends Error {
   readonly status = 403;
@@ -60,7 +71,8 @@ export function isAuthorized(
 }
 
 export async function loadGrants(userId: string): Promise<Grant[]> {
-  const rows = await prisma.userRole.findMany({
+  const { prisma } = await import('../db');
+  const rows: UserRoleGrantRow[] = await prisma.userRole.findMany({
     where: { userId, revokedAt: null },
     include: { role: { include: { permissions: { include: { permission: true } } } } },
   });

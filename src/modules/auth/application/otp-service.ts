@@ -1,4 +1,3 @@
-import type { OtpPurpose } from '@prisma/client';
 import { prisma, type Tx } from '@/lib/db';
 import { env } from '@/lib/env';
 import { recordAudit } from '@/lib/audit';
@@ -37,7 +36,7 @@ export async function issueOtp(input: {
   now?: Date;
 }): Promise<{ expiresAt: Date; sendsRemainingThisHour: number }> {
   const now = input.now ?? new Date();
-  const purpose = input.purpose as OtpPurpose;
+  const purpose = input.purpose;
 
   const recent = await prisma.otpCode.findMany({
     where: {
@@ -49,7 +48,7 @@ export async function issueOtp(input: {
   });
 
   const verdict = evaluateResend(
-    recent.map((row) => row.createdAt),
+    recent.map((row: { createdAt: Date }) => row.createdAt),
     now,
   );
   if (!verdict.ok) {
@@ -60,7 +59,7 @@ export async function issueOtp(input: {
   const codeHash = hashOtpCode(code, input.userId, input.purpose, env.SESSION_SECRET);
   const expiresAt = otpExpiry(now);
 
-  await prisma.$transaction(async (tx) => {
+  await prisma.$transaction(async (tx: Tx) => {
     // Supersede any code still outstanding for this purpose, so a stale
     // message arriving late cannot be used after a new one is requested.
     await tx.otpCode.updateMany({
@@ -110,7 +109,7 @@ export async function consumeOtp(input: {
   now?: Date;
 }): Promise<void> {
   const now = input.now ?? new Date();
-  const purpose = input.purpose as OtpPurpose;
+  const purpose = input.purpose;
   const client = input.tx ?? prisma;
 
   const record = await client.otpCode.findFirst({

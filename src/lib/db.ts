@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, type Prisma } from '@prisma/client';
 
 /**
  * One Prisma client per process. Next.js hot reload would otherwise open a
@@ -17,4 +17,4 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 /** A transaction client: the type every audited write accepts. */
-export type Tx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
+export type Tx = Prisma.TransactionClient;

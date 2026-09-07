@@ -1,5 +1,5 @@
 import { cookies } from 'next/headers';
-import { prisma } from '@/lib/db';
+import { prisma, type Tx } from '@/lib/db';
 import { env } from '@/lib/env';
 import { recordAudit } from '@/lib/audit';
 import {
@@ -33,7 +33,7 @@ export async function issueSession(input: {
   const { token, tokenHash } = generateSessionToken();
   const expiresAt = sessionExpiry(now);
 
-  const session = await prisma.$transaction(async (tx) => {
+  const session = await prisma.$transaction(async (tx: Tx) => {
     const created = await tx.session.create({
       data: {
         userId: input.userId,
@@ -111,7 +111,7 @@ export async function revokeSession(input: {
 }): Promise<void> {
   const now = input.now ?? new Date();
 
-  await prisma.$transaction(async (tx) => {
+  await prisma.$transaction(async (tx: Tx) => {
     await tx.session.updateMany({
       where: { id: input.sessionId, revokedAt: null },
       data: { revokedAt: now },
@@ -144,7 +144,7 @@ export async function revokeAllSessions(input: {
 }): Promise<number> {
   const now = input.now ?? new Date();
 
-  return prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx: Tx) => {
     const result = await tx.session.updateMany({
       where: { userId: input.userId, revokedAt: null },
       data: { revokedAt: now },

@@ -1,4 +1,4 @@
-import { prisma } from '@/lib/db';
+import { prisma, type Tx } from '@/lib/db';
 import { recordAudit } from '@/lib/audit';
 import { publishEvent } from '@/lib/outbox';
 import { EVENTS } from '@/lib/events';
@@ -62,7 +62,7 @@ export async function startRegistration(
     return { userId: existing.id, phone, expiresAt, existing: true };
   }
 
-  const user = await prisma.$transaction(async (tx) => {
+  const user = await prisma.$transaction(async (tx: Tx) => {
     const created = await tx.user.create({
       data: { phone, fullName, email, status: 'PENDING_VERIFICATION' },
     });
@@ -116,7 +116,7 @@ export async function verifyRegistrationPhone(input: {
 
   await consumeOtp({ userId: user.id, purpose: 'PHONE_VERIFICATION', code: input.code, now });
 
-  await prisma.$transaction(async (tx) => {
+  await prisma.$transaction(async (tx: Tx) => {
     await tx.user.update({ where: { id: user.id }, data: { phoneVerifiedAt: now } });
 
     await recordAudit(tx, {
@@ -176,7 +176,7 @@ export async function setInitialPassword(input: {
 
   const passwordHash = await hashPassword(input.password);
 
-  await prisma.$transaction(async (tx) => {
+  await prisma.$transaction(async (tx: Tx) => {
     await tx.user.update({
       where: { id: user.id },
       data: { passwordHash, status: 'UNDER_REVIEW' },

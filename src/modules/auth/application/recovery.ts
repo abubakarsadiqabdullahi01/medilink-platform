@@ -1,4 +1,4 @@
-import { prisma } from '@/lib/db';
+import { prisma, type Tx } from '@/lib/db';
 import { recordAudit } from '@/lib/audit';
 import { hashPassword, passwordProblems } from '@/lib/password';
 import { normalizeNigerianPhone } from '@/lib/phone';
@@ -93,7 +93,7 @@ export async function confirmPasswordReset(input: {
 
   const passwordHash = await hashPassword(input.password);
 
-  await prisma.$transaction(async (tx) => {
+  await prisma.$transaction(async (tx: Tx) => {
     await tx.user.update({ where: { id: user.id }, data: { passwordHash } });
 
     await recordAudit(tx, {
