@@ -1,11 +1,12 @@
 import { logger } from '../lib/logger';
 import { EVENTS } from '../lib/events';
+import type { EventHandler } from './processor';
 
 /**
  * Event handlers, registered by event type. Handlers must be idempotent:
  * a retry after a partial failure will call them again with the same payload.
  */
-export type EventHandler = (payload: Record<string, unknown>) => Promise<void>;
+export type { EventHandler };
 
 export const handlers: Record<string, EventHandler> = {
   [EVENTS.PractitionerRegistered]: async (payload) => {

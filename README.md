@@ -57,10 +57,16 @@ pnpm dev
 ## Verification commands
 
 ```bash
-pnpm verify        # lint, typecheck, unit tests — run before every push
-pnpm test:e2e      # Playwright, needs the app running
-pnpm db:updown     # migrate down and up again on an empty database
+pnpm verify            # lint, typecheck, unit tests — run before every push
+pnpm test:integration  # audit coverage and outbox recovery, against a real database
+pnpm test:e2e          # Playwright, needs the app running
+pnpm db:updown         # migrate down and up again on an empty database
 ```
+
+`pnpm test:integration` creates and migrates `medilink_test`, separate from the
+development database because it truncates between cases. Run it inside the
+container — `docker compose exec web pnpm test:integration` — unless the host
+can reach PostgreSQL directly.
 
 ## Layout
 
@@ -71,10 +77,13 @@ src/app/                  routes; API under src/app/api/v1
 src/modules/<module>/      one folder per specification module (Section 8.1)
 src/lib/authz/            permissions and the permission-plus-scope guard
 src/lib/audit.ts          the audited-write helper
+src/lib/audit-coverage.ts which tables must be audited, and the test harness
 src/lib/outbox.ts         transactional event publishing
 src/lib/storage/tigris.ts signed upload and download URLs
-src/worker/               outbox worker and event handlers
+src/worker/processor.ts   claim, dispatch, retry, dead-letter
+src/worker/               outbox worker loop and event handlers
 docs/adr/                 the decisions and why they were made
+tests/integration/        audit coverage and outbox recovery, real database
 tests/                    unit setup, e2e specs
 ```
 

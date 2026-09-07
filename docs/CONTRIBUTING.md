@@ -48,6 +48,25 @@ await prisma.$transaction(async (tx) => {
 The audit row and the event are written in the same transaction as the change.
 If the transaction rolls back, none of the three exist — which is the point.
 
+The audit rule is enforced, not merely stated: `pnpm test:integration` fails if
+a write leaves no audit row. See `docs/stage-4-5-audit-coverage.md`, and add
+any new model to `AUDITED_MODELS` or `EXEMPT_MODELS` in
+`src/lib/audit-coverage.ts` — a model in neither fails the suite.
+
 ## Money
 
 Integers in kobo, never floats. Column names end in `_kobo`.
+
+## If `pnpm typecheck` passes suspiciously easily
+
+This project uses pnpm, and `@prisma/client` is a stub that re-exports the
+client generated into `node_modules/.prisma/client`. If that generation has
+not run in pnpm's own tree, TypeScript resolves the stub instead, where
+`PrismaClient` is declared `any` — every Prisma call then typechecks, whatever
+it says, and `Prisma.dmmf` and `Prisma.raw` appear not to exist.
+
+The fix is `pnpm prisma generate`. The cause is usually `npm install` having
+been run in this repository at some point: it creates a hoisted
+`node_modules/.prisma` that generation targets instead. `package-lock.json` is
+in `.gitignore` for this reason — if one appears, delete it along with
+`node_modules`, then `pnpm install`.

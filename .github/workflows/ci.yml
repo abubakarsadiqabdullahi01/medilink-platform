@@ -73,6 +73,39 @@ jobs:
       - name: seed and assert row counts
         run: pnpm db:seed
 
+  integration:
+    name: Integration against a real database
+    runs-on: ubuntu-latest
+    needs: [quality]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: medilink
+          POSTGRES_PASSWORD: medilink
+          POSTGRES_DB: medilink
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U medilink" --health-interval 5s
+          --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm prisma generate
+      # Stage 4.5 (no write without an audit row) and 4.6 (no event lost on
+      # consumer failure). Neither is observable without a real PostgreSQL:
+      # one depends on transaction boundaries, the other on SKIP LOCKED.
+      # The suite creates and migrates medilink_test itself.
+      - name: audit coverage and outbox recovery
+        run: pnpm test:integration
+
   security:
     name: Dependency and secret scanning
     runs-on: ubuntu-latest
