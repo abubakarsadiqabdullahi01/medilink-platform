@@ -4,7 +4,7 @@ import { publishEvent } from '@/lib/outbox';
 import { EVENTS } from '@/lib/events';
 import { hashPassword, passwordProblems } from '@/lib/password';
 import { maskPhone, normalizeNigerianPhone } from '@/lib/phone';
-import { consumeOtp, issueOtp } from './otp-service';
+import { consumeOtp, issueOtp, verifyOtp } from './otp-service';
 import { AuthErrors } from '../domain/errors';
 
 /**
@@ -114,9 +114,13 @@ export async function verifyRegistrationPhone(input: {
     throw AuthErrors.accountNotUsable();
   }
 
-  await consumeOtp({ userId: user.id, purpose: 'PHONE_VERIFICATION', code: input.code, now });
+  const verified = await verifyOtp({ userId: user.id, purpose: 'PHONE_VERIFICATION', code: input.code, now });
 
   await prisma.$transaction(async (tx: Tx) => {
+    // Atomic with the update below: a crash here must not leave the code
+    // burned with the phone still unverified.
+    await consumeOtp(tx, verified, now);
+
     await tx.user.update({ where: { id: user.id }, data: { phoneVerifiedAt: now } });
 
     await recordAudit(tx, {

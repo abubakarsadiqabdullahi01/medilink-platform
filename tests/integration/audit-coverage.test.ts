@@ -27,6 +27,7 @@ import {
   confirmPasswordReset,
   requestPasswordReset,
 } from '@/modules/auth/application/recovery';
+import { consumeOtp, verifyOtp } from '@/modules/auth/application/otp-service';
 import { clearCookies } from './support/cookie-jar';
 import { lastOtpCode, startSmsCapture, stopSmsCapture } from './support/sms-capture';
 
@@ -102,6 +103,56 @@ describe('audit coverage across the authentication journey', () => {
       'auth.password_set',
       'auth.session_issued',
     ]);
+  });
+});
+
+describe('a wrong OTP guess', () => {
+  it('writes its own audit row rather than relying on a nearby one', async () => {
+    const { userId } = await startRegistration({ phone: PHONE, fullName: 'Amina Yusuf' });
+    const real = lastOtpCode();
+    const wrong = String((Number(real) + 1) % 1_000_000).padStart(6, '0');
+
+    // The window opens after registration's own auth.otp_issued row, so
+    // nothing else here can write to identity.otp_codes on this table's
+    // behalf — if the mismatch write is covered, it is covered on its own.
+    startAuditCoverage();
+    await expect(
+      verifyRegistrationPhone({ phone: PHONE, code: wrong }),
+    ).rejects.toThrow();
+    const report = auditCoverageReport();
+
+    expect(describeCoverageFailure(report)).toBeNull();
+    expect(report.writes.some((write) => write.model === 'OtpCode')).toBe(true);
+    expect(report.audits.some((audit) => audit.action === 'auth.otp_attempt_failed')).toBe(true);
+
+    const otp = await prisma.otpCode.findFirstOrThrow({ where: { userId } });
+    expect(otp.attempts).toBe(1);
+    expect(otp.consumedAt).toBeNull();
+  });
+});
+
+describe('otp consumption is atomic with what it authorises', () => {
+  it('rolls back the consumption when the enclosing transaction fails', async () => {
+    const { userId } = await startRegistration({ phone: PHONE, fullName: 'Amina Yusuf' });
+    const code = lastOtpCode();
+
+    const verified = await verifyOtp({ userId, purpose: 'PHONE_VERIFICATION', code });
+
+    await expect(
+      prisma.$transaction(async (tx) => {
+        await consumeOtp(tx, verified);
+        throw new Error('simulated failure after consuming');
+      }),
+    ).rejects.toThrow('simulated failure after consuming');
+
+    // Rolled back along with the rest of the transaction: nothing was burned.
+    const otp = await prisma.otpCode.findUniqueOrThrow({ where: { id: verified.id } });
+    expect(otp.consumedAt).toBeNull();
+
+    // So the same code still works, end to end, once the real caller retries.
+    await expect(
+      verifyRegistrationPhone({ phone: PHONE, code }),
+    ).resolves.toMatchObject({ userId });
   });
 });
 

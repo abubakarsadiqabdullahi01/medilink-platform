@@ -3,7 +3,7 @@ import { recordAudit } from '@/lib/audit';
 import { hashPassword, passwordProblems } from '@/lib/password';
 import { normalizeNigerianPhone } from '@/lib/phone';
 import { logger } from '@/lib/logger';
-import { consumeOtp, issueOtp } from './otp-service';
+import { consumeOtp, issueOtp, verifyOtp } from './otp-service';
 import { revokeAllSessions } from './session-service';
 import { AuthErrors } from '../domain/errors';
 
@@ -89,11 +89,15 @@ export async function confirmPasswordReset(input: {
   });
   if (problems.length > 0) throw AuthErrors.passwordRejected(problems);
 
-  await consumeOtp({ userId: user.id, purpose: 'PASSWORD_RESET', code: input.code, now });
+  const verified = await verifyOtp({ userId: user.id, purpose: 'PASSWORD_RESET', code: input.code, now });
 
   const passwordHash = await hashPassword(input.password);
 
   await prisma.$transaction(async (tx: Tx) => {
+    // Atomic with the update below: a crash here must not leave the code
+    // burned with the password unchanged.
+    await consumeOtp(tx, verified, now);
+
     await tx.user.update({ where: { id: user.id }, data: { passwordHash } });
 
     await recordAudit(tx, {

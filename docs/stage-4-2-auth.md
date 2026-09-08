@@ -76,6 +76,16 @@ across a call to an SMS gateway parks a database connection for the gateway's
 latency, and a gateway timeout would roll back a code the practitioner has
 already received.
 
+**Verifying and consuming a code are two calls, not one.** `verifyOtp` checks
+the code and, on a wrong guess, commits the attempt counter immediately in
+its own transaction — with an `auth.otp_attempt_failed` audit row, so that
+write is never covered by coincidence — because abandoning the request must
+not buy a free guess. `consumeOtp` only marks the code used, and takes the
+caller's transaction so consumption is atomic with the state change it
+authorises: phone verification or a password reset. Before this split,
+consumption happened outside that transaction, so a crash between the two
+could burn a code without completing what it was for.
+
 ## Not in this stage
 
 - Step-up auth enforcement on sensitive actions — the session carries

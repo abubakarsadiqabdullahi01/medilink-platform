@@ -66,6 +66,21 @@ not counted, since nothing changed; and an audit row naming a table that does
 not exist is reported, which catches a typo in `entityType` that would
 otherwise satisfy the matching while making the trail unsearchable.
 
+Table-level matching also means a write path can pass only because an
+unrelated write to the same table happened to be audited elsewhere in the
+same window — which is a real gap, not the accepted one above. `identity.otp_codes`
+had exactly this: issuing a code is audited, but until this was found neither
+a failed guess (an `attempts` increment) nor a successful redemption ever
+wrote its own audit row, so both passed only by sharing a window with some
+`auth.otp_issued` row. The fix, in `src/modules/auth/application/otp-service.ts`:
+a failed guess now writes its own `auth.otp_attempt_failed` row, atomically
+with the increment; a successful redemption still writes none, but is now
+folded into the same transaction as the state change it authorises, so it can
+no longer occur — successfully or not — without that change's own audit row.
+The first is a real per-write audit row; the second is a real per-write
+guarantee the harness cannot see but the transaction boundary enforces
+regardless. Neither relies on coincidence anymore.
+
 ## Verifying it
 
 ```

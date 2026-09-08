@@ -96,23 +96,33 @@ export async function issueOtp(input: {
   };
 }
 
+export interface VerifiedOtp {
+  id: string;
+}
+
 /**
- * Verifies and consumes a code. The failed-attempt counter is incremented
- * before the caller learns the result, so abandoning the request mid-flight
- * does not buy a free guess.
+ * Verifies a submitted code without consuming it. Throws on any invalid
+ * state: wrong, expired, exhausted, already used, or none outstanding.
+ *
+ * A wrong guess still increments the code's attempt counter, and that
+ * increment is committed — with its own audit row — immediately, in its own
+ * transaction, rather than deferred to whatever the caller does next.
+ * Deferring it would let an abandoned or crashed request buy a free guess,
+ * which is exactly what the counter exists to prevent. The audit row is what
+ * closes the gap table-level coverage matching would otherwise paper over:
+ * without it, this write is only "covered" because some unrelated
+ * auth.otp_issued row happens to land in the same test window.
  */
-export async function consumeOtp(input: {
+export async function verifyOtp(input: {
   userId: string;
   purpose: OtpPurposeKey;
   code: string;
-  tx?: Tx;
   now?: Date;
-}): Promise<void> {
+}): Promise<VerifiedOtp> {
   const now = input.now ?? new Date();
   const purpose = input.purpose;
-  const client = input.tx ?? prisma;
 
-  const record = await client.otpCode.findFirst({
+  const record = await prisma.otpCode.findFirst({
     where: { userId: input.userId, purpose, consumedAt: null },
     orderBy: { createdAt: 'desc' },
   });
@@ -122,9 +132,20 @@ export async function consumeOtp(input: {
 
   if (!verdict.ok) {
     if (record && verdict.reason === 'mismatch') {
-      await client.otpCode.update({
-        where: { id: record.id },
-        data: { attempts: { increment: 1 } },
+      await prisma.$transaction(async (tx) => {
+        await tx.otpCode.update({
+          where: { id: record.id },
+          data: { attempts: { increment: 1 } },
+        });
+
+        await recordAudit(tx, {
+          action: 'auth.otp_attempt_failed',
+          entityType: 'identity.otp_codes',
+          entityId: input.userId,
+          actorId: input.userId,
+          scopeType: 'SELF',
+          scopeId: input.userId,
+        });
       });
     }
     logger.warn('otp verification failed', { userId: input.userId, reason: verdict.reason });
@@ -141,10 +162,24 @@ export async function consumeOtp(input: {
 
   if (!record) throw AuthErrors.otpInvalid();
 
-  // Consume conditionally: two concurrent submissions of the same valid code
-  // must result in exactly one success.
-  const consumed = await client.otpCode.updateMany({
-    where: { id: record.id, consumedAt: null },
+  return { id: record.id };
+}
+
+/**
+ * Marks a verified code consumed. Takes the caller's transaction so
+ * consumption is atomic with the state change it authorizes — a crash
+ * between the two must not leave a burned code with no completed action, or
+ * a completed action whose code is still redeemable. No separate audit row
+ * names this write: the state change recorded in the same transaction is
+ * what the redemption was for, and a code is not a distinct auditable event
+ * from the verification it enables.
+ *
+ * Conditional on consumedAt still being null: two concurrent submissions of
+ * the same valid code must result in exactly one success.
+ */
+export async function consumeOtp(tx: Tx, verified: VerifiedOtp, now: Date = new Date()): Promise<void> {
+  const consumed = await tx.otpCode.updateMany({
+    where: { id: verified.id, consumedAt: null },
     data: { consumedAt: now },
   });
 
