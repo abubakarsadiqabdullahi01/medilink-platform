@@ -3,7 +3,7 @@ import { fail, handleError, ok } from './responses';
 import { contextLogger, requestContextFrom, type RequestContext } from './request-context';
 import { AuthorizationError, requirePermission, type RequestedScope } from '../authz/guard';
 import type { Permission } from '../authz/permissions';
-import { AuthError } from '@/modules/auth/domain/errors';
+import { HttpError } from './errors';
 import { requireSession, type CurrentSession } from '@/modules/auth/application/session-service';
 
 /**
@@ -79,7 +79,7 @@ export async function handleGuardedRequest<TInput, TOutput>(
 
     return ok(await options.action({ input, context, session }), context, options.successStatus ?? 200);
   } catch (error) {
-    if (error instanceof AuthError) {
+    if (error instanceof HttpError) {
       return fail(error.code, error.message, context, error.status);
     }
 

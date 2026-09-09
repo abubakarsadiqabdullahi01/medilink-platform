@@ -7,7 +7,7 @@ internal shape: `domain/`, `application/`, `infrastructure/`, `presentation/`,
 | Module folder | Specification module | Stage | Status |
 | --- | --- | --- | --- |
 | `auth` | 1. Authentication and access control | 4 | Foundations in `src/lib` |
-| `practitioners` | 2. Practitioner profiles | 5 | Folder only |
+| `practitioners` | 2. Practitioner profiles | 5 | Self-service profile (SELF scope) |
 | `credentials` | 3. Credential verification | 5 | Folder only |
 | `facilities` | 4. Facility management | 5 | Folder only |
 | `availability` | 5. Availability | 6 | Folder only |

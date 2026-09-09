@@ -28,8 +28,10 @@ import {
   requestPasswordReset,
 } from '@/modules/auth/application/recovery';
 import { consumeOtp, verifyOtp } from '@/modules/auth/application/otp-service';
+import { createProfile, updateProfile } from '@/modules/practitioners/application/profile';
 import { clearCookies } from './support/cookie-jar';
 import { lastOtpCode, startSmsCapture, stopSmsCapture } from './support/sms-capture';
+import { createProfessionalCategory, createUser } from './support/fixtures';
 
 /**
  * Stage 4.5 — "a test harness fails the suite if any write leaves no audit
@@ -156,6 +158,23 @@ describe('otp consumption is atomic with what it authorises', () => {
   });
 });
 
+describe('audit coverage for practitioner profiles', () => {
+  it('leaves no state change without an audit row', async () => {
+    const category = await createProfessionalCategory();
+    const user = await createUser();
+
+    startAuditCoverage();
+
+    await createProfile({ userId: user.id, professionalCategoryId: category.id, yearsOfExperience: 5 });
+    await updateProfile({ userId: user.id, bio: 'Updated via a direct application call.' });
+
+    const report = auditCoverageReport();
+
+    expect(describeCoverageFailure(report)).toBeNull();
+    expect(report.writes.some((write) => write.model === 'PractitionerProfile')).toBe(true);
+  });
+});
+
 describe('the harness itself', () => {
   it('reports a write that leaves no audit row', async () => {
     startAuditCoverage();
@@ -246,7 +265,7 @@ describe('the audited-model registry', () => {
     const rows = await prisma.$queryRaw<{ qualified: string }[]>`
       SELECT format('%I.%I', schemaname, tablename) AS qualified
         FROM pg_tables
-       WHERE schemaname IN ('identity', 'audit', 'config', 'storage')
+       WHERE schemaname IN ('identity', 'audit', 'config', 'storage', 'practitioners')
     `;
     const existing = new Set(rows.map((row) => row.qualified));
 

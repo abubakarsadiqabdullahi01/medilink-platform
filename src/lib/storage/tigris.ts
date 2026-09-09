@@ -31,7 +31,7 @@ export type ObjectPurpose =
   | 'incident_attachment'
   | 'timesheet_attachment';
 
-const ALLOWED_CONTENT_TYPES = new Set([
+export const ALLOWED_CONTENT_TYPES = new Set([
   'application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/heic',
 ]);
 

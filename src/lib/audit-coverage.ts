@@ -40,6 +40,7 @@ export const AUDITED_MODELS: Readonly<Record<string, string>> = {
   PublicHoliday: 'config.public_holidays',
   RateFloor: 'config.rate_floors',
   StoredObject: 'storage.stored_objects',
+  PractitionerProfile: 'practitioners.practitioner_profiles',
 };
 
 /**

@@ -1,5 +1,6 @@
 import { logger } from '../lib/logger';
 import { EVENTS } from '../lib/events';
+import { grantPractitionerRoleOnRegistration } from '../modules/practitioners/application/role-grants';
 import type { EventHandler } from './processor';
 
 /**
@@ -12,5 +13,6 @@ export const handlers: Record<string, EventHandler> = {
   [EVENTS.PractitionerRegistered]: async (payload) => {
     // Stage 4.7: send the welcome message through the notification adapter.
     logger.info('practitioner registered', { userId: String(payload.userId ?? '') });
+    await grantPractitionerRoleOnRegistration(String(payload.userId ?? ''));
   },
 };

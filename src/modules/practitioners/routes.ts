@@ -10,4 +10,14 @@ export interface RouteDefinition {
   scopeType: ScopeType;
 }
 
-export const ROUTES: RouteDefinition[] = [];
+export const ROUTES: RouteDefinition[] = [
+  { method: 'GET', path: '/api/v1/practitioners/me', permission: 'practitioner.profile.read', scopeType: 'SELF' },
+  { method: 'POST', path: '/api/v1/practitioners/me', permission: 'practitioner.profile.write', scopeType: 'SELF' },
+  { method: 'PATCH', path: '/api/v1/practitioners/me', permission: 'practitioner.profile.write', scopeType: 'SELF' },
+  {
+    method: 'POST',
+    path: '/api/v1/practitioners/me/photo-upload-url',
+    permission: 'practitioner.profile.write',
+    scopeType: 'SELF',
+  },
+];

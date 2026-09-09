@@ -67,6 +67,75 @@ export async function grant(input: {
   });
 }
 
+/**
+ * Ensures a role row exists without granting it to anyone — for tests that
+ * exercise something else's role-granting logic (e.g. an event handler)
+ * rather than setting up a session's own grants directly.
+ */
+export async function ensureRole(key: string) {
+  return prisma.role.upsert({
+    where: { key },
+    update: {},
+    create: { key, name: key },
+  });
+}
+
+/**
+ * Config-schema rows for practitioner-profile tests. `config` is not
+ * truncated between cases and `test:integration` never runs the seed, so
+ * these are created on demand, upserted by a fixed test key like `grant()`
+ * upserts its roles.
+ */
+export async function createProfessionalCategory(
+  input: { key?: string; name?: string; regulator?: string } = {},
+) {
+  sequence += 1;
+  const key = input.key ?? `test_category_${sequence}`;
+  return prisma.professionalCategory.upsert({
+    where: { key },
+    update: {},
+    create: {
+      key,
+      name: input.name ?? `Test Category ${sequence}`,
+      regulator: input.regulator ?? 'TEST',
+      owner: 'test-fixture',
+    },
+  });
+}
+
+export async function createSpecialty(
+  categoryId: string,
+  input: { key?: string; name?: string } = {},
+) {
+  sequence += 1;
+  const key = input.key ?? `test_specialty_${sequence}`;
+  return prisma.specialty.upsert({
+    where: { key },
+    update: { categoryId },
+    create: {
+      key,
+      name: input.name ?? `Test Specialty ${sequence}`,
+      categoryId,
+      owner: 'test-fixture',
+    },
+  });
+}
+
+export async function createState(input: { code?: string; name?: string; zone?: string } = {}) {
+  sequence += 1;
+  const code = input.code ?? `T${sequence}`;
+  return prisma.state.upsert({
+    where: { code },
+    update: {},
+    create: {
+      code,
+      name: input.name ?? `Test State ${sequence}`,
+      zone: input.zone ?? 'Test Zone',
+      owner: 'test-fixture',
+    },
+  });
+}
+
 /** An audit row tagged with a scope, so scope filtering has something to filter. */
 export async function seedAuditRow(input: {
   action: string;

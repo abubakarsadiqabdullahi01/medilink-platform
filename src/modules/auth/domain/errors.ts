@@ -1,16 +1,18 @@
+import { HttpError } from '@/lib/http/errors';
+
 /**
  * Auth failures carry a stable code and an HTTP status. Messages are written
  * for the person reading them on a phone in a ward corridor, and are
  * deliberately vague about whether an account exists.
  */
-export class AuthError extends Error {
+export class AuthError extends HttpError {
   constructor(
-    readonly code: string,
+    code: string,
     message: string,
-    readonly status: number = 400,
+    status: number = 400,
     readonly retryAfterSeconds?: number,
   ) {
-    super(message);
+    super(code, message, status);
     this.name = 'AuthError';
   }
 }
