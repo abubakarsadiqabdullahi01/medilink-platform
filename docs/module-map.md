@@ -10,7 +10,7 @@ internal shape: `domain/`, `application/`, `infrastructure/`, `presentation/`,
 | `practitioners` | 2. Practitioner profiles | 5 | Profile, identity/registration, screening, eligibility |
 | `credentials` | 3. Credential verification | 5 | Submit + manual review (SELF/PLATFORM) |
 | `facilities` | 4. Facility management | 5 | Create, verify, licence (PLATFORM/FACILITY) |
-| `availability` | 5. Availability | 6 | Folder only |
+| `availability` | 5. Availability | 6 | Slots, blocks, matcher boundary (SELF) |
 | `service-requests` | 6. Service requests | 6 | Folder only |
 | `matching` | 7. Matching and assignment | 6 | Folder only |
 | `scheduling` | 8. Scheduling | 6 | Folder only |

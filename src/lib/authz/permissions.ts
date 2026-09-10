@@ -23,6 +23,8 @@ export const PERMISSIONS = {
   'facility.user.manage': 'Manage staff accounts within a facility',
 
   // staffing
+  'availability.read': 'View a practitioner availability calendar',
+  'availability.write': 'Set your own availability',
   'service_request.read': 'View a service request',
   'service_request.publish': 'Publish a service request',
   'assignment.confirm': 'Confirm a practitioner onto an assignment',
@@ -53,6 +55,7 @@ export type Permission = keyof typeof PERMISSIONS;
  */
 export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
   practitioner: [
+    'availability.read', 'availability.write',
     'practitioner.profile.read', 'practitioner.profile.write', 'credential.submit',
     'credential.document.read', 'service_request.read', 'attendance.record',
     'timesheet.submit', 'invoice.read', 'payout.account.change', 'dispute.manage',
@@ -67,6 +70,7 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     'facility.read', 'facility.write', 'facility.user.manage', 'service_request.read',
   ],
   facility_scheduler: [
+    'availability.read',
     'facility.read', 'service_request.read', 'service_request.publish',
     'assignment.confirm', 'assignment.cancel', 'attendance.record',
   ],
@@ -77,6 +81,7 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     // self-declared, so somebody on this side has to create the record;
     // without this, only super_administrator could, which is not a role
     // anyone should be doing daily onboarding under.
+    'availability.read',
     'user.read', 'practitioner.profile.read', 'facility.read', 'facility.write',
     'service_request.read', 'assignment.confirm', 'assignment.cancel', 'dispute.manage',
   ],

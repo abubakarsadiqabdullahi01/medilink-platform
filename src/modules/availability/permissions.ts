@@ -2,4 +2,4 @@
 // src/lib/authz/permissions.ts; this file records which ones availability uses.
 import type { Permission } from '@/lib/authz/permissions';
 
-export const MODULE_PERMISSIONS: Permission[] = [];
+export const MODULE_PERMISSIONS: Permission[] = ['availability.read', 'availability.write'];

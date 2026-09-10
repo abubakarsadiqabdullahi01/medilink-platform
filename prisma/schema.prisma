@@ -17,7 +17,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-  schemas  = ["identity", "audit", "config", "storage", "practitioners", "credentials", "facilities"]
+  schemas  = ["identity", "audit", "config", "storage", "practitioners", "credentials", "facilities", "availability"]
 }
 
 // ---------------------------------------------------------------- identity
@@ -46,6 +46,8 @@ model User {
   representedFacilities Facility[]
   identityVerification IdentityVerification?
   screeningResult ScreeningResult?
+  availabilitySlots AvailabilitySlot[]
+  blockedPeriods    BlockedPeriod[]
   professionalRegistrations ProfessionalRegistration[]
 
   @@map("users")
@@ -364,6 +366,7 @@ model Lga {
 
   state State @relation(fields: [stateId], references: [id], onDelete: Cascade)
   facilities Facility[]
+  practitionerProfiles PractitionerProfile[]
 
   @@unique([stateId, name])
   @@map("lgas")
@@ -453,6 +456,11 @@ model PractitionerProfile {
   bio                    String?
   photoObjectKey         String?   @map("photo_object_key")
   homeStateId            String?   @map("home_state_id") @db.Uuid
+  homeLgaId              String?   @map("home_lga_id") @db.Uuid
+  // How far this practitioner is willing to travel, in the same tiers
+  // proximity is scored in. Nothing here holds coordinates, so tiers are
+  // the honest unit until something does.
+  travelPreference       TravelPreference @default(SAME_STATE) @map("travel_preference")
   createdAt              DateTime  @default(now()) @map("created_at")
   updatedAt              DateTime  @updatedAt @map("updated_at")
   deletedAt              DateTime? @map("deleted_at")
@@ -461,6 +469,7 @@ model PractitionerProfile {
   professionalCategory ProfessionalCategory @relation(fields: [professionalCategoryId], references: [id])
   specialty            Specialty?           @relation(fields: [specialtyId], references: [id])
   homeState            State?               @relation(fields: [homeStateId], references: [id])
+  homeLga              Lga?                 @relation(fields: [homeLgaId], references: [id])
 
   @@map("practitioner_profiles")
   @@schema("practitioners")
@@ -804,4 +813,78 @@ model CredentialRequirement {
   @@index([professionalCategoryId, isMandatory])
   @@map("credential_requirements")
   @@schema("config")
+}
+
+// How far a practitioner will travel, in the tiers proximity is scored in.
+enum TravelPreference {
+  SAME_LGA
+  SAME_STATE
+  ANYWHERE
+
+  @@schema("practitioners")
+}
+
+// ------------------------------------------------------------- availability
+
+// Step 6.2. One table for both shapes of availability, because both answer
+// the same question — "is this practitioner free for this window?" — and a
+// matcher that had to union two tables would drift between them.
+//
+// Recurring times are minutes since midnight in WAT (UTC+1, no DST), which is
+// how a practitioner thinks about them. The conversion lives in one place,
+// domain/availability.ts; storing local minutes and comparing them in UTC is
+// the bug that shape avoids.
+model AvailabilitySlot {
+  id     String           @id @default(uuid()) @db.Uuid
+  userId String           @map("user_id") @db.Uuid
+  kind   AvailabilityKind
+
+  // RECURRING_WEEKLY. 0 is Sunday, matching JavaScript's getUTCDay.
+  dayOfWeek      Int?      @map("day_of_week")
+  startMinute    Int?      @map("start_minute")
+  // An end at or before the start means the slot runs past midnight.
+  endMinute      Int?      @map("end_minute")
+  effectiveFrom  DateTime? @map("effective_from")
+  effectiveUntil DateTime? @map("effective_until")
+
+  // ONE_OFF
+  startsAt DateTime? @map("starts_at")
+  endsAt   DateTime? @map("ends_at")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, kind])
+  @@map("availability_slots")
+  @@schema("availability")
+}
+
+enum AvailabilityKind {
+  RECURRING_WEEKLY
+  ONE_OFF
+
+  @@schema("availability")
+}
+
+// Leave, a conference, a shift already worked elsewhere. A block always beats
+// a slot: saying "I am free on Tuesdays" and "I am away this Tuesday" is not
+// a contradiction, and the second is the more specific statement.
+model BlockedPeriod {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  startsAt  DateTime  @map("starts_at")
+  endsAt    DateTime  @map("ends_at")
+  reason    String
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, startsAt])
+  @@map("blocked_periods")
+  @@schema("availability")
 }
