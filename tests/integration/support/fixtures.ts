@@ -174,6 +174,35 @@ export async function createFacilityType(input: { key?: string; name?: string; r
 }
 
 /**
+ * Step 5.8: which credential types a category requires. Not upserted by a
+ * generated key like the others — the natural key is the
+ * (category, credential type) pair itself, which is already what the tests
+ * pass in, and re-declaring the same requirement twice is a legitimate
+ * no-op rather than a fixture collision to guard against.
+ */
+export async function createCredentialRequirement(input: {
+  professionalCategoryId: string;
+  credentialTypeId: string;
+  isMandatory?: boolean;
+}) {
+  return prisma.credentialRequirement.upsert({
+    where: {
+      professionalCategoryId_credentialTypeId: {
+        professionalCategoryId: input.professionalCategoryId,
+        credentialTypeId: input.credentialTypeId,
+      },
+    },
+    update: { isMandatory: input.isMandatory ?? true },
+    create: {
+      professionalCategoryId: input.professionalCategoryId,
+      credentialTypeId: input.credentialTypeId,
+      isMandatory: input.isMandatory ?? true,
+      owner: 'test-fixture',
+    },
+  });
+}
+
+/**
  * An LGA belongs to a state, and facility creation refuses a pairing that
  * does not match, so the two are created together by default.
  */

@@ -30,6 +30,8 @@ import {
 import { consumeOtp, verifyOtp } from '@/modules/auth/application/otp-service';
 import { createProfile, updateProfile } from '@/modules/practitioners/application/profile';
 import { reviewCredential, submitCredential } from '@/modules/credentials/application/submission';
+import { expireCredentials } from '@/modules/credentials/application/expiry';
+import { expireRegistrations } from '@/modules/practitioners/application/expiry';
 import {
   createFacility,
   updateFacility,
@@ -260,6 +262,46 @@ describe('audit coverage for facilities', () => {
     expect(report.writes.some((write) => write.model === 'Facility')).toBe(true);
     expect(report.writes.some((write) => write.model === 'UserRole')).toBe(true);
     expect(report.audits.some((audit) => audit.action === 'facility.role_granted')).toBe(true);
+  });
+});
+
+describe('audit coverage for expiry sweeps', () => {
+  it('leaves no state change without an audit row', async () => {
+    const credentialType = await createCredentialType({ expires: true, reviewDays: 30 });
+    const practitioner = await createUser();
+    await prisma.credentialSubmission.create({
+      data: {
+        userId: practitioner.id,
+        credentialTypeId: credentialType.id,
+        referenceNumber: 'A1',
+        status: 'VERIFIED',
+        expiresAt: new Date(Date.now() - 1000),
+      },
+    });
+
+    const registrant = await createUser();
+    await prisma.professionalRegistration.create({
+      data: {
+        userId: registrant.id,
+        regulator: 'MDCN',
+        folioNumber: `MDCN-${registrant.id.slice(0, 8)}`,
+        registrationStatus: 'ACTIVE',
+        evidenceRetrievedAt: new Date(),
+        expiresAt: new Date(Date.now() - 1000),
+        source: 'MANUAL',
+      },
+    });
+
+    startAuditCoverage();
+
+    await expireCredentials();
+    await expireRegistrations();
+
+    const report = auditCoverageReport();
+
+    expect(describeCoverageFailure(report)).toBeNull();
+    expect(report.writes.some((write) => write.model === 'CredentialSubmission')).toBe(true);
+    expect(report.writes.some((write) => write.model === 'ProfessionalRegistration')).toBe(true);
   });
 });
 

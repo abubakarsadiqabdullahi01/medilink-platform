@@ -13,7 +13,7 @@ const credentialTypeId = z.string().uuid();
 const referenceNumber = z.string().trim().min(1).max(REFERENCE_NUMBER_MAX_LENGTH);
 const documentObjectKey = z.string().min(1).max(500);
 const reviewNotes = z.string().trim().max(REVIEW_NOTES_MAX_LENGTH);
-const submissionStatus = z.enum(['PENDING', 'MORE_INFO_REQUESTED', 'VERIFIED', 'REJECTED']);
+const submissionStatus = z.enum(['PENDING', 'MORE_INFO_REQUESTED', 'VERIFIED', 'REJECTED', 'EXPIRED']);
 
 export const submitCredentialSchema = z
   .object({

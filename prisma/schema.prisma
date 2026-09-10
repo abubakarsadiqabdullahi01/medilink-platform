@@ -298,6 +298,7 @@ model ProfessionalCategory {
   createdAt DateTime @default(now()) @map("created_at")
 
   specialties Specialty[]
+  credentialRequirements CredentialRequirement[]
   practitionerProfiles PractitionerProfile[]
 
   @@map("professional_categories")
@@ -333,6 +334,7 @@ model CredentialType {
   createdAt     DateTime @default(now()) @map("created_at")
 
   submissions CredentialSubmission[]
+  requirements CredentialRequirement[]
 
   @@map("credential_types")
   @@schema("config")
@@ -512,6 +514,10 @@ enum CredentialSubmissionStatus {
   MORE_INFO_REQUESTED
   VERIFIED
   REJECTED
+  // Was VERIFIED, then its expiry passed. A separate state from REJECTED:
+  // nobody judged it wanting, and the practitioner renews rather than
+  // re-argues it.
+  EXPIRED
 
   @@schema("credentials")
 }
@@ -773,4 +779,29 @@ enum ScreeningStatus {
   FLAGGED
 
   @@schema("practitioners")
+}
+
+// Step 5.8: which credentials each professional category actually requires.
+//
+// This replaces CredentialType.isMandatory, which was a single global flag on
+// a doctor-shaped list — under it a nurse appeared to need an MDCN practising
+// licence and an MBBS certificate. Building an eligibility rule on that would
+// have been actively wrong rather than merely incomplete.
+//
+// Owner: Compliance. Partial in the same way the state and LGA lists are.
+model CredentialRequirement {
+  id                     String   @id @default(uuid()) @db.Uuid
+  professionalCategoryId String   @map("professional_category_id") @db.Uuid
+  credentialTypeId       String   @map("credential_type_id") @db.Uuid
+  isMandatory            Boolean  @default(true) @map("is_mandatory")
+  owner                  String
+  createdAt              DateTime @default(now()) @map("created_at")
+
+  professionalCategory ProfessionalCategory @relation(fields: [professionalCategoryId], references: [id], onDelete: Cascade)
+  credentialType       CredentialType       @relation(fields: [credentialTypeId], references: [id], onDelete: Cascade)
+
+  @@unique([professionalCategoryId, credentialTypeId])
+  @@index([professionalCategoryId, isMandatory])
+  @@map("credential_requirements")
+  @@schema("config")
 }

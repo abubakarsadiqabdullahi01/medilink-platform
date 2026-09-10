@@ -18,7 +18,10 @@ export type CredentialSubmissionStatusValue =
   | 'PENDING'
   | 'MORE_INFO_REQUESTED'
   | 'VERIFIED'
-  | 'REJECTED';
+  | 'REJECTED'
+  // Set only by the Step 5.9 expiry sweep (src/modules/credentials/application/expiry.ts),
+  // never by this file — included here so toView accepts a row the sweep touched.
+  | 'EXPIRED';
 
 export interface CredentialSubmissionView {
   id: string;

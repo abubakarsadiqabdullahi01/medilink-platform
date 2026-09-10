@@ -101,3 +101,14 @@ export const verificationQuerySchema = z.object({
   scopeId: z.string().uuid().optional(),
 });
 export type VerificationQueryInput = z.infer<typeof verificationQuerySchema>;
+
+/**
+ * Step 5.8. Same shape as verificationQuerySchema, kept as its own schema
+ * rather than shared: the two guard unrelated endpoints, and a future filter
+ * added to one should not silently reach the other.
+ */
+export const eligibilityQuerySchema = z.object({
+  scopeType: z.enum(['SELF', 'PLATFORM']),
+  scopeId: z.string().uuid().optional(),
+});
+export type EligibilityQueryInput = z.infer<typeof eligibilityQuerySchema>;

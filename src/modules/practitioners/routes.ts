@@ -46,4 +46,18 @@ export const ROUTES: RouteDefinition[] = [
     permission: 'practitioner.profile.write',
     scopeType: 'SELF',
   },
+  // Step 5.8. Read-only: activation itself only happens on the nightly
+  // sweep, never as a side effect of this endpoint.
+  {
+    method: 'GET',
+    path: '/api/v1/practitioners/eligibility',
+    permission: 'practitioner.profile.read',
+    scopeType: 'SELF',
+  },
+  {
+    method: 'GET',
+    path: '/api/v1/practitioners/eligibility',
+    permission: 'practitioner.profile.read',
+    scopeType: 'PLATFORM',
+  },
 ];

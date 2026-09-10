@@ -100,6 +100,39 @@ async function seedCredentialTypes() {
 }
 
 /**
+ * Step 5.8: which credentials each category actually requires. Partial in
+ * the same way the state and LGA lists are — only the doctor category is
+ * populated, matching the three types that used to carry the old, global
+ * `CredentialType.isMandatory` flag. Nurse, pharmacist, lab scientist and
+ * radiographer have no seeded requirements yet; each needs its own
+ * regulator-specific credential types added first, which is compliance's
+ * list to complete, not a default this file should guess at.
+ */
+async function seedCredentialRequirements() {
+  const doctor = await prisma.professionalCategory.findUniqueOrThrow({ where: { key: 'doctor' } });
+  const mandatoryForDoctor = ['mdcn_practising_licence', 'nin_slip', 'mbbs_certificate'];
+
+  for (const key of mandatoryForDoctor) {
+    const credentialType = await prisma.credentialType.findUniqueOrThrow({ where: { key } });
+    await prisma.credentialRequirement.upsert({
+      where: {
+        professionalCategoryId_credentialTypeId: {
+          professionalCategoryId: doctor.id,
+          credentialTypeId: credentialType.id,
+        },
+      },
+      update: { isMandatory: true, owner: OWNER_COMPLIANCE },
+      create: {
+        professionalCategoryId: doctor.id,
+        credentialTypeId: credentialType.id,
+        isMandatory: true,
+        owner: OWNER_COMPLIANCE,
+      },
+    });
+  }
+}
+
+/**
  * Scheduled jobs come from JOB_DEFINITIONS so the code and the rows cannot
  * drift. `enabled` and `nextRunAt` are deliberately not in `update`: an
  * operator who disables a misbehaving sweep must not have it switched back on
@@ -239,6 +272,7 @@ async function main() {
   await seedPermissionsAndRoles();
   await seedCategoriesAndSpecialties();
   await seedCredentialTypes();
+  await seedCredentialRequirements();
   await seedFacilityTypes();
   await seedStates();
   await seedHolidays();
@@ -252,6 +286,7 @@ async function main() {
     categories: await prisma.professionalCategory.count(),
     specialties: await prisma.specialty.count(),
     credentialTypes: await prisma.credentialType.count(),
+    credentialRequirements: await prisma.credentialRequirement.count(),
     facilityTypes: await prisma.facilityType.count(),
     states: await prisma.state.count(),
     lgas: await prisma.lga.count(),

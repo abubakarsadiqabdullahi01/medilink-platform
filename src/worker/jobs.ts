@@ -1,4 +1,7 @@
 import { screenAllPractitioners } from '../modules/practitioners/application/screening';
+import { activateEligiblePractitioners } from '../modules/practitioners/application/eligibility';
+import { expireRegistrations } from '../modules/practitioners/application/expiry';
+import { expireCredentials } from '../modules/credentials/application/expiry';
 import type { JobHandler } from './scheduler';
 
 /**
@@ -30,11 +33,38 @@ export const JOB_DEFINITIONS: JobDefinition[] = [
       'Re-screen every practitioner against the sanctioned and quack lists. Daily, because the list changes: someone struck off in March was not on it in February.',
     intervalSeconds: DAILY,
   },
+  {
+    key: 'credential.expiry_sweep',
+    description:
+      'Move VERIFIED credential submissions whose expiry date has passed to EXPIRED. Daily — the eligibility rule already refuses a lapsed credential the moment it lapses; this is what keeps the stored status from still claiming VERIFIED.',
+    intervalSeconds: DAILY,
+  },
+  {
+    key: 'registration.expiry_sweep',
+    description:
+      'Move ACTIVE professional registrations whose licence date has passed to EXPIRED. Daily, same reasoning as the credential sweep.',
+    intervalSeconds: DAILY,
+  },
+  {
+    key: 'practitioner.activation_sweep',
+    description:
+      'Promote UNDER_REVIEW practitioners to ACTIVE once every eligibility requirement is satisfied. Daily: nothing activates an account synchronously, so this is the only thing that does.',
+    intervalSeconds: DAILY,
+  },
 ];
 
 export const jobs: Record<string, JobHandler> = {
   'screening.sweep': async () => {
     await screenAllPractitioners();
+  },
+  'credential.expiry_sweep': async () => {
+    await expireCredentials();
+  },
+  'registration.expiry_sweep': async () => {
+    await expireRegistrations();
+  },
+  'practitioner.activation_sweep': async () => {
+    await activateEligiblePractitioners();
   },
 };
 

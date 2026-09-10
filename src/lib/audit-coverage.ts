@@ -47,6 +47,7 @@ export const AUDITED_MODELS: Readonly<Record<string, string>> = {
   ProfessionalRegistration: 'practitioners.professional_registrations',
   ScreeningResult: 'practitioners.screening_results',
   SanctionedEntry: 'config.sanctioned_entries',
+  CredentialRequirement: 'config.credential_requirements',
 };
 
 /**
