@@ -33,6 +33,13 @@ export const PractitionerErrors = {
 
   invalidState: () => new PractitionerError('invalid_state', 'Choose a valid state.', 422),
 
+  invalidHomeLga: () =>
+    new PractitionerError(
+      'invalid_home_lga',
+      'That local government area is not in the selected home state.',
+      422,
+    ),
+
   invalidPhotoReference: () =>
     new PractitionerError(
       'invalid_photo_reference',

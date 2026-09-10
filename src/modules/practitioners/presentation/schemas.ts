@@ -10,6 +10,8 @@ import { FOLIO_NUMBER_MAX_LENGTH } from '../domain/verification';
 const professionalCategoryId = z.string().uuid();
 const specialtyId = z.string().uuid();
 const homeStateId = z.string().uuid();
+const homeLgaId = z.string().uuid();
+const travelPreference = z.enum(['SAME_LGA', 'SAME_STATE', 'ANYWHERE']);
 const yearsOfExperience = z.coerce
   .number()
   .int()
@@ -26,6 +28,8 @@ export const createProfileSchema = z.object({
   yearsOfExperience,
   bio: bio.optional(),
   homeStateId: homeStateId.optional(),
+  homeLgaId: homeLgaId.optional(),
+  travelPreference: travelPreference.optional(),
   photoObjectKey: photoObjectKey.optional(),
 });
 export type CreateProfileInput = z.infer<typeof createProfileSchema>;
@@ -42,6 +46,8 @@ export const updateProfileSchema = z.object({
   yearsOfExperience: yearsOfExperience.optional(),
   bio: bio.nullable().optional(),
   homeStateId: homeStateId.nullable().optional(),
+  homeLgaId: homeLgaId.nullable().optional(),
+  travelPreference: travelPreference.optional(),
   photoObjectKey: photoObjectKey.nullable().optional(),
 });
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;

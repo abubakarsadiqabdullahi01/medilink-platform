@@ -19,6 +19,7 @@ export const APP_SCHEMAS = [
   'facilities',
   'availability',
   'service_requests',
+  'matching',
 ] as const;
 
 /**
@@ -35,4 +36,12 @@ export const MUTABLE_SCHEMAS = APP_SCHEMAS.filter((schema) => schema !== 'config
  * a listed name left behind would flag an unrelated practitioner in every case
  * that followed.
  */
-export const MUTABLE_CONFIG_TABLES = ['config.sanctioned_entries'] as const;
+export const MUTABLE_CONFIG_TABLES = [
+  'config.sanctioned_entries',
+  // Requirements are attached to categories by the tests, and
+  // createProfessionalCategory upserts by a sequence-derived key that repeats
+  // between runs. Left in place, a requirement written by one run would make
+  // an unrelated practitioner ineligible in the next — which is exactly how
+  // this was found.
+  'config.credential_requirements',
+] as const;

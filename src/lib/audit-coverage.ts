@@ -50,6 +50,8 @@ export const AUDITED_MODELS: Readonly<Record<string, string>> = {
   AvailabilitySlot: 'availability.availability_slots',
   BlockedPeriod: 'availability.blocked_periods',
   ServiceRequest: 'service_requests.service_requests',
+  Invitation: 'matching.invitations',
+  Assignment: 'matching.assignments',
   CredentialRequirement: 'config.credential_requirements',
 };
 
@@ -68,6 +70,12 @@ export const EXEMPT_MODELS: Readonly<Record<string, string>> = {
     'Append-only evidence of every sign-in attempt, and the input to the lockout throttle. Auditing each failed guess would bury real state changes under noise.',
   ScheduledJob:
     'Scheduling bookkeeping, not domain state. A nextRunAt or a failure count is not a decision anyone made; what a sweep actually changed is audited by the sweep itself.',
+  MatchRun:
+    'The record of a computation, not a state change. A match run alters nothing; the run itself is audited once as matching.run, and the rows are its output rather than decisions taken.',
+  MatchCandidate:
+    'Output of a match run, written with it and never altered afterwards. See MatchRun.',
+  AssignmentStatusHistory:
+    'The assignment audit trail in its own right, with actor and reason as required columns. Auditing the history of an audited change is circular.',
 };
 
 const MUTATIONS = new Set([

@@ -22,6 +22,8 @@ export interface PractitionerProfileView {
   bio: string | null;
   photoObjectKey: string | null;
   homeStateId: string | null;
+  homeLgaId: string | null;
+  travelPreference: 'SAME_LGA' | 'SAME_STATE' | 'ANYWHERE';
   createdAt: Date;
   updatedAt: Date;
 }
@@ -35,6 +37,8 @@ function toView(profile: {
   bio: string | null;
   photoObjectKey: string | null;
   homeStateId: string | null;
+  homeLgaId: string | null;
+  travelPreference: 'SAME_LGA' | 'SAME_STATE' | 'ANYWHERE';
   createdAt: Date;
   updatedAt: Date;
 }): PractitionerProfileView {
@@ -47,6 +51,8 @@ function toView(profile: {
     bio: profile.bio,
     photoObjectKey: profile.photoObjectKey,
     homeStateId: profile.homeStateId,
+    homeLgaId: profile.homeLgaId,
+    travelPreference: profile.travelPreference,
     createdAt: profile.createdAt,
     updatedAt: profile.updatedAt,
   };
@@ -74,6 +80,18 @@ async function assertCategoryAndSpecialty(
     ) {
       throw PractitionerErrors.invalidSpecialty();
     }
+  }
+}
+
+/**
+ * The home LGA must sit in the home state. Proximity is scored from both, so
+ * a mismatched pair would put a practitioner in a tier they are not in.
+ */
+async function assertHomeLga(homeLgaId: string | null, homeStateId: string | null): Promise<void> {
+  if (!homeLgaId) return;
+  const lga = await prisma.lga.findUnique({ where: { id: homeLgaId }, select: { stateId: true } });
+  if (!lga || (homeStateId && lga.stateId !== homeStateId)) {
+    throw PractitionerErrors.invalidHomeLga();
   }
 }
 
@@ -131,6 +149,8 @@ export interface CreateProfileParams {
   yearsOfExperience: number;
   bio?: string;
   homeStateId?: string;
+  homeLgaId?: string;
+  travelPreference?: 'SAME_LGA' | 'SAME_STATE' | 'ANYWHERE';
   photoObjectKey?: string;
 }
 
@@ -140,6 +160,7 @@ export async function createProfile(input: CreateProfileParams): Promise<Practit
 
   await assertCategoryAndSpecialty(input.professionalCategoryId, input.specialtyId ?? null);
   await assertState(input.homeStateId ?? null);
+  await assertHomeLga(input.homeLgaId ?? null, input.homeStateId ?? null);
   if (input.photoObjectKey) await confirmPhotoOwnership(input.userId, input.photoObjectKey);
 
   try {
@@ -152,6 +173,8 @@ export async function createProfile(input: CreateProfileParams): Promise<Practit
           yearsOfExperience: input.yearsOfExperience,
           bio: input.bio,
           homeStateId: input.homeStateId,
+          homeLgaId: input.homeLgaId,
+          travelPreference: input.travelPreference,
           photoObjectKey: input.photoObjectKey,
         },
       });
@@ -194,6 +217,8 @@ export interface UpdateProfileParams {
   yearsOfExperience?: number;
   bio?: string | null;
   homeStateId?: string | null;
+  homeLgaId?: string | null;
+  travelPreference?: 'SAME_LGA' | 'SAME_STATE' | 'ANYWHERE';
   photoObjectKey?: string | null;
 }
 
@@ -213,6 +238,9 @@ export async function updateProfile(input: UpdateProfileParams): Promise<Practit
   }
 
   if (input.homeStateId !== undefined) await assertState(input.homeStateId);
+  if (input.homeLgaId !== undefined) {
+    await assertHomeLga(input.homeLgaId, input.homeStateId ?? existing.homeStateId);
+  }
   if (input.photoObjectKey) await confirmPhotoOwnership(input.userId, input.photoObjectKey);
 
   return prisma.$transaction(async (tx) => {
@@ -226,6 +254,8 @@ export async function updateProfile(input: UpdateProfileParams): Promise<Practit
         yearsOfExperience: input.yearsOfExperience,
         bio: input.bio,
         homeStateId: input.homeStateId,
+        homeLgaId: input.homeLgaId,
+        travelPreference: input.travelPreference,
         photoObjectKey: input.photoObjectKey,
       },
     });

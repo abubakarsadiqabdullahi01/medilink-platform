@@ -1,0 +1,77 @@
+import { prisma } from '@/lib/db';
+import { getEligibility } from './eligibility';
+
+/**
+ * The practitioner data the matcher needs, exposed as a function rather than
+ * as tables to join.
+ *
+ * Modules talk through each other's application layer; `src/modules/matching`
+ * reading `practitioners.practitioner_profiles` directly is exactly what the
+ * rule in docs/module-map.md forbids, and this is what makes obeying it
+ * cheaper than breaking it.
+ */
+
+export interface MatchCandidateProfile {
+  userId: string;
+  professionalCategoryId: string;
+  specialtyId: string | null;
+  yearsOfExperience: number;
+  homeStateId: string | null;
+  homeLgaId: string | null;
+  travelPreference: 'SAME_LGA' | 'SAME_STATE' | 'ANYWHERE';
+  eligible: boolean;
+  completedAssignments: number;
+  reliabilityScore: number | null;
+}
+
+/**
+ * Everyone in the requested category, with eligibility already decided.
+ *
+ * Filtering by category in the query rather than in the engine keeps the pool
+ * to a sensible size; every other filter is the engine's, because the engine
+ * is what has to explain itself.
+ *
+ * Eligibility is evaluated per candidate rather than in SQL, because it is
+ * the Stage 5 invariant and lives in one pure function — a second copy of it
+ * expressed as a WHERE clause is precisely the "under any code path" failure
+ * step 5.8 exists to prevent.
+ */
+export async function listMatchCandidates(input: {
+  professionalCategoryId: string;
+}): Promise<MatchCandidateProfile[]> {
+  const profiles = await prisma.practitionerProfile.findMany({
+    where: { professionalCategoryId: input.professionalCategoryId, deletedAt: null },
+    select: {
+      userId: true,
+      professionalCategoryId: true,
+      specialtyId: true,
+      yearsOfExperience: true,
+      homeStateId: true,
+      homeLgaId: true,
+      travelPreference: true,
+    },
+  });
+
+  const candidates: MatchCandidateProfile[] = [];
+
+  for (const profile of profiles) {
+    const eligibility = await getEligibility(profile.userId);
+
+    candidates.push({
+      userId: profile.userId,
+      professionalCategoryId: profile.professionalCategoryId,
+      specialtyId: profile.specialtyId,
+      yearsOfExperience: profile.yearsOfExperience,
+      homeStateId: profile.homeStateId,
+      homeLgaId: profile.homeLgaId,
+      travelPreference: profile.travelPreference,
+      eligible: eligibility.eligible,
+      // Nothing completes an assignment until Stage 7, so every practitioner
+      // is in cold start today and reliability is neutral for all of them.
+      completedAssignments: 0,
+      reliabilityScore: null,
+    });
+  }
+
+  return candidates;
+}

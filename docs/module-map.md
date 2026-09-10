@@ -12,7 +12,7 @@ internal shape: `domain/`, `application/`, `infrastructure/`, `presentation/`,
 | `facilities` | 4. Facility management | 5 | Create, verify, licence (PLATFORM/FACILITY) |
 | `availability` | 5. Availability | 6 | Slots, blocks, matcher boundary (SELF) |
 | `service-requests` | 6. Service requests | 6 | Draft, publish, cancel (FACILITY) |
-| `matching` | 7. Matching and assignment | 6 | Folder only |
+| `matching` | 7. Matching and assignment | 6 | Ranking + explainable runs (FACILITY) |
 | `scheduling` | 8. Scheduling | 6 | Folder only |
 | `attendance` | 9. Attendance | 7 | Folder only |
 | `timesheets` | 10. Timesheets | 7 | Folder only |

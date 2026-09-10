@@ -10,4 +10,17 @@ export interface RouteDefinition {
   scopeType: ScopeType;
 }
 
-export const ROUTES: RouteDefinition[] = [];
+export const ROUTES: RouteDefinition[] = [
+  {
+    method: 'POST',
+    path: '/api/v1/service-requests/:id/match',
+    permission: 'assignment.confirm',
+    scopeType: 'FACILITY',
+  },
+  {
+    method: 'GET',
+    path: '/api/v1/match-runs/:id',
+    permission: 'service_request.read',
+    scopeType: 'FACILITY',
+  },
+];

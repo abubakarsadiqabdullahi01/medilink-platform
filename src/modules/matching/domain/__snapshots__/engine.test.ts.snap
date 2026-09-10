@@ -1,0 +1,121 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ranking > gives the same answer for the same inputs, whatever order they arrive in 1`] = `
+{
+  "excluded": [
+    {
+      "reasons": [
+        "not_eligible",
+      ],
+      "userId": "user-d",
+    },
+  ],
+  "ranked": [
+    {
+      "factors": [
+        {
+          "detail": "9 years, capped at 10",
+          "factor": "experience",
+          "points": 27,
+          "raw": 0.9,
+          "weight": 30,
+        },
+        {
+          "detail": "same state",
+          "factor": "proximity",
+          "points": 21,
+          "raw": 0.6,
+          "weight": 35,
+        },
+        {
+          "detail": "0 hours already committed this week",
+          "factor": "fatigue",
+          "points": 20,
+          "raw": 1,
+          "weight": 20,
+        },
+        {
+          "detail": "neutral: 0 of 5 assignments completed",
+          "factor": "reliability",
+          "points": 7.5,
+          "raw": 0.5,
+          "weight": 15,
+        },
+      ],
+      "rank": 1,
+      "score": 75.5,
+      "userId": "user-a",
+    },
+    {
+      "factors": [
+        {
+          "detail": "3 years, capped at 10",
+          "factor": "experience",
+          "points": 9,
+          "raw": 0.3,
+          "weight": 30,
+        },
+        {
+          "detail": "same lga",
+          "factor": "proximity",
+          "points": 35,
+          "raw": 1,
+          "weight": 35,
+        },
+        {
+          "detail": "0 hours already committed this week",
+          "factor": "fatigue",
+          "points": 20,
+          "raw": 1,
+          "weight": 20,
+        },
+        {
+          "detail": "neutral: 0 of 5 assignments completed",
+          "factor": "reliability",
+          "points": 7.5,
+          "raw": 0.5,
+          "weight": 15,
+        },
+      ],
+      "rank": 2,
+      "score": 71.5,
+      "userId": "user-c",
+    },
+    {
+      "factors": [
+        {
+          "detail": "9 years, capped at 10",
+          "factor": "experience",
+          "points": 27,
+          "raw": 0.9,
+          "weight": 30,
+        },
+        {
+          "detail": "elsewhere",
+          "factor": "proximity",
+          "points": 7,
+          "raw": 0.2,
+          "weight": 35,
+        },
+        {
+          "detail": "0 hours already committed this week",
+          "factor": "fatigue",
+          "points": 20,
+          "raw": 1,
+          "weight": 20,
+        },
+        {
+          "detail": "neutral: 0 of 5 assignments completed",
+          "factor": "reliability",
+          "points": 7.5,
+          "raw": 0.5,
+          "weight": 15,
+        },
+      ],
+      "rank": 3,
+      "score": 61.5,
+      "userId": "user-b",
+    },
+  ],
+}
+`;

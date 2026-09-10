@@ -17,7 +17,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-  schemas  = ["identity", "audit", "config", "storage", "practitioners", "credentials", "facilities", "availability", "service_requests"]
+  schemas  = ["identity", "audit", "config", "storage", "practitioners", "credentials", "facilities", "availability", "service_requests", "matching"]
 }
 
 // ---------------------------------------------------------------- identity
@@ -47,6 +47,7 @@ model User {
   identityVerification IdentityVerification?
   screeningResult ScreeningResult?
   availabilitySlots AvailabilitySlot[]
+  assignments       Assignment[]
   blockedPeriods    BlockedPeriod[]
   professionalRegistrations ProfessionalRegistration[]
 
@@ -930,6 +931,9 @@ model ServiceRequest {
   updatedAt DateTime  @updatedAt @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
 
+  matchRuns   MatchRun[]
+  assignments Assignment[]
+
   facility             Facility             @relation(fields: [facilityId], references: [id])
   professionalCategory ProfessionalCategory @relation(fields: [professionalCategoryId], references: [id])
   specialty            Specialty?           @relation(fields: [specialtyId], references: [id])
@@ -967,4 +971,138 @@ enum ServiceRequestStatus {
   EXPIRED
 
   @@schema("service_requests")
+}
+
+// ------------------------------------------------------------------ matching
+
+// Step 6.3 requires match results to be explainable: "for any candidate, why
+// they ranked where they did". That has to survive the request that produced
+// it, so a run is persisted with every candidate's factors and every excluded
+// candidate's reasons.
+model MatchRun {
+  id               String @id @default(uuid()) @db.Uuid
+  serviceRequestId String @map("service_request_id") @db.Uuid
+  runBy            String? @map("run_by") @db.Uuid
+  consideredCount  Int     @map("considered_count")
+  rankedCount      Int     @map("ranked_count")
+  // The weights in force when this ran. Without them an old ranking cannot be
+  // read back once the weights change, and "why did they rank there" becomes
+  // unanswerable for exactly the runs anyone would want to question.
+  weights          Json
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  serviceRequest ServiceRequest   @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
+  candidates     MatchCandidate[]
+
+  @@index([serviceRequestId, createdAt])
+  @@map("match_runs")
+  @@schema("matching")
+}
+
+model MatchCandidate {
+  id         String  @id @default(uuid()) @db.Uuid
+  matchRunId String  @map("match_run_id") @db.Uuid
+  userId     String  @map("user_id") @db.Uuid
+  // Null for an excluded candidate: they have no rank because they were never
+  // in the running.
+  rank       Int?
+  score      Float?
+  factors    Json?
+  exclusions String[]
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  matchRun MatchRun @relation(fields: [matchRunId], references: [id], onDelete: Cascade)
+
+  @@index([matchRunId, rank])
+  @@map("match_candidates")
+  @@schema("matching")
+}
+
+// Steps 6.5 to 6.7. Created here so the matcher's conflict check has
+// something real to query from the moment it exists; the lifecycle that
+// fills it follows.
+model Invitation {
+  id               String           @id @default(uuid()) @db.Uuid
+  serviceRequestId String           @map("service_request_id") @db.Uuid
+  userId           String           @map("user_id") @db.Uuid
+  matchRunId       String?          @map("match_run_id") @db.Uuid
+  status           InvitationStatus @default(INVITED)
+  expiresAt        DateTime         @map("expires_at")
+  respondedAt      DateTime?        @map("responded_at")
+  declineReason    String?          @map("decline_reason")
+  invitedBy        String?          @map("invited_by") @db.Uuid
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+
+  // One live invitation per practitioner per request.
+  @@unique([serviceRequestId, userId])
+  @@index([userId, status])
+  @@map("invitations")
+  @@schema("matching")
+}
+
+enum InvitationStatus {
+  INVITED
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  // The request was withdrawn or filled before they answered.
+  WITHDRAWN
+
+  @@schema("matching")
+}
+
+model Assignment {
+  id               String           @id @default(uuid()) @db.Uuid
+  serviceRequestId String           @map("service_request_id") @db.Uuid
+  userId           String           @map("user_id") @db.Uuid
+  facilityId       String           @map("facility_id") @db.Uuid
+  startsAt         DateTime         @map("starts_at")
+  endsAt           DateTime         @map("ends_at")
+  status           AssignmentStatus @default(CONFIRMED)
+  confirmedBy      String           @map("confirmed_by") @db.Uuid
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+
+  serviceRequest ServiceRequest            @relation(fields: [serviceRequestId], references: [id])
+  user           User                      @relation(fields: [userId], references: [id])
+  history        AssignmentStatusHistory[]
+
+  // A practitioner is confirmed onto a given request once.
+  @@unique([serviceRequestId, userId])
+  // The conflict check reads this: everything this practitioner is committed
+  // to, by time.
+  @@index([userId, startsAt, endsAt])
+  @@index([facilityId, startsAt])
+  @@map("assignments")
+  @@schema("matching")
+}
+
+enum AssignmentStatus {
+  CONFIRMED
+  CANCELLED
+  // Reached in Stage 7, when attendance says what actually happened.
+  COMPLETED
+  NO_SHOW
+
+  @@schema("matching")
+}
+
+// Step 6.6: "every change records actor and reason". Both are required
+// columns rather than a convention, so the schema enforces it and nobody has
+// to remember.
+model AssignmentStatusHistory {
+  id           String           @id @default(uuid()) @db.Uuid
+  assignmentId String           @map("assignment_id") @db.Uuid
+  fromStatus   AssignmentStatus? @map("from_status")
+  toStatus     AssignmentStatus @map("to_status")
+  actorId      String           @map("actor_id") @db.Uuid
+  reason       String
+  createdAt    DateTime         @default(now()) @map("created_at")
+
+  assignment Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+
+  @@index([assignmentId, createdAt])
+  @@map("assignment_status_history")
+  @@schema("matching")
 }
