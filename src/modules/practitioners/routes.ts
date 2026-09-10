@@ -14,6 +14,32 @@ export const ROUTES: RouteDefinition[] = [
   { method: 'GET', path: '/api/v1/practitioners/me', permission: 'practitioner.profile.read', scopeType: 'SELF' },
   { method: 'POST', path: '/api/v1/practitioners/me', permission: 'practitioner.profile.write', scopeType: 'SELF' },
   { method: 'PATCH', path: '/api/v1/practitioners/me', permission: 'practitioner.profile.write', scopeType: 'SELF' },
+  // Steps 5.3 and 5.5. Recording is PLATFORM-only — a practitioner does not
+  // verify their own identity or licence, which is the point of the step.
+  {
+    method: 'GET',
+    path: '/api/v1/practitioners/verification',
+    permission: 'practitioner.profile.read',
+    scopeType: 'SELF',
+  },
+  {
+    method: 'GET',
+    path: '/api/v1/practitioners/verification',
+    permission: 'practitioner.profile.read',
+    scopeType: 'PLATFORM',
+  },
+  {
+    method: 'POST',
+    path: '/api/v1/practitioners/verification/identity',
+    permission: 'credential.review',
+    scopeType: 'PLATFORM',
+  },
+  {
+    method: 'POST',
+    path: '/api/v1/practitioners/verification/registration',
+    permission: 'credential.review',
+    scopeType: 'PLATFORM',
+  },
   {
     method: 'POST',
     path: '/api/v1/practitioners/me/photo-upload-url',

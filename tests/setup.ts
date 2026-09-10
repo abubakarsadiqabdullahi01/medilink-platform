@@ -14,3 +14,12 @@ process.env.STORAGE_BUCKET ??= 'medilink-documents-test';
 process.env.STORAGE_ACCESS_KEY_ID ??= 'test';
 process.env.STORAGE_SECRET_ACCESS_KEY ??= 'test-secret';
 process.env.LOG_LEVEL ??= 'error';
+
+// Verification providers are forced off, not defaulted off. The container and
+// CI both inherit whatever the deployment .env says, and a suite that depends
+// on a paid subscription being configured is a suite that breaks the moment
+// someone switches one on. TEST_*_VERIFICATION_PROVIDER exists for the tests
+// that deliberately exercise the enabled path.
+process.env.NIN_VERIFICATION_PROVIDER = process.env.TEST_NIN_VERIFICATION_PROVIDER ?? 'none';
+process.env.MDCN_VERIFICATION_PROVIDER = process.env.TEST_MDCN_VERIFICATION_PROVIDER ?? 'none';
+

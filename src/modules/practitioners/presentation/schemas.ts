@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ALLOWED_CONTENT_TYPES, MAX_UPLOAD_BYTES } from '@/lib/storage/tigris';
 import { BIO_MAX_LENGTH, YEARS_OF_EXPERIENCE_MAX, YEARS_OF_EXPERIENCE_MIN } from '../domain/profile';
+import { FOLIO_NUMBER_MAX_LENGTH } from '../domain/verification';
 
 /**
  * Request validation at the boundary. Every route parses its body or query
@@ -55,3 +56,48 @@ export const requestPhotoUploadUrlSchema = z.object({
     .max(MAX_UPLOAD_BYTES, 'File is too large.'),
 });
 export type RequestPhotoUploadUrlInput = z.infer<typeof requestPhotoUploadUrlSchema>;
+
+/**
+ * Identity and professional-registration recording (steps 5.3, 5.4, 5.5).
+ *
+ * The NIN is validated and normalised here so a malformed one is a 422 with a
+ * usable message. It is the only place the raw number appears in a schema —
+ * everything downstream works with the keyed digest and the last four digits.
+ */
+const nin = z
+  .string()
+  .trim()
+  .transform((value) => value.replace(/[\s-]/g, ''))
+  .refine((value) => /^\d{11}$/.test(value), {
+    message: 'A National Identification Number is 11 digits.',
+  });
+
+export const recordIdentitySchema = z.object({
+  userId: z.string().uuid(),
+  nin,
+  /**
+   * Required in practice when verification runs manually, which is the
+   * default; the service rejects its absence rather than the schema, because
+   * whether it is needed depends on a runtime switch, not on the request.
+   */
+  nameMatch: z.boolean().optional(),
+});
+export type RecordIdentityInput = z.infer<typeof recordIdentitySchema>;
+
+export const recordRegistrationSchema = z.object({
+  userId: z.string().uuid(),
+  regulator: z.string().trim().min(2).max(20),
+  folioNumber: z.string().trim().min(3).max(FOLIO_NUMBER_MAX_LENGTH),
+  registrationStatus: z.enum(['ACTIVE', 'SUSPENDED', 'EXPIRED', 'STRUCK_OFF', 'UNKNOWN']).optional(),
+  practiceType: z.string().trim().max(100).optional(),
+  location: z.string().trim().max(200).optional(),
+  expiresAt: z.coerce.date().optional(),
+});
+export type RecordRegistrationInput = z.infer<typeof recordRegistrationSchema>;
+
+/** SELF for a practitioner's own record, PLATFORM for compliance. */
+export const verificationQuerySchema = z.object({
+  scopeType: z.enum(['SELF', 'PLATFORM']),
+  scopeId: z.string().uuid().optional(),
+});
+export type VerificationQueryInput = z.infer<typeof verificationQuerySchema>;

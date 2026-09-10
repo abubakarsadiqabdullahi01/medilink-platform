@@ -39,4 +39,40 @@ export const PractitionerErrors = {
       'That photo has not finished uploading, or does not belong to you.',
       422,
     ),
+
+  practitionerNotFound: () =>
+    new PractitionerError('practitioner_not_found', 'That practitioner does not exist.', 404),
+
+  /**
+   * There is no sensible default for "did the name on the slip match?".
+   * Assuming true would let a mismatched identity through silently, which is
+   * the failure identity verification exists to catch.
+   */
+  nameMatchRequired: () =>
+    new PractitionerError(
+      'name_match_required',
+      'Say whether the name on the identity slip matches the account.',
+      422,
+    ),
+
+  registrationStatusRequired: () =>
+    new PractitionerError(
+      'registration_status_required',
+      'Record what the register showed for this folio number.',
+      422,
+    ),
+
+  duplicateNin: () =>
+    new PractitionerError(
+      'duplicate_nin',
+      'That identity is already registered to another account.',
+      409,
+    ),
+
+  duplicateFolioNumber: () =>
+    new PractitionerError(
+      'duplicate_folio_number',
+      'That folio number is already registered to another account.',
+      409,
+    ),
 } as const;

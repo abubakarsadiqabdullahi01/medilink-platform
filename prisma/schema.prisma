@@ -44,6 +44,8 @@ model User {
   practitionerProfile PractitionerProfile?
   credentialSubmissions CredentialSubmission[]
   representedFacilities Facility[]
+  identityVerification IdentityVerification?
+  professionalRegistrations ProfessionalRegistration[]
 
   @@map("users")
   @@schema("identity")
@@ -614,4 +616,93 @@ enum ScheduledJobStatus {
   FAILED
 
   @@schema("audit")
+}
+
+// Step 5.3 and 5.4. The National Identification Number itself is never
+// stored: the column holds an HMAC keyed with SESSION_SECRET, for the same
+// reason one-time codes do (docs/stage-4-2-auth.md) — an eleven-digit number
+// under an unkeyed hash is reversible by exhaustive search in seconds, and a
+// leaked table would then be a list of everyone's NIN.
+//
+// nin_hash carries the unique constraint, so a duplicate identity is refused
+// by the database rather than by a prior read. There is deliberately no
+// column named `nin`, and no raw value is ever logged or returned.
+model IdentityVerification {
+  id                  String                     @id @default(uuid()) @db.Uuid
+  userId              String                     @unique @map("user_id") @db.Uuid
+  ninHash             String                     @unique @map("nin_hash")
+  // The last four digits, which is what a reviewer needs to talk to a
+  // practitioner about their record without holding the number.
+  ninLast4            String                     @map("nin_last4")
+  nameMatch           Boolean                    @map("name_match")
+  method              IdentityVerificationMethod
+  verifiedBy          String?                    @map("verified_by") @db.Uuid
+  verifiedAt          DateTime                   @map("verified_at")
+  evidenceRetrievedAt DateTime                   @map("evidence_retrieved_at")
+  createdAt           DateTime                   @default(now()) @map("created_at")
+  updatedAt           DateTime                   @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("identity_verifications")
+  @@schema("practitioners")
+}
+
+enum IdentityVerificationMethod {
+  // A compliance officer read the slip and recorded it. The only path while
+  // NIN_VERIFICATION_PROVIDER is `none`, which is the default.
+  MANUAL
+  NIMC
+
+  @@schema("practitioners")
+}
+
+// Step 5.5: what the regulator says about this practitioner, and when we
+// last looked. The retrieval date is the point — evidence without a date
+// cannot be judged stale, and a licence checked two years ago is not
+// evidence that someone may work a shift tomorrow.
+model ProfessionalRegistration {
+  id                  String             @id @default(uuid()) @db.Uuid
+  userId              String             @map("user_id") @db.Uuid
+  regulator           String
+  folioNumber         String             @unique @map("folio_number")
+  practiceType        String?            @map("practice_type")
+  registrationStatus  RegistrationStatus @map("registration_status")
+  location            String?
+  evidenceRetrievedAt DateTime           @map("evidence_retrieved_at")
+  expiresAt           DateTime?          @map("expires_at")
+  source              VerificationSource
+  recordedBy          String?            @map("recorded_by") @db.Uuid
+  createdAt           DateTime           @default(now()) @map("created_at")
+  updatedAt           DateTime           @updatedAt @map("updated_at")
+  deletedAt           DateTime?          @map("deleted_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // One registration per regulator per practitioner: a doctor holds one MDCN
+  // folio, not several.
+  @@unique([userId, regulator])
+  @@index([registrationStatus])
+  @@index([expiresAt])
+  @@map("professional_registrations")
+  @@schema("practitioners")
+}
+
+enum RegistrationStatus {
+  ACTIVE
+  SUSPENDED
+  EXPIRED
+  STRUCK_OFF
+  // The regulator was unreachable or gave an answer we could not read. Never
+  // treated as good news by the eligibility rule.
+  UNKNOWN
+
+  @@schema("practitioners")
+}
+
+enum VerificationSource {
+  MANUAL
+  REGULATOR_API
+
+  @@schema("practitioners")
 }
