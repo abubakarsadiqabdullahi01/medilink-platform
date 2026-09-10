@@ -13,7 +13,7 @@ const credentialTypeId = z.string().uuid();
 const referenceNumber = z.string().trim().min(1).max(REFERENCE_NUMBER_MAX_LENGTH);
 const documentObjectKey = z.string().min(1).max(500);
 const reviewNotes = z.string().trim().max(REVIEW_NOTES_MAX_LENGTH);
-const submissionStatus = z.enum(['PENDING', 'VERIFIED', 'REJECTED']);
+const submissionStatus = z.enum(['PENDING', 'MORE_INFO_REQUESTED', 'VERIFIED', 'REJECTED']);
 
 export const submitCredentialSchema = z
   .object({
@@ -58,14 +58,29 @@ export const documentUrlSchema = z.object({
 });
 export type DocumentUrlInput = z.infer<typeof documentUrlSchema>;
 
+/** The practitioner's answer to a request for more information. */
+export const resupplyCredentialSchema = z
+  .object({
+    id: z.string().uuid(),
+    referenceNumber: referenceNumber.optional(),
+    documentObjectKey: documentObjectKey.optional(),
+  })
+  .refine((value) => Boolean(value.referenceNumber) || Boolean(value.documentObjectKey), {
+    message: 'Provide a reference number or a document.',
+    path: ['referenceNumber'],
+  });
+export type ResupplyCredentialInput = z.infer<typeof resupplyCredentialSchema>;
+
 export const reviewCredentialSchema = z
   .object({
     id: z.string().uuid(),
-    decision: z.enum(['approve', 'reject']),
+    decision: z.enum(['approve', 'reject', 'request_info']),
     reviewNotes: reviewNotes.optional(),
   })
   .refine((value) => value.decision === 'approve' || Boolean(value.reviewNotes?.length), {
-    message: 'reviewNotes is required when rejecting a submission.',
+    // A rejection without a reason cannot be acted on, and a request for more
+    // information without saying what is missing is worse than no request.
+    message: 'reviewNotes is required when rejecting or requesting more information.',
     path: ['reviewNotes'],
   });
 export type ReviewCredentialInput = z.infer<typeof reviewCredentialSchema>;

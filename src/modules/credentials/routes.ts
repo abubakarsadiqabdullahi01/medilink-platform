@@ -21,6 +21,12 @@ export const ROUTES: RouteDefinition[] = [
     scopeType: 'SELF',
   },
   {
+    method: 'PATCH',
+    path: '/api/v1/credentials/:id',
+    permission: 'credential.submit',
+    scopeType: 'SELF',
+  },
+  {
     method: 'POST',
     path: '/api/v1/credentials/:id/review',
     permission: 'credential.review',

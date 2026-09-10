@@ -101,6 +101,23 @@ parsed input after the query/body, so the URL always wins over a
 same-named field — the path is authoritative for identity. All seven
 pre-existing call sites are untouched.
 
+## Step 5.7 — requesting more information
+
+A reviewer's third option, added after this module first shipped. `decision:
+'request_info'` moves the submission to `MORE_INFO_REQUESTED` rather than
+deciding it, and requires a note saying what is missing — a request that does
+not say what it wants is worse than no request.
+
+From there, and **only** from there, the practitioner may `PATCH
+/api/v1/credentials/:id` to supply what was asked for, which returns the row
+to `PENDING`. `reviewedBy`, `reviewedAt` and `reviewNotes` are cleared on
+resupply, because they described the request and the request has been
+answered; what was asked survives on the `credential.info_requested` audit row.
+
+A submission awaiting information counts as active, so it still blocks a
+second submission of the same credential type: the practitioner should answer
+on the existing row rather than open one the reviewer has to reconcile.
+
 ## Not in this stage
 
 - **NIMC or MDCN API verification.** `verificationMethod` is stored and
@@ -128,9 +145,12 @@ pre-existing call sites are untouched.
   cron or scheduled-job mechanism anywhere in this codebase. `EVENTS.
   CredentialExpired` is declared in the event vocabulary but not published
   by anything in this cut.
-- **Editing a submission before it is reviewed.** A practitioner who
-  mistypes a reference number must wait for rejection and resubmit; there
-  is no PATCH for a `PENDING` row.
+- **Editing a `PENDING` submission.** Still deliberately absent: a reviewer
+  must never be looking at one version while the practitioner replaces it
+  underneath them. A practitioner who mistypes a reference number waits for
+  the reviewer to reject it or to ask for more information.
+
+  Step 5.7 has since added the second of those — see below.
 
 ## Verifying it locally
 

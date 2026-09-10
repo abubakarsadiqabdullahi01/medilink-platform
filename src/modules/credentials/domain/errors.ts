@@ -44,6 +44,13 @@ export const CredentialErrors = {
   alreadyReviewed: () =>
     new CredentialError('already_reviewed', 'That credential submission has already been reviewed.', 409),
 
+  notAwaitingInformation: () =>
+    new CredentialError(
+      'not_awaiting_information',
+      'That submission is not waiting for more information.',
+      409,
+    ),
+
   noDocumentOnSubmission: () =>
     new CredentialError('no_document_on_submission', 'This submission has no document to retrieve.', 422),
 

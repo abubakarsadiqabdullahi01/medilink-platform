@@ -14,11 +14,17 @@ import { CredentialErrors } from '../domain/errors';
  * practitioners/application/profile.ts's precedent.
  */
 
+export type CredentialSubmissionStatusValue =
+  | 'PENDING'
+  | 'MORE_INFO_REQUESTED'
+  | 'VERIFIED'
+  | 'REJECTED';
+
 export interface CredentialSubmissionView {
   id: string;
   userId: string;
   credentialTypeId: string;
-  status: 'PENDING' | 'VERIFIED' | 'REJECTED';
+  status: CredentialSubmissionStatusValue;
   referenceNumber: string | null;
   documentObjectKey: string | null;
   reviewedBy: string | null;
@@ -33,7 +39,7 @@ function toView(submission: {
   id: string;
   userId: string;
   credentialTypeId: string;
-  status: 'PENDING' | 'VERIFIED' | 'REJECTED';
+  status: CredentialSubmissionStatusValue;
   referenceNumber: string | null;
   documentObjectKey: string | null;
   reviewedBy: string | null;
@@ -136,7 +142,10 @@ export async function submitCredential(
     where: {
       userId: input.userId,
       credentialTypeId: input.credentialTypeId,
-      status: { in: ['PENDING', 'VERIFIED'] },
+      // MORE_INFO_REQUESTED counts as active: the practitioner should
+      // resupply on the existing row, not open a second one the reviewer
+      // then has to reconcile.
+      status: { in: ['PENDING', 'MORE_INFO_REQUESTED', 'VERIFIED'] },
       deletedAt: null,
     },
   });
@@ -188,7 +197,7 @@ export async function submitCredential(
 export interface ListSubmissionsQuery {
   scopeType: 'SELF' | 'PLATFORM';
   scopeId?: string;
-  status?: 'PENDING' | 'VERIFIED' | 'REJECTED';
+  status?: CredentialSubmissionStatusValue;
   credentialTypeId?: string;
   limit: number;
   cursor?: string;
@@ -229,12 +238,26 @@ export async function listSubmissions(query: ListSubmissionsQuery): Promise<Subm
   };
 }
 
+export type ReviewDecision = 'approve' | 'reject' | 'request_info';
+
 export interface ReviewCredentialParams {
   submissionId: string;
   reviewerId: string;
-  decision: 'approve' | 'reject';
+  decision: ReviewDecision;
   reviewNotes?: string;
 }
+
+const DECISION_STATUS: Record<ReviewDecision, CredentialSubmissionStatusValue> = {
+  approve: 'VERIFIED',
+  reject: 'REJECTED',
+  request_info: 'MORE_INFO_REQUESTED',
+};
+
+const DECISION_ACTION: Record<ReviewDecision, string> = {
+  approve: 'credential.verified',
+  reject: 'credential.rejected',
+  request_info: 'credential.info_requested',
+};
 
 export async function reviewCredential(
   input: ReviewCredentialParams,
@@ -249,7 +272,7 @@ export async function reviewCredential(
 
   const now = new Date();
   const approved = input.decision === 'approve';
-  const nextStatus = approved ? 'VERIFIED' : 'REJECTED';
+  const nextStatus = DECISION_STATUS[input.decision];
   const expiresAt = approved ? computeExpiresAt(existing.credentialType, now) : null;
 
   return prisma.$transaction(async (tx) => {
@@ -274,7 +297,7 @@ export async function reviewCredential(
     // it in their own SELF-scoped audit history. actorId is who actually
     // did it — the two are deliberately different people here.
     await recordAudit(tx, {
-      action: approved ? 'credential.verified' : 'credential.rejected',
+      action: DECISION_ACTION[input.decision],
       entityType: 'credentials.credential_submissions',
       entityId: updated.id,
       actorId: input.reviewerId,
@@ -285,8 +308,8 @@ export async function reviewCredential(
       after: toView(updated),
     });
 
-    // No event on reject — none exists in the vocabulary; the audit row
-    // above is the record.
+    // No event on reject or on an information request — neither exists in
+    // the vocabulary, and the audit row above is the record.
     if (approved) {
       await publishEvent(tx, {
         eventType: EVENTS.CredentialVerified,
@@ -299,6 +322,86 @@ export async function reviewCredential(
         },
       });
     }
+
+    return toView(updated);
+  });
+}
+
+export interface ResupplyCredentialParams {
+  submissionId: string;
+  userId: string;
+  referenceNumber?: string;
+  documentObjectKey?: string;
+}
+
+/**
+ * The practitioner's answer to a request for more information. The row
+ * returns to PENDING for the reviewer to pick up again.
+ *
+ * Reachable only from MORE_INFO_REQUESTED. This is deliberately not a general
+ * edit path for a PENDING submission — 5.2's doc left that out on purpose,
+ * and allowing it would mean a reviewer could be looking at one version of a
+ * submission while the practitioner replaces it underneath them.
+ *
+ * A submission belonging to someone else is 404, not 403: ownership is folded
+ * into the lookup, because the guard has no way to know whose submission an
+ * id is before reading it, and a distinguishable 403 would confirm that a
+ * particular id exists.
+ */
+export async function resupplyCredential(
+  input: ResupplyCredentialParams,
+): Promise<CredentialSubmissionView> {
+  const existing = await prisma.credentialSubmission.findFirst({
+    where: { id: input.submissionId, userId: input.userId, deletedAt: null },
+    include: { credentialType: true },
+  });
+  if (!existing) throw CredentialErrors.submissionNotFound();
+  if (existing.status !== 'MORE_INFO_REQUESTED') throw CredentialErrors.notAwaitingInformation();
+
+  const referenceNumber = input.referenceNumber ?? existing.referenceNumber;
+  const documentObjectKey = input.documentObjectKey ?? existing.documentObjectKey;
+
+  // The same evidence rule as the original submission: what the credential
+  // type needs does not change because a reviewer asked a question.
+  const required = requiredEvidenceFor(existing.credentialType.verificationMethod);
+  if (required === 'reference_number' && !referenceNumber) {
+    throw CredentialErrors.referenceNumberRequired();
+  }
+  if (required === 'document' && !documentObjectKey) throw CredentialErrors.documentRequired();
+
+  if (input.documentObjectKey) {
+    await confirmDocumentOwnership(input.userId, input.documentObjectKey);
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.credentialSubmission.update({
+      where: { id: existing.id },
+      data: {
+        referenceNumber,
+        documentObjectKey,
+        status: 'PENDING',
+        // Cleared: they described the request, and the request has been
+        // answered. What was asked survives on the audit row.
+        reviewedBy: null,
+        reviewedAt: null,
+        reviewNotes: null,
+      },
+    });
+
+    if (input.documentObjectKey) {
+      await confirmDocumentUpload(tx, input.userId, input.documentObjectKey);
+    }
+
+    await recordAudit(tx, {
+      action: 'credential.resupplied',
+      entityType: 'credentials.credential_submissions',
+      entityId: updated.id,
+      actorId: input.userId,
+      scopeType: 'SELF',
+      scopeId: input.userId,
+      before: toView(existing),
+      after: toView(updated),
+    });
 
     return toView(updated);
   });

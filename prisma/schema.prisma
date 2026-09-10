@@ -474,7 +474,8 @@ model CredentialSubmission {
   status            CredentialSubmissionStatus @default(PENDING)
   referenceNumber   String?                    @map("reference_number")
   documentObjectKey String?                    @map("document_object_key")
-  // Who reviewed it, when and why. A bare column, not a Prisma relation —
+  // Who last acted on it, when and why — a decision or a request for more
+  // information; `status` is what says which. A bare column, not a relation —
   // matching the existing precedent of audit.security_events.user_id, which
   // also has no @relation and no back-relation on User. The audit row
   // reviewCredential writes in the same transaction is the system of record
@@ -502,6 +503,10 @@ model CredentialSubmission {
 
 enum CredentialSubmissionStatus {
   PENDING
+  // The reviewer needs something more before deciding. The practitioner can
+  // resupply from here and the row returns to PENDING; it is the only state
+  // a submission can be edited from.
+  MORE_INFO_REQUESTED
   VERIFIED
   REJECTED
 

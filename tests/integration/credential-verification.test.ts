@@ -18,6 +18,7 @@ import { GET, POST } from '@/app/api/v1/credentials/route';
 import { POST as postDocumentUploadUrl } from '@/app/api/v1/credentials/document-upload-url/route';
 import { POST as postReview } from '@/app/api/v1/credentials/[id]/review/route';
 import { POST as postDocumentUrl } from '@/app/api/v1/credentials/[id]/document-url/route';
+import { PATCH as patchSubmission } from '@/app/api/v1/credentials/[id]/route';
 import { ROUTES } from '@/modules/credentials/routes';
 import { issueSession } from '@/modules/auth/application/session-service';
 import { clearCookies } from './support/cookie-jar';
@@ -77,6 +78,18 @@ async function callReview(id: string, body: unknown): Promise<ApiResult> {
 async function callDocumentUrl(id: string, body: unknown): Promise<ApiResult> {
   const response = await postDocumentUrl(
     await jsonRequest(`http://localhost/api/v1/credentials/${id}/document-url`, body),
+    { params: { id } },
+  );
+  return { status: response.status, body: await response.json() };
+}
+
+async function callResupply(id: string, body: unknown): Promise<ApiResult> {
+  const response = await patchSubmission(
+    new Request(`http://localhost/api/v1/credentials/${id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
     { params: { id } },
   );
   return { status: response.status, body: await response.json() };
@@ -448,6 +461,131 @@ describe('document access', () => {
     const result = await callDocumentUrl(submitted.body.id as string, { scopeType: 'SELF' });
     expect(result.status).toBe(422);
     expect(result.body).toMatchObject({ error: { code: 'no_document_on_submission' } });
+  });
+});
+
+describe('step 5.7 — requesting more information', () => {
+  async function pendingSubmission() {
+    const credentialType = await createCredentialType({ verificationMethod: 'nimc_verification' });
+    const practitioner = await loginAsPractitioner();
+    const submitted = await callSubmit({
+      credentialTypeId: credentialType.id,
+      referenceNumber: 'A11111111',
+    });
+    expect(submitted.status).toBe(201);
+    return { practitioner, submissionId: submitted.body.id as string };
+  }
+
+  it('moves a submission to MORE_INFO_REQUESTED instead of deciding it', async () => {
+    const { submissionId } = await pendingSubmission();
+    await loginAsComplianceOfficer();
+
+    const asked = await callReview(submissionId, {
+      decision: 'request_info',
+      reviewNotes: 'The reference number does not match the slip. Please re-check it.',
+    });
+
+    expect(asked.status).toBe(200);
+    expect(asked.body.status).toBe('MORE_INFO_REQUESTED');
+    // Not a decision: neither verified nor rejected, and no expiry computed.
+    expect(asked.body.expiresAt).toBeNull();
+
+    const audit = await prisma.auditLog.findFirst({
+      where: { action: 'credential.info_requested', entityId: submissionId },
+    });
+    expect(audit?.reason).toContain('re-check');
+  });
+
+  it('refuses a request with no note saying what is missing', async () => {
+    const { submissionId } = await pendingSubmission();
+    await loginAsComplianceOfficer();
+
+    // A request for more information that does not say what is missing is
+    // worse than no request at all.
+    expect((await callReview(submissionId, { decision: 'request_info' })).status).toBe(422);
+  });
+
+  it('lets the practitioner resupply, returning the row to PENDING', async () => {
+    const { practitioner, submissionId } = await pendingSubmission();
+    await loginAsComplianceOfficer();
+    await callReview(submissionId, { decision: 'request_info', reviewNotes: 'Wrong number.' });
+
+    await issueSession({ userId: practitioner.id });
+    const resupplied = await callResupply(submissionId, { referenceNumber: 'B22222222' });
+
+    expect(resupplied.status).toBe(200);
+    expect(resupplied.body.status).toBe('PENDING');
+    expect(resupplied.body.referenceNumber).toBe('B22222222');
+    // The request has been answered, so the fields describing it are cleared;
+    // what was asked survives on the audit row.
+    expect(resupplied.body.reviewedBy).toBeNull();
+    expect(resupplied.body.reviewNotes).toBeNull();
+  });
+
+  it('can then be approved, completing the round trip', async () => {
+    const { practitioner, submissionId } = await pendingSubmission();
+    await loginAsComplianceOfficer();
+    await callReview(submissionId, { decision: 'request_info', reviewNotes: 'Wrong number.' });
+
+    await issueSession({ userId: practitioner.id });
+    await callResupply(submissionId, { referenceNumber: 'B22222222' });
+
+    const officer = await loginAsComplianceOfficer();
+    const approved = await callReview(submissionId, { decision: 'approve' });
+
+    expect(approved.status).toBe(200);
+    expect(approved.body.status).toBe('VERIFIED');
+    expect(approved.body.reviewedBy).toBe(officer.id);
+  });
+
+  it('refuses a resupply on a submission that is not awaiting information', async () => {
+    const { submissionId } = await pendingSubmission();
+
+    const result = await callResupply(submissionId, { referenceNumber: 'C33333333' });
+
+    // Not a general edit path: a reviewer must never be looking at one
+    // version while the practitioner replaces it underneath them.
+    expect(result.status).toBe(409);
+    expect(result.body).toMatchObject({ error: { code: 'not_awaiting_information' } });
+  });
+
+  it("refuses a resupply on someone else's submission, as a 404", async () => {
+    const { submissionId } = await pendingSubmission();
+    await loginAsComplianceOfficer();
+    await callReview(submissionId, { decision: 'request_info', reviewNotes: 'Wrong number.' });
+
+    await loginAsPractitioner();
+    const result = await callResupply(submissionId, { referenceNumber: 'D44444444' });
+
+    // 404 rather than 403: a distinguishable 403 would confirm that this
+    // particular submission id exists.
+    expect(result.status).toBe(404);
+  });
+
+  it('blocks a second submission while one is awaiting information', async () => {
+    const credentialType = await createCredentialType({ verificationMethod: 'nimc_verification' });
+    const practitioner = await loginAsPractitioner();
+    const first = await callSubmit({
+      credentialTypeId: credentialType.id,
+      referenceNumber: 'A11111111',
+    });
+
+    await loginAsComplianceOfficer();
+    await callReview(first.body.id as string, {
+      decision: 'request_info',
+      reviewNotes: 'Wrong number.',
+    });
+
+    await issueSession({ userId: practitioner.id });
+    const second = await callSubmit({
+      credentialTypeId: credentialType.id,
+      referenceNumber: 'B22222222',
+    });
+
+    // They should answer on the existing row, not open a second one the
+    // reviewer then has to reconcile.
+    expect(second.status).toBe(409);
+    expect(second.body).toMatchObject({ error: { code: 'duplicate_active_submission' } });
   });
 });
 
