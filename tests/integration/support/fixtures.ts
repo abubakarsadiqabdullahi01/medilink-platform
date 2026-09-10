@@ -36,25 +36,7 @@ export async function grant(input: {
   scopeId?: string | null;
   revoked?: boolean;
 }) {
-  const role = await prisma.role.upsert({
-    where: { key: input.roleKey },
-    update: {},
-    create: { key: input.roleKey, name: input.roleKey },
-  });
-
-  for (const key of input.permissions) {
-    const permission = await prisma.permission.upsert({
-      where: { key },
-      update: {},
-      create: { key, description: PERMISSIONS[key] },
-    });
-
-    await prisma.rolePermission.upsert({
-      where: { roleId_permissionId: { roleId: role.id, permissionId: permission.id } },
-      update: {},
-      create: { roleId: role.id, permissionId: permission.id },
-    });
-  }
+  const role = await ensureRole(input.roleKey, input.permissions);
 
   return prisma.userRole.create({
     data: {
@@ -68,16 +50,38 @@ export async function grant(input: {
 }
 
 /**
- * Ensures a role row exists without granting it to anyone — for tests that
- * exercise something else's role-granting logic (e.g. an event handler)
- * rather than setting up a session's own grants directly.
+ * Ensures a role exists, carrying the permissions given, without granting it
+ * to anyone — for tests that exercise something else's role-granting logic
+ * (an event handler, or createFacility) rather than setting up a session's
+ * own grants directly.
+ *
+ * The permissions are not optional in spirit: the seed builds every role from
+ * ROLE_PERMISSIONS, so a role created here without them is a role that exists
+ * and authorises nothing, and whatever granted it appears to have silently
+ * failed.
  */
-export async function ensureRole(key: string) {
-  return prisma.role.upsert({
+export async function ensureRole(key: string, permissions: Permission[] = []) {
+  const role = await prisma.role.upsert({
     where: { key },
     update: {},
     create: { key, name: key },
   });
+
+  for (const permissionKey of permissions) {
+    const permission = await prisma.permission.upsert({
+      where: { key: permissionKey },
+      update: {},
+      create: { key: permissionKey, description: PERMISSIONS[permissionKey] },
+    });
+
+    await prisma.rolePermission.upsert({
+      where: { roleId_permissionId: { roleId: role.id, permissionId: permission.id } },
+      update: {},
+      create: { roleId: role.id, permissionId: permission.id },
+    });
+  }
+
+  return role;
 }
 
 /**
@@ -155,6 +159,31 @@ export async function createCredentialType(
     owner: 'test-fixture',
   };
   return prisma.credentialType.upsert({ where: { key }, update: data, create: { key, ...data } });
+}
+
+export async function createFacilityType(input: { key?: string; name?: string; regulator?: string } = {}) {
+  sequence += 1;
+  const key = input.key ?? `test_facility_type_${sequence}`;
+  const data = {
+    name: input.name ?? `Test Facility Type ${sequence}`,
+    regulator: input.regulator ?? 'TEST',
+    owner: 'test-fixture',
+  };
+  return prisma.facilityType.upsert({ where: { key }, update: data, create: { key, ...data } });
+}
+
+/**
+ * An LGA belongs to a state, and facility creation refuses a pairing that
+ * does not match, so the two are created together by default.
+ */
+export async function createLga(stateId: string, input: { name?: string } = {}) {
+  sequence += 1;
+  const name = input.name ?? `Test LGA ${sequence}`;
+  return prisma.lga.upsert({
+    where: { stateId_name: { stateId, name } },
+    update: { stateId, name },
+    create: { stateId, name },
+  });
 }
 
 /** An audit row tagged with a scope, so scope filtering has something to filter. */

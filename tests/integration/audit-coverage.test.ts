@@ -30,9 +30,22 @@ import {
 import { consumeOtp, verifyOtp } from '@/modules/auth/application/otp-service';
 import { createProfile, updateProfile } from '@/modules/practitioners/application/profile';
 import { reviewCredential, submitCredential } from '@/modules/credentials/application/submission';
+import {
+  createFacility,
+  updateFacility,
+  verifyFacility,
+} from '@/modules/facilities/application/facility';
+import { APP_SCHEMAS } from './support/schemas';
 import { clearCookies } from './support/cookie-jar';
 import { lastOtpCode, startSmsCapture, stopSmsCapture } from './support/sms-capture';
-import { createCredentialType, createProfessionalCategory, createUser } from './support/fixtures';
+import {
+  createCredentialType,
+  createFacilityType,
+  createProfessionalCategory,
+  createState,
+  createUser,
+  ensureRole,
+} from './support/fixtures';
 
 /**
  * Stage 4.5 — "a test harness fails the suite if any write leaves no audit
@@ -206,6 +219,50 @@ describe('audit coverage for credential submissions', () => {
   });
 });
 
+describe('audit coverage for facilities', () => {
+  it('leaves no state change without an audit row', async () => {
+    await ensureRole('facility_owner');
+    const state = await createState();
+    const facilityType = await createFacilityType();
+    const representative = await createUser();
+    const ops = await createUser();
+    const officer = await createUser();
+
+    startAuditCoverage();
+
+    // Creation writes to two audited tables at once — the facility itself
+    // and the representative's role grant — so this window also proves the
+    // grant is not riding on the facility's audit row.
+    const facility = await createFacility({
+      name: 'Coverage General Hospital',
+      facilityTypeId: facilityType.id,
+      cacNumber: 'RC55501',
+      stateId: state.id,
+      addressLine: '1 Coverage Road',
+      contactPhone: '+2348031112233',
+      representativeUserId: representative.id,
+      actorId: ops.id,
+    });
+    await updateFacility({
+      facilityId: facility.id,
+      actorId: representative.id,
+      addressLine: '2 Coverage Road',
+    });
+    await verifyFacility({
+      facilityId: facility.id,
+      verifierId: officer.id,
+      decision: 'approve',
+    });
+
+    const report = auditCoverageReport();
+
+    expect(describeCoverageFailure(report)).toBeNull();
+    expect(report.writes.some((write) => write.model === 'Facility')).toBe(true);
+    expect(report.writes.some((write) => write.model === 'UserRole')).toBe(true);
+    expect(report.audits.some((audit) => audit.action === 'facility.role_granted')).toBe(true);
+  });
+});
+
 describe('the harness itself', () => {
   it('reports a write that leaves no audit row', async () => {
     startAuditCoverage();
@@ -296,7 +353,7 @@ describe('the audited-model registry', () => {
     const rows = await prisma.$queryRaw<{ qualified: string }[]>`
       SELECT format('%I.%I', schemaname, tablename) AS qualified
         FROM pg_tables
-       WHERE schemaname IN ('identity', 'audit', 'config', 'storage', 'practitioners', 'credentials')
+       WHERE schemaname IN (${Prisma.join([...APP_SCHEMAS])})
     `;
     const existing = new Set(rows.map((row) => row.qualified));
 

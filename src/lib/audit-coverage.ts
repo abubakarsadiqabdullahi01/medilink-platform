@@ -42,6 +42,7 @@ export const AUDITED_MODELS: Readonly<Record<string, string>> = {
   StoredObject: 'storage.stored_objects',
   PractitionerProfile: 'practitioners.practitioner_profiles',
   CredentialSubmission: 'credentials.credential_submissions',
+  Facility: 'facilities.facilities',
 };
 
 /**

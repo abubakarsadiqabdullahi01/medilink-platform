@@ -1,4 +1,6 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db';
+import { MUTABLE_SCHEMAS } from './schemas';
 
 /**
  * Truncates the mutable schemas between cases. `config` is left alone: it
@@ -13,7 +15,7 @@ async function mutableTables(): Promise<string[]> {
   const rows = await prisma.$queryRaw<{ qualified: string }[]>`
     SELECT format('%I.%I', schemaname, tablename) AS qualified
       FROM pg_tables
-     WHERE schemaname IN ('identity', 'audit', 'storage', 'practitioners', 'credentials')
+     WHERE schemaname IN (${Prisma.join(MUTABLE_SCHEMAS)})
   `;
 
   if (rows.length === 0) {

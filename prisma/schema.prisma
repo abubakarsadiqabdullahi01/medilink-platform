@@ -17,7 +17,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-  schemas  = ["identity", "audit", "config", "storage", "practitioners", "credentials"]
+  schemas  = ["identity", "audit", "config", "storage", "practitioners", "credentials", "facilities"]
 }
 
 // ---------------------------------------------------------------- identity
@@ -43,6 +43,7 @@ model User {
   loginAttempts LoginAttempt[]
   practitionerProfile PractitionerProfile?
   credentialSubmissions CredentialSubmission[]
+  representedFacilities Facility[]
 
   @@map("users")
   @@schema("identity")
@@ -344,6 +345,7 @@ model State {
 
   lgas Lga[]
   practitionerProfiles PractitionerProfile[]
+  facilities Facility[]
 
   @@map("states")
   @@schema("config")
@@ -356,6 +358,7 @@ model Lga {
   createdAt DateTime @default(now()) @map("created_at")
 
   state State @relation(fields: [stateId], references: [id], onDelete: Cascade)
+  facilities Facility[]
 
   @@unique([stateId, name])
   @@map("lgas")
@@ -369,6 +372,8 @@ model FacilityType {
   regulator String
   owner     String
   createdAt DateTime @default(now()) @map("created_at")
+
+  facilities Facility[]
 
   @@map("facility_types")
   @@schema("config")
@@ -501,4 +506,72 @@ enum CredentialSubmissionStatus {
   REJECTED
 
   @@schema("credentials")
+}
+
+// ---------------------------------------------------------------- facilities
+
+// A facility is an organisation, not a person, so it is created by Medilink
+// operations rather than self-declared: verification exists precisely to stop
+// anyone claiming to be a hospital. The named representative is granted
+// facility_owner over this facility at creation, in the same transaction.
+model Facility {
+  id             String  @id @default(uuid()) @db.Uuid
+  name           String
+  facilityTypeId String  @map("facility_type_id") @db.Uuid
+  // Unique at the database level, not checked in application code: step 5.4
+  // asks for a duplicate to be refused "on the constraint, not in code".
+  cacNumber      String  @unique @map("cac_number")
+
+  stateId     String  @map("state_id") @db.Uuid
+  lgaId       String? @map("lga_id") @db.Uuid
+  addressLine String  @map("address_line")
+
+  contactPhone String  @map("contact_phone")
+  contactEmail String? @map("contact_email")
+
+  representativeUserId String @map("representative_user_id") @db.Uuid
+
+  status FacilityStatus @default(PENDING)
+
+  licenceNumber    String?   @map("licence_number")
+  licenceObjectKey String?   @map("licence_object_key")
+  // Read by canPublish() at publish time, which needs no scheduler. The
+  // automatic suspension of step 5.9 does, and does not exist yet.
+  licenceExpiresAt DateTime? @map("licence_expires_at")
+
+  // Who verified it, when and why. A bare column, not a Prisma relation,
+  // matching CredentialSubmission.reviewedBy: the audit row written in the
+  // same transaction is the system of record for "who did this".
+  verifiedBy  String?   @map("verified_by") @db.Uuid
+  verifiedAt  DateTime? @map("verified_at")
+  reviewNotes String?   @map("review_notes")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  facilityType FacilityType @relation(fields: [facilityTypeId], references: [id])
+  state        State        @relation(fields: [stateId], references: [id])
+  lga          Lga?         @relation(fields: [lgaId], references: [id])
+  // Restrict, not Cascade: removing the person must never silently remove the
+  // organisation they happened to represent.
+  representative User @relation(fields: [representativeUserId], references: [id], onDelete: Restrict)
+
+  @@index([status])
+  @@index([stateId, status])
+  @@index([representativeUserId])
+  @@map("facilities")
+  @@schema("facilities")
+}
+
+enum FacilityStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+  // Reachable by no code path in this cut. It exists because canPublish must
+  // decide on it, and because step 5.9 (expiry) and module 15 (clinical
+  // incidents) both suspend a facility rather than delete it.
+  SUSPENDED
+
+  @@schema("facilities")
 }

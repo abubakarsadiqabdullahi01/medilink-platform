@@ -72,8 +72,13 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
   ],
   facility_finance_officer: ['facility.read', 'timesheet.approve', 'invoice.read', 'payout.manage'],
   operations_officer: [
-    'user.read', 'practitioner.profile.read', 'facility.read', 'service_request.read',
-    'assignment.confirm', 'assignment.cancel', 'dispute.manage',
+    // facility.write at PLATFORM is what lets operations onboard a facility.
+    // A facility is an organisation rather than a person and is not
+    // self-declared, so somebody on this side has to create the record;
+    // without this, only super_administrator could, which is not a role
+    // anyone should be doing daily onboarding under.
+    'user.read', 'practitioner.profile.read', 'facility.read', 'facility.write',
+    'service_request.read', 'assignment.confirm', 'assignment.cancel', 'dispute.manage',
   ],
   compliance_officer: [
     'user.read', 'user.suspend', 'practitioner.profile.read', 'credential.review',

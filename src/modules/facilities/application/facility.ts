@@ -1,0 +1,547 @@
+import { Prisma } from '@prisma/client';
+import { prisma, type Tx } from '@/lib/db';
+import { env } from '@/lib/env';
+import { recordAudit } from '@/lib/audit';
+import { publishEvent } from '@/lib/outbox';
+import { EVENTS } from '@/lib/events';
+import { createDownloadUrl, createUploadUrl, headObject } from '@/lib/storage/tigris';
+import {
+  canPublish,
+  publishBlockers,
+  type FacilityStatusValue,
+  type PublishBlocker,
+} from '../domain/facility';
+import { FacilityErrors } from '../domain/errors';
+
+/**
+ * The facility aggregate: create, read, list, edit, verify, and the licence
+ * document flow around it. One file, matching
+ * credentials/application/submission.ts's precedent.
+ */
+
+export interface FacilityView {
+  id: string;
+  name: string;
+  facilityTypeId: string;
+  cacNumber: string;
+  stateId: string;
+  lgaId: string | null;
+  addressLine: string;
+  contactPhone: string;
+  contactEmail: string | null;
+  representativeUserId: string;
+  status: FacilityStatusValue;
+  licenceNumber: string | null;
+  licenceObjectKey: string | null;
+  licenceExpiresAt: Date | null;
+  verifiedBy: string | null;
+  verifiedAt: Date | null;
+  reviewNotes: string | null;
+  /**
+   * Derived, never stored. Stage 6 will call canPublish() itself on the way
+   * into publishing; surfacing it here is what lets a facility administrator
+   * see they are blocked before they try, and why.
+   */
+  canPublish: boolean;
+  publishBlockers: PublishBlocker[];
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+interface FacilityRow {
+  id: string;
+  name: string;
+  facilityTypeId: string;
+  cacNumber: string;
+  stateId: string;
+  lgaId: string | null;
+  addressLine: string;
+  contactPhone: string;
+  contactEmail: string | null;
+  representativeUserId: string;
+  status: FacilityStatusValue;
+  licenceNumber: string | null;
+  licenceObjectKey: string | null;
+  licenceExpiresAt: Date | null;
+  verifiedBy: string | null;
+  verifiedAt: Date | null;
+  reviewNotes: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  deletedAt: Date | null;
+}
+
+function toView(facility: FacilityRow, now: Date = new Date()): FacilityView {
+  return {
+    id: facility.id,
+    name: facility.name,
+    facilityTypeId: facility.facilityTypeId,
+    cacNumber: facility.cacNumber,
+    stateId: facility.stateId,
+    lgaId: facility.lgaId,
+    addressLine: facility.addressLine,
+    contactPhone: facility.contactPhone,
+    contactEmail: facility.contactEmail,
+    representativeUserId: facility.representativeUserId,
+    status: facility.status,
+    licenceNumber: facility.licenceNumber,
+    licenceObjectKey: facility.licenceObjectKey,
+    licenceExpiresAt: facility.licenceExpiresAt,
+    verifiedBy: facility.verifiedBy,
+    verifiedAt: facility.verifiedAt,
+    reviewNotes: facility.reviewNotes,
+    canPublish: canPublish(facility, now),
+    publishBlockers: publishBlockers(facility, now),
+    createdAt: facility.createdAt,
+    updatedAt: facility.updatedAt,
+  };
+}
+
+/** The address must be internally consistent, or the facility cannot be found. */
+async function assertLgaInState(lgaId: string, stateId: string): Promise<void> {
+  const lga = await prisma.lga.findUnique({ where: { id: lgaId } });
+  if (!lga || lga.stateId !== stateId) throw FacilityErrors.lgaNotInState();
+}
+
+/**
+ * Mirrors confirmDocumentOwnership in credentials, keyed on the facility
+ * rather than the user: a licence uploaded for facility A must not be
+ * attachable to facility B.
+ */
+async function confirmLicenceReference(facilityId: string, objectKey: string): Promise<void> {
+  const stored = await prisma.storedObject.findUnique({ where: { objectKey } });
+  if (
+    !stored ||
+    stored.purpose !== 'facility_licence' ||
+    stored.scopeType !== 'FACILITY' ||
+    stored.scopeId !== facilityId ||
+    stored.deletedAt
+  ) {
+    throw FacilityErrors.invalidLicenceReference();
+  }
+  try {
+    await headObject(objectKey);
+  } catch {
+    throw FacilityErrors.invalidLicenceReference();
+  }
+}
+
+/** Its own audit row: confirmation can happen in a later, unrelated request. */
+async function confirmLicenceUpload(
+  tx: Tx,
+  facilityId: string,
+  actorId: string,
+  objectKey: string,
+): Promise<void> {
+  const updated = await tx.storedObject.update({
+    where: { objectKey },
+    data: { uploadedAt: new Date() },
+  });
+
+  await recordAudit(tx, {
+    action: 'facility.licence_confirmed',
+    entityType: 'storage.stored_objects',
+    entityId: updated.id,
+    actorId,
+    scopeType: 'FACILITY',
+    scopeId: facilityId,
+  });
+}
+
+export interface CreateFacilityParams {
+  name: string;
+  facilityTypeId: string;
+  cacNumber: string;
+  stateId: string;
+  lgaId?: string;
+  addressLine: string;
+  contactPhone: string;
+  contactEmail?: string;
+  representativeUserId: string;
+  licenceNumber?: string;
+  licenceExpiresAt?: Date;
+  /** The operations user creating the record, not the representative. */
+  actorId: string;
+}
+
+/**
+ * Creates the facility and grants its representative facility_owner over it,
+ * in one transaction.
+ *
+ * The grant happens here rather than through the outbox, unlike
+ * grantPractitionerRoleOnRegistration: that one had to react to an event
+ * because registration's transaction had no facility to scope a grant to.
+ * Here the id exists in the same transaction, and a facility whose
+ * representative cannot reach it is not something worth half-creating.
+ */
+export async function createFacility(input: CreateFacilityParams): Promise<FacilityView> {
+  const facilityType = await prisma.facilityType.findUnique({ where: { id: input.facilityTypeId } });
+  if (!facilityType) throw FacilityErrors.facilityTypeNotFound();
+
+  const state = await prisma.state.findUnique({ where: { id: input.stateId } });
+  if (!state) throw FacilityErrors.stateNotFound();
+
+  if (input.lgaId) await assertLgaInState(input.lgaId, input.stateId);
+
+  const representative = await prisma.user.findUnique({
+    where: { id: input.representativeUserId },
+    select: { id: true, deletedAt: true },
+  });
+  if (!representative || representative.deletedAt) throw FacilityErrors.representativeNotFound();
+
+  const role = await prisma.role.findUniqueOrThrow({ where: { key: 'facility_owner' } });
+
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const created = await tx.facility.create({
+        data: {
+          name: input.name,
+          facilityTypeId: input.facilityTypeId,
+          cacNumber: input.cacNumber,
+          stateId: input.stateId,
+          lgaId: input.lgaId,
+          addressLine: input.addressLine,
+          contactPhone: input.contactPhone,
+          contactEmail: input.contactEmail,
+          representativeUserId: input.representativeUserId,
+          licenceNumber: input.licenceNumber,
+          licenceExpiresAt: input.licenceExpiresAt,
+        },
+      });
+
+      await recordAudit(tx, {
+        action: 'facility.created',
+        entityType: 'facilities.facilities',
+        entityId: created.id,
+        actorId: input.actorId,
+        scopeType: 'FACILITY',
+        scopeId: created.id,
+        after: toView(created),
+      });
+
+      const grant = await tx.userRole.create({
+        data: {
+          userId: input.representativeUserId,
+          roleId: role.id,
+          scopeType: 'FACILITY',
+          scopeId: created.id,
+          grantedBy: input.actorId,
+        },
+      });
+
+      await recordAudit(tx, {
+        action: 'facility.role_granted',
+        entityType: 'identity.user_roles',
+        entityId: grant.id,
+        actorId: input.actorId,
+        scopeType: 'FACILITY',
+        scopeId: created.id,
+        after: { roleKey: 'facility_owner', userId: input.representativeUserId },
+      });
+
+      return toView(created);
+    });
+  } catch (error) {
+    // Refused by the constraint rather than by a prior read: two concurrent
+    // creations of the same registration number cannot both win.
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      throw FacilityErrors.duplicateCacNumber();
+    }
+    throw error;
+  }
+}
+
+export async function getFacility(facilityId: string): Promise<FacilityView> {
+  const facility = await prisma.facility.findFirst({
+    where: { id: facilityId, deletedAt: null },
+  });
+  if (!facility) throw FacilityErrors.facilityNotFound();
+  return toView(facility);
+}
+
+export interface ListFacilitiesQuery {
+  scopeType: 'PLATFORM' | 'FACILITY';
+  scopeId?: string;
+  status?: FacilityStatusValue;
+  stateId?: string;
+  limit: number;
+  cursor?: string;
+}
+
+export interface FacilitiesPage {
+  facilities: FacilityView[];
+  nextCursor: string | null;
+}
+
+export async function listFacilities(query: ListFacilitiesQuery): Promise<FacilitiesPage> {
+  const where: Prisma.FacilityWhereInput = { deletedAt: null };
+
+  // FACILITY scope is confined to the one facility the caller was authorised
+  // for; PLATFORM applies no filter unless one is given, as an optional
+  // narrowing for an operations lookup.
+  if (query.scopeType !== 'PLATFORM' || query.scopeId) {
+    where.id = query.scopeId;
+  }
+
+  if (query.status) where.status = query.status;
+  if (query.stateId) where.stateId = query.stateId;
+
+  const rows = await prisma.facility.findMany({
+    where,
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    take: query.limit + 1,
+    ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
+  });
+
+  const facilities = rows.slice(0, query.limit).map((row) => toView(row));
+  const hasMore = rows.length > query.limit;
+
+  return {
+    facilities,
+    nextCursor: hasMore ? (facilities[facilities.length - 1]?.id ?? null) : null,
+  };
+}
+
+export interface UpdateFacilityParams {
+  facilityId: string;
+  actorId: string;
+  name?: string;
+  addressLine?: string;
+  lgaId?: string;
+  contactPhone?: string;
+  contactEmail?: string;
+  licenceNumber?: string;
+  licenceObjectKey?: string;
+  licenceExpiresAt?: Date;
+}
+
+const LICENCE_FIELDS = ['licenceNumber', 'licenceObjectKey', 'licenceExpiresAt'] as const;
+
+export async function updateFacility(input: UpdateFacilityParams): Promise<FacilityView> {
+  const existing = await prisma.facility.findFirst({
+    where: { id: input.facilityId, deletedAt: null },
+  });
+  if (!existing) throw FacilityErrors.facilityNotFound();
+
+  if (input.lgaId) await assertLgaInState(input.lgaId, existing.stateId);
+  if (input.licenceObjectKey) await confirmLicenceReference(existing.id, input.licenceObjectKey);
+
+  /**
+   * Changing the licence of an already-verified facility sends it back for
+   * review. Without this, verification would mean only that some licence was
+   * approved once — a facility could swap the document afterwards and keep
+   * publishing on the strength of a review nobody did. Name, address and
+   * contact details are not evidence, so they do not reset it.
+   */
+  const licenceChanged = LICENCE_FIELDS.some((field) => input[field] !== undefined);
+  const resetForReview = licenceChanged && existing.status === 'VERIFIED';
+
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.facility.update({
+      where: { id: existing.id },
+      data: {
+        name: input.name,
+        addressLine: input.addressLine,
+        lgaId: input.lgaId,
+        contactPhone: input.contactPhone,
+        contactEmail: input.contactEmail,
+        licenceNumber: input.licenceNumber,
+        licenceObjectKey: input.licenceObjectKey,
+        licenceExpiresAt: input.licenceExpiresAt,
+        ...(resetForReview
+          ? { status: 'PENDING', verifiedBy: null, verifiedAt: null, reviewNotes: null }
+          : {}),
+      },
+    });
+
+    if (input.licenceObjectKey) {
+      await confirmLicenceUpload(tx, existing.id, input.actorId, input.licenceObjectKey);
+    }
+
+    await recordAudit(tx, {
+      action: resetForReview ? 'facility.licence_replaced' : 'facility.updated',
+      entityType: 'facilities.facilities',
+      entityId: updated.id,
+      actorId: input.actorId,
+      scopeType: 'FACILITY',
+      scopeId: updated.id,
+      reason: resetForReview ? 'Licence changed; returned for review' : undefined,
+      before: toView(existing),
+      after: toView(updated),
+    });
+
+    return toView(updated);
+  });
+}
+
+export interface VerifyFacilityParams {
+  facilityId: string;
+  verifierId: string;
+  decision: 'approve' | 'reject';
+  reviewNotes?: string;
+}
+
+export async function verifyFacility(input: VerifyFacilityParams): Promise<FacilityView> {
+  const existing = await prisma.facility.findFirst({
+    where: { id: input.facilityId, deletedAt: null },
+  });
+  if (!existing) throw FacilityErrors.facilityNotFound();
+
+  // Nothing else stops a user holding both facility_owner and
+  // compliance_officer from verifying the facility they represent.
+  if (existing.representativeUserId === input.verifierId) {
+    throw FacilityErrors.cannotVerifyOwnFacility();
+  }
+  if (existing.status !== 'PENDING') throw FacilityErrors.alreadyVerified();
+
+  const now = new Date();
+  const approved = input.decision === 'approve';
+
+  return prisma.$transaction(async (tx) => {
+    // Conditional on the status just read, so two concurrent reviews cannot
+    // both apply — the same shape reviewCredential uses.
+    const applied = await tx.facility.updateMany({
+      where: { id: existing.id, status: 'PENDING' },
+      data: {
+        status: approved ? 'VERIFIED' : 'REJECTED',
+        verifiedBy: input.verifierId,
+        verifiedAt: now,
+        reviewNotes: input.reviewNotes,
+      },
+    });
+    if (applied.count !== 1) throw FacilityErrors.alreadyVerified();
+
+    const updated = await tx.facility.findUniqueOrThrow({ where: { id: existing.id } });
+
+    // Scoped to the facility, not the reviewer: the facility's own people
+    // must see this in their FACILITY-scoped audit history. actorId is who
+    // actually decided — deliberately a different person.
+    await recordAudit(tx, {
+      action: approved ? 'facility.verified' : 'facility.rejected',
+      entityType: 'facilities.facilities',
+      entityId: updated.id,
+      actorId: input.verifierId,
+      scopeType: 'FACILITY',
+      scopeId: updated.id,
+      reason: input.reviewNotes,
+      before: toView(existing),
+      after: toView(updated),
+    });
+
+    // No event on reject — none exists in the vocabulary, and the audit row
+    // is the record. FacilityVerified has no handler yet, so the worker's
+    // no-handler path marks it processed rather than retrying it forever.
+    if (approved) {
+      await publishEvent(tx, {
+        eventType: EVENTS.FacilityVerified,
+        aggregateType: 'facilities.facilities',
+        aggregateId: updated.id,
+        payload: {
+          facilityId: updated.id,
+          representativeUserId: updated.representativeUserId,
+          stateId: updated.stateId,
+        },
+      });
+    }
+
+    return toView(updated);
+  });
+}
+
+export interface RequestLicenceUploadUrlParams {
+  facilityId: string;
+  actorId: string;
+  filename: string;
+  contentType: string;
+  sizeBytes: number;
+}
+
+export interface LicenceUploadUrl {
+  objectKey: string;
+  uploadUrl: string;
+  expiresInSeconds: number;
+}
+
+export async function requestLicenceUploadUrl(
+  input: RequestLicenceUploadUrlParams,
+): Promise<LicenceUploadUrl> {
+  const facility = await prisma.facility.findFirst({
+    where: { id: input.facilityId, deletedAt: null },
+    select: { id: true },
+  });
+  if (!facility) throw FacilityErrors.facilityNotFound();
+
+  // Keyed by facility, not by uploader: the licence belongs to the
+  // organisation and outlives whoever happened to upload it.
+  const { objectKey, url, expiresInSeconds } = await createUploadUrl({
+    purpose: 'facility_licence',
+    ownerId: facility.id,
+    filename: input.filename,
+    contentType: input.contentType,
+    sizeBytes: input.sizeBytes,
+  });
+
+  await prisma.$transaction(async (tx) => {
+    const stored = await tx.storedObject.create({
+      data: {
+        bucket: env.STORAGE_BUCKET,
+        objectKey,
+        contentType: input.contentType,
+        sizeBytes: input.sizeBytes,
+        purpose: 'facility_licence',
+        ownerUserId: input.actorId,
+        scopeType: 'FACILITY',
+        scopeId: facility.id,
+      },
+    });
+
+    await recordAudit(tx, {
+      action: 'facility.licence_upload_requested',
+      entityType: 'storage.stored_objects',
+      entityId: stored.id,
+      actorId: input.actorId,
+      scopeType: 'FACILITY',
+      scopeId: facility.id,
+      after: { objectKey, contentType: input.contentType, sizeBytes: input.sizeBytes },
+    });
+  });
+
+  return { objectKey, uploadUrl: url, expiresInSeconds };
+}
+
+export interface RequestLicenceDownloadUrlParams {
+  facilityId: string;
+  viewerId: string;
+}
+
+export interface LicenceDownloadUrl {
+  downloadUrl: string;
+  expiresInSeconds: number;
+}
+
+export async function requestLicenceDownloadUrl(
+  input: RequestLicenceDownloadUrlParams,
+): Promise<LicenceDownloadUrl> {
+  const facility = await prisma.facility.findFirst({
+    where: { id: input.facilityId, deletedAt: null },
+    select: { id: true, licenceObjectKey: true },
+  });
+  if (!facility) throw FacilityErrors.facilityNotFound();
+  if (!facility.licenceObjectKey) throw FacilityErrors.noLicenceOnFacility();
+
+  const downloadUrl = await createDownloadUrl(facility.licenceObjectKey);
+
+  // A read, not a state change: evidence in security_events rather than a
+  // coverage-checked audit_log row, the same reasoning
+  // requestDocumentDownloadUrl and recordAuditTrailAccess already use.
+  await prisma.securityEvent.create({
+    data: {
+      userId: input.viewerId,
+      kind: 'facility.licence_accessed',
+      severity: 'info',
+      detail: { facilityId: facility.id },
+    },
+  });
+
+  return { downloadUrl, expiresInSeconds: env.STORAGE_SIGNED_URL_TTL_SECONDS };
+}
