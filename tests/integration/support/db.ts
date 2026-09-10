@@ -13,7 +13,7 @@ async function mutableTables(): Promise<string[]> {
   const rows = await prisma.$queryRaw<{ qualified: string }[]>`
     SELECT format('%I.%I', schemaname, tablename) AS qualified
       FROM pg_tables
-     WHERE schemaname IN ('identity', 'audit', 'storage', 'practitioners')
+     WHERE schemaname IN ('identity', 'audit', 'storage', 'practitioners', 'credentials')
   `;
 
   if (rows.length === 0) {

@@ -29,9 +29,10 @@ import {
 } from '@/modules/auth/application/recovery';
 import { consumeOtp, verifyOtp } from '@/modules/auth/application/otp-service';
 import { createProfile, updateProfile } from '@/modules/practitioners/application/profile';
+import { reviewCredential, submitCredential } from '@/modules/credentials/application/submission';
 import { clearCookies } from './support/cookie-jar';
 import { lastOtpCode, startSmsCapture, stopSmsCapture } from './support/sms-capture';
-import { createProfessionalCategory, createUser } from './support/fixtures';
+import { createCredentialType, createProfessionalCategory, createUser } from './support/fixtures';
 
 /**
  * Stage 4.5 — "a test harness fails the suite if any write leaves no audit
@@ -175,6 +176,36 @@ describe('audit coverage for practitioner profiles', () => {
   });
 });
 
+describe('audit coverage for credential submissions', () => {
+  it('leaves no state change without an audit row', async () => {
+    // A reference-number type, not document_review: submitCredential would
+    // otherwise try to confirm a real StoredObject upload that was never
+    // made, which is the document flow's own concern, already covered in
+    // tests/integration/credential-verification.test.ts.
+    const credentialType = await createCredentialType({ verificationMethod: 'nimc_verification' });
+    const practitioner = await createUser();
+    const reviewer = await createUser();
+
+    startAuditCoverage();
+
+    const submission = await submitCredential({
+      userId: practitioner.id,
+      credentialTypeId: credentialType.id,
+      referenceNumber: 'A123456789',
+    });
+    await reviewCredential({
+      submissionId: submission.id,
+      reviewerId: reviewer.id,
+      decision: 'approve',
+    });
+
+    const report = auditCoverageReport();
+
+    expect(describeCoverageFailure(report)).toBeNull();
+    expect(report.writes.some((write) => write.model === 'CredentialSubmission')).toBe(true);
+  });
+});
+
 describe('the harness itself', () => {
   it('reports a write that leaves no audit row', async () => {
     startAuditCoverage();
@@ -265,7 +296,7 @@ describe('the audited-model registry', () => {
     const rows = await prisma.$queryRaw<{ qualified: string }[]>`
       SELECT format('%I.%I', schemaname, tablename) AS qualified
         FROM pg_tables
-       WHERE schemaname IN ('identity', 'audit', 'config', 'storage', 'practitioners')
+       WHERE schemaname IN ('identity', 'audit', 'config', 'storage', 'practitioners', 'credentials')
     `;
     const existing = new Set(rows.map((row) => row.qualified));
 

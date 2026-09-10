@@ -85,22 +85,26 @@ export async function ensureRole(key: string) {
  * truncated between cases and `test:integration` never runs the seed, so
  * these are created on demand, upserted by a fixed test key like `grant()`
  * upserts its roles.
+ *
+ * `update` mirrors `create` field-for-field (never `{}`): each test file's
+ * `sequence` counter starts at 1 independently, and since `config` rows
+ * persist across files within a run, two files can both land on
+ * `test_credential_type_1` — an `update: {}` would then silently keep
+ * whichever file ran first's field values instead of the second caller's,
+ * which is exactly the kind of cross-file collision that bit
+ * `createCredentialType` before this was fixed.
  */
 export async function createProfessionalCategory(
   input: { key?: string; name?: string; regulator?: string } = {},
 ) {
   sequence += 1;
   const key = input.key ?? `test_category_${sequence}`;
-  return prisma.professionalCategory.upsert({
-    where: { key },
-    update: {},
-    create: {
-      key,
-      name: input.name ?? `Test Category ${sequence}`,
-      regulator: input.regulator ?? 'TEST',
-      owner: 'test-fixture',
-    },
-  });
+  const data = {
+    name: input.name ?? `Test Category ${sequence}`,
+    regulator: input.regulator ?? 'TEST',
+    owner: 'test-fixture',
+  };
+  return prisma.professionalCategory.upsert({ where: { key }, update: data, create: { key, ...data } });
 }
 
 export async function createSpecialty(
@@ -109,31 +113,48 @@ export async function createSpecialty(
 ) {
   sequence += 1;
   const key = input.key ?? `test_specialty_${sequence}`;
-  return prisma.specialty.upsert({
-    where: { key },
-    update: { categoryId },
-    create: {
-      key,
-      name: input.name ?? `Test Specialty ${sequence}`,
-      categoryId,
-      owner: 'test-fixture',
-    },
-  });
+  const data = {
+    name: input.name ?? `Test Specialty ${sequence}`,
+    categoryId,
+    owner: 'test-fixture',
+  };
+  return prisma.specialty.upsert({ where: { key }, update: data, create: { key, ...data } });
 }
 
 export async function createState(input: { code?: string; name?: string; zone?: string } = {}) {
   sequence += 1;
   const code = input.code ?? `T${sequence}`;
-  return prisma.state.upsert({
-    where: { code },
-    update: {},
-    create: {
-      code,
-      name: input.name ?? `Test State ${sequence}`,
-      zone: input.zone ?? 'Test Zone',
-      owner: 'test-fixture',
-    },
-  });
+  const data = {
+    name: input.name ?? `Test State ${sequence}`,
+    zone: input.zone ?? 'Test Zone',
+    owner: 'test-fixture',
+  };
+  return prisma.state.upsert({ where: { code }, update: data, create: { code, ...data } });
+}
+
+export async function createCredentialType(
+  input: {
+    key?: string;
+    name?: string;
+    issuer?: string;
+    isMandatory?: boolean;
+    expires?: boolean;
+    reviewDays?: number;
+    verificationMethod?: string;
+  } = {},
+) {
+  sequence += 1;
+  const key = input.key ?? `test_credential_type_${sequence}`;
+  const data = {
+    name: input.name ?? `Test Credential Type ${sequence}`,
+    issuer: input.issuer ?? 'Test Issuer',
+    isMandatory: input.isMandatory ?? false,
+    expires: input.expires ?? true,
+    reviewDays: input.reviewDays ?? 365,
+    verificationMethod: input.verificationMethod ?? 'document_review',
+    owner: 'test-fixture',
+  };
+  return prisma.credentialType.upsert({ where: { key }, update: data, create: { key, ...data } });
 }
 
 /** An audit row tagged with a scope, so scope filtering has something to filter. */

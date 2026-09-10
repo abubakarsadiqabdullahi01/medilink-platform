@@ -17,7 +17,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-  schemas  = ["identity", "audit", "config", "storage", "practitioners"]
+  schemas  = ["identity", "audit", "config", "storage", "practitioners", "credentials"]
 }
 
 // ---------------------------------------------------------------- identity
@@ -42,6 +42,7 @@ model User {
   otpCodes      OtpCode[]
   loginAttempts LoginAttempt[]
   practitionerProfile PractitionerProfile?
+  credentialSubmissions CredentialSubmission[]
 
   @@map("users")
   @@schema("identity")
@@ -327,6 +328,8 @@ model CredentialType {
   owner         String
   createdAt     DateTime @default(now()) @map("created_at")
 
+  submissions CredentialSubmission[]
+
   @@map("credential_types")
   @@schema("config")
 }
@@ -451,4 +454,51 @@ model PractitionerProfile {
 
   @@map("practitioner_profiles")
   @@schema("practitioners")
+}
+
+// ------------------------------------------------------------- credentials
+
+// Many rows per user: a practitioner holds several credential types over
+// time and may resubmit after a rejection. "Active" (not yet superseded)
+// means PENDING or VERIFIED; a REJECTED row does not block a fresh
+// submission of the same type.
+model CredentialSubmission {
+  id                String                     @id @default(uuid()) @db.Uuid
+  userId            String                     @map("user_id") @db.Uuid
+  credentialTypeId  String                     @map("credential_type_id") @db.Uuid
+  status            CredentialSubmissionStatus @default(PENDING)
+  referenceNumber   String?                    @map("reference_number")
+  documentObjectKey String?                    @map("document_object_key")
+  // Who reviewed it, when and why. A bare column, not a Prisma relation —
+  // matching the existing precedent of audit.security_events.user_id, which
+  // also has no @relation and no back-relation on User. The audit row
+  // reviewCredential writes in the same transaction is the system of record
+  // for "who did this"; this is a denormalised convenience for reading a
+  // submission back without a join to audit_log.
+  reviewedBy  String?   @map("reviewed_by") @db.Uuid
+  reviewedAt  DateTime? @map("reviewed_at")
+  reviewNotes String?   @map("review_notes")
+  // Computed once at verification time from credentialType.reviewDays when
+  // credentialType.expires is true. Nothing reads this yet — no expiry
+  // sweep exists — stored now so a future one is additive, not a backfill.
+  expiresAt DateTime? @map("expires_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  credentialType CredentialType @relation(fields: [credentialTypeId], references: [id])
+
+  @@index([userId, credentialTypeId])
+  @@index([status])
+  @@map("credential_submissions")
+  @@schema("credentials")
+}
+
+enum CredentialSubmissionStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+
+  @@schema("credentials")
 }

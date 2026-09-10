@@ -41,6 +41,7 @@ export const AUDITED_MODELS: Readonly<Record<string, string>> = {
   RateFloor: 'config.rate_floors',
   StoredObject: 'storage.stored_objects',
   PractitionerProfile: 'practitioners.practitioner_profiles',
+  CredentialSubmission: 'credentials.credential_submissions',
 };
 
 /**

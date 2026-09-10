@@ -8,7 +8,7 @@ internal shape: `domain/`, `application/`, `infrastructure/`, `presentation/`,
 | --- | --- | --- | --- |
 | `auth` | 1. Authentication and access control | 4 | Foundations in `src/lib` |
 | `practitioners` | 2. Practitioner profiles | 5 | Self-service profile (SELF scope) |
-| `credentials` | 3. Credential verification | 5 | Folder only |
+| `credentials` | 3. Credential verification | 5 | Submit + manual review (SELF/PLATFORM) |
 | `facilities` | 4. Facility management | 5 | Folder only |
 | `availability` | 5. Availability | 6 | Folder only |
 | `service-requests` | 6. Service requests | 6 | Folder only |

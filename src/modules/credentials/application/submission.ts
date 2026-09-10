@@ -1,0 +1,408 @@
+import { Prisma } from '@prisma/client';
+import { prisma, type Tx } from '@/lib/db';
+import { env } from '@/lib/env';
+import { recordAudit } from '@/lib/audit';
+import { publishEvent } from '@/lib/outbox';
+import { EVENTS } from '@/lib/events';
+import { createDownloadUrl, createUploadUrl, headObject } from '@/lib/storage/tigris';
+import { computeExpiresAt, requiredEvidenceFor } from '../domain/submission';
+import { CredentialErrors } from '../domain/errors';
+
+/**
+ * The credential-submission aggregate: submit, list, review, and the
+ * document upload/download flow around it. One file, matching
+ * practitioners/application/profile.ts's precedent.
+ */
+
+export interface CredentialSubmissionView {
+  id: string;
+  userId: string;
+  credentialTypeId: string;
+  status: 'PENDING' | 'VERIFIED' | 'REJECTED';
+  referenceNumber: string | null;
+  documentObjectKey: string | null;
+  reviewedBy: string | null;
+  reviewedAt: Date | null;
+  reviewNotes: string | null;
+  expiresAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+function toView(submission: {
+  id: string;
+  userId: string;
+  credentialTypeId: string;
+  status: 'PENDING' | 'VERIFIED' | 'REJECTED';
+  referenceNumber: string | null;
+  documentObjectKey: string | null;
+  reviewedBy: string | null;
+  reviewedAt: Date | null;
+  reviewNotes: string | null;
+  expiresAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}): CredentialSubmissionView {
+  return {
+    id: submission.id,
+    userId: submission.userId,
+    credentialTypeId: submission.credentialTypeId,
+    status: submission.status,
+    referenceNumber: submission.referenceNumber,
+    documentObjectKey: submission.documentObjectKey,
+    reviewedBy: submission.reviewedBy,
+    reviewedAt: submission.reviewedAt,
+    reviewNotes: submission.reviewNotes,
+    expiresAt: submission.expiresAt,
+    createdAt: submission.createdAt,
+    updatedAt: submission.updatedAt,
+  };
+}
+
+/**
+ * Confirms the client actually finished uploading before a submission is
+ * allowed to reference the object — a network call, so it stays outside any
+ * transaction, same reasoning as "codes are sent after the transaction
+ * commits" in the auth module.
+ */
+async function confirmDocumentOwnership(userId: string, objectKey: string): Promise<void> {
+  const stored = await prisma.storedObject.findUnique({ where: { objectKey } });
+  if (
+    !stored ||
+    stored.ownerUserId !== userId ||
+    stored.purpose !== 'credential_document' ||
+    stored.deletedAt
+  ) {
+    throw CredentialErrors.invalidDocumentReference();
+  }
+  try {
+    await headObject(objectKey);
+  } catch {
+    throw CredentialErrors.invalidDocumentReference();
+  }
+}
+
+/**
+ * Marks the StoredObject uploaded, with its own audit row — separate from
+ * the submission's own row, and separate from the upload-url request's row,
+ * because confirmation can happen in a later, unrelated request.
+ */
+async function confirmDocumentUpload(tx: Tx, userId: string, objectKey: string): Promise<void> {
+  const updated = await tx.storedObject.update({
+    where: { objectKey },
+    data: { uploadedAt: new Date() },
+  });
+
+  await recordAudit(tx, {
+    action: 'credential.document_confirmed',
+    entityType: 'storage.stored_objects',
+    entityId: updated.id,
+    actorId: userId,
+    scopeType: 'SELF',
+    scopeId: userId,
+  });
+}
+
+export interface SubmitCredentialParams {
+  userId: string;
+  credentialTypeId: string;
+  referenceNumber?: string;
+  documentObjectKey?: string;
+}
+
+export async function submitCredential(
+  input: SubmitCredentialParams,
+): Promise<CredentialSubmissionView> {
+  const credentialType = await prisma.credentialType.findUnique({
+    where: { id: input.credentialTypeId },
+  });
+  if (!credentialType) throw CredentialErrors.credentialTypeNotFound();
+
+  const required = requiredEvidenceFor(credentialType.verificationMethod);
+  if (required === 'reference_number' && !input.referenceNumber) {
+    throw CredentialErrors.referenceNumberRequired();
+  }
+  if (required === 'document' && !input.documentObjectKey) {
+    throw CredentialErrors.documentRequired();
+  }
+
+  // Best-effort, not a hard guarantee: there is no partial unique index
+  // backing this (Prisma's schema DSL cannot express one, and hand-writing
+  // one into the migration would drift the next time anyone runs `migrate
+  // dev`). A genuinely concurrent double-submit of the same type can still
+  // race past this check; worst case a reviewer sees two PENDING rows for
+  // the same type and rejects the extra one.
+  const existingActive = await prisma.credentialSubmission.findFirst({
+    where: {
+      userId: input.userId,
+      credentialTypeId: input.credentialTypeId,
+      status: { in: ['PENDING', 'VERIFIED'] },
+      deletedAt: null,
+    },
+  });
+  if (existingActive) throw CredentialErrors.duplicateActiveSubmission();
+
+  if (input.documentObjectKey) {
+    await confirmDocumentOwnership(input.userId, input.documentObjectKey);
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const created = await tx.credentialSubmission.create({
+      data: {
+        userId: input.userId,
+        credentialTypeId: input.credentialTypeId,
+        referenceNumber: input.referenceNumber,
+        documentObjectKey: input.documentObjectKey,
+      },
+    });
+
+    if (input.documentObjectKey) {
+      await confirmDocumentUpload(tx, input.userId, input.documentObjectKey);
+    }
+
+    await recordAudit(tx, {
+      action: 'credential.submitted',
+      entityType: 'credentials.credential_submissions',
+      entityId: created.id,
+      actorId: input.userId,
+      scopeType: 'SELF',
+      scopeId: input.userId,
+      after: toView(created),
+    });
+
+    await publishEvent(tx, {
+      eventType: EVENTS.CredentialSubmitted,
+      aggregateType: 'credentials.credential_submissions',
+      aggregateId: created.id,
+      payload: {
+        submissionId: created.id,
+        userId: input.userId,
+        credentialTypeId: input.credentialTypeId,
+      },
+    });
+
+    return toView(created);
+  });
+}
+
+export interface ListSubmissionsQuery {
+  scopeType: 'SELF' | 'PLATFORM';
+  scopeId?: string;
+  status?: 'PENDING' | 'VERIFIED' | 'REJECTED';
+  credentialTypeId?: string;
+  limit: number;
+  cursor?: string;
+}
+
+export interface SubmissionsPage {
+  submissions: CredentialSubmissionView[];
+  nextCursor: string | null;
+}
+
+/** Filter derivation mirrors readAuditTrail exactly, adapted to a userId column. */
+export async function listSubmissions(query: ListSubmissionsQuery): Promise<SubmissionsPage> {
+  const where: Prisma.CredentialSubmissionWhereInput = { deletedAt: null };
+
+  // SELF is confined to the caller's own id (defaulted upstream, same as the
+  // audit route); PLATFORM applies no owner filter unless one is given — an
+  // optional narrowing to a single practitioner for a reviewer's lookup.
+  if (query.scopeType !== 'PLATFORM' || query.scopeId) {
+    where.userId = query.scopeId;
+  }
+
+  if (query.status) where.status = query.status;
+  if (query.credentialTypeId) where.credentialTypeId = query.credentialTypeId;
+
+  const rows = await prisma.credentialSubmission.findMany({
+    where,
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    take: query.limit + 1,
+    ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
+  });
+
+  const submissions = rows.slice(0, query.limit).map(toView);
+  const hasMore = rows.length > query.limit;
+
+  return {
+    submissions,
+    nextCursor: hasMore ? (submissions[submissions.length - 1]?.id ?? null) : null,
+  };
+}
+
+export interface ReviewCredentialParams {
+  submissionId: string;
+  reviewerId: string;
+  decision: 'approve' | 'reject';
+  reviewNotes?: string;
+}
+
+export async function reviewCredential(
+  input: ReviewCredentialParams,
+): Promise<CredentialSubmissionView> {
+  const existing = await prisma.credentialSubmission.findUnique({
+    where: { id: input.submissionId },
+    include: { credentialType: true },
+  });
+  if (!existing || existing.deletedAt) throw CredentialErrors.submissionNotFound();
+  if (existing.userId === input.reviewerId) throw CredentialErrors.cannotReviewOwnSubmission();
+  if (existing.status !== 'PENDING') throw CredentialErrors.alreadyReviewed();
+
+  const now = new Date();
+  const approved = input.decision === 'approve';
+  const nextStatus = approved ? 'VERIFIED' : 'REJECTED';
+  const expiresAt = approved ? computeExpiresAt(existing.credentialType, now) : null;
+
+  return prisma.$transaction(async (tx) => {
+    const review = await tx.credentialSubmission.updateMany({
+      where: { id: input.submissionId, status: 'PENDING' },
+      data: {
+        status: nextStatus,
+        reviewedBy: input.reviewerId,
+        reviewedAt: now,
+        reviewNotes: input.reviewNotes,
+        expiresAt,
+      },
+    });
+    if (review.count !== 1) throw CredentialErrors.alreadyReviewed();
+
+    const updated = await tx.credentialSubmission.findUniqueOrThrow({
+      where: { id: input.submissionId },
+    });
+
+    // Scoped to the submitting practitioner, not the reviewer: this row is
+    // about the practitioner's own credential, and they must be able to see
+    // it in their own SELF-scoped audit history. actorId is who actually
+    // did it — the two are deliberately different people here.
+    await recordAudit(tx, {
+      action: approved ? 'credential.verified' : 'credential.rejected',
+      entityType: 'credentials.credential_submissions',
+      entityId: updated.id,
+      actorId: input.reviewerId,
+      scopeType: 'SELF',
+      scopeId: existing.userId,
+      reason: input.reviewNotes,
+      before: toView(existing),
+      after: toView(updated),
+    });
+
+    // No event on reject — none exists in the vocabulary; the audit row
+    // above is the record.
+    if (approved) {
+      await publishEvent(tx, {
+        eventType: EVENTS.CredentialVerified,
+        aggregateType: 'credentials.credential_submissions',
+        aggregateId: updated.id,
+        payload: {
+          submissionId: updated.id,
+          userId: updated.userId,
+          credentialTypeId: updated.credentialTypeId,
+        },
+      });
+    }
+
+    return toView(updated);
+  });
+}
+
+export interface RequestDocumentUploadUrlParams {
+  userId: string;
+  filename: string;
+  contentType: string;
+  sizeBytes: number;
+}
+
+export interface DocumentUploadUrl {
+  objectKey: string;
+  uploadUrl: string;
+  expiresInSeconds: number;
+}
+
+export async function requestDocumentUploadUrl(
+  input: RequestDocumentUploadUrlParams,
+): Promise<DocumentUploadUrl> {
+  const { objectKey, url, expiresInSeconds } = await createUploadUrl({
+    purpose: 'credential_document',
+    ownerId: input.userId,
+    filename: input.filename,
+    contentType: input.contentType,
+    sizeBytes: input.sizeBytes,
+  });
+
+  await prisma.$transaction(async (tx) => {
+    const stored = await tx.storedObject.create({
+      data: {
+        bucket: env.STORAGE_BUCKET,
+        objectKey,
+        contentType: input.contentType,
+        sizeBytes: input.sizeBytes,
+        purpose: 'credential_document',
+        ownerUserId: input.userId,
+        scopeType: 'SELF',
+        scopeId: input.userId,
+      },
+    });
+
+    await recordAudit(tx, {
+      action: 'credential.document_upload_requested',
+      entityType: 'storage.stored_objects',
+      entityId: stored.id,
+      actorId: input.userId,
+      scopeType: 'SELF',
+      scopeId: input.userId,
+      after: { objectKey, contentType: input.contentType, sizeBytes: input.sizeBytes },
+    });
+  });
+
+  return { objectKey, uploadUrl: url, expiresInSeconds };
+}
+
+export interface RequestDocumentDownloadUrlParams {
+  submissionId: string;
+  scopeType: 'SELF' | 'PLATFORM';
+  scopeId?: string;
+  viewerId: string;
+}
+
+export interface DocumentDownloadUrl {
+  downloadUrl: string;
+  expiresInSeconds: number;
+}
+
+/**
+ * A submission that exists but belongs to someone else at SELF scope is 404,
+ * not 403 — guarded-handler.ts's own stated reasoning applies exactly here
+ * ("a distinguishable 403 and 404 is a directory"): a 403 would confirm to a
+ * prying caller that some other practitioner's specific submission id
+ * exists. Ownership is folded into the lookup itself, since the guard has no
+ * way to know which practitioner a submissionId belongs to beforehand.
+ */
+export async function requestDocumentDownloadUrl(
+  input: RequestDocumentDownloadUrlParams,
+): Promise<DocumentDownloadUrl> {
+  const submission = await prisma.credentialSubmission.findFirst({
+    where: {
+      id: input.submissionId,
+      deletedAt: null,
+      ...(input.scopeType === 'PLATFORM' ? {} : { userId: input.scopeId }),
+    },
+  });
+  if (!submission) throw CredentialErrors.submissionNotFound();
+  if (!submission.documentObjectKey) throw CredentialErrors.noDocumentOnSubmission();
+
+  const downloadUrl = await createDownloadUrl(submission.documentObjectKey);
+
+  // A read, not a state change: evidence in security_events (already exempt
+  // from audit coverage) rather than a coverage-checked audit_log row, same
+  // reasoning recordAuditTrailAccess already uses for "who read the audit
+  // trail."
+  await prisma.securityEvent.create({
+    data: {
+      userId: input.viewerId,
+      kind: 'credential.document_accessed',
+      severity: 'info',
+      detail: { submissionId: submission.id, scopeType: input.scopeType },
+    },
+  });
+
+  return { downloadUrl, expiresInSeconds: env.STORAGE_SIGNED_URL_TTL_SECONDS };
+}

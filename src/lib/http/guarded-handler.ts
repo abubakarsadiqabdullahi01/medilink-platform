@@ -61,9 +61,22 @@ function inputFrom(request: Request, source: 'query' | 'body'): Promise<unknown>
   return request.json().catch(() => ({}));
 }
 
+function mergeRouteParams(raw: unknown, routeParams?: Record<string, string>): unknown {
+  if (!routeParams) return raw;
+  const base = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  return { ...base, ...routeParams };
+}
+
 export async function handleGuardedRequest<TInput, TOutput>(
   request: Request,
   options: GuardOptions<TInput, TOutput>,
+  /**
+   * A dynamic segment's values, e.g. Next.js's `{ params: { id } }` for a
+   * route under `[id]/`. Merged into the parsed input after the query/body,
+   * so the URL always wins over a same-named field — the path is
+   * authoritative for identity, not something a caller can override.
+   */
+  routeParams?: Record<string, string>,
 ) {
   let context = requestContextFrom(request);
 
@@ -73,7 +86,8 @@ export async function handleGuardedRequest<TInput, TOutput>(
     const session = await requireSession();
     context = { ...context, userId: session.userId };
 
-    const input = options.schema.parse(await inputFrom(request, options.source));
+    const raw = await inputFrom(request, options.source);
+    const input = options.schema.parse(mergeRouteParams(raw, routeParams));
 
     await requirePermission(session.userId, options.permission, options.scope(input, session));
 

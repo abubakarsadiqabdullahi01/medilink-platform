@@ -10,4 +10,32 @@ export interface RouteDefinition {
   scopeType: ScopeType;
 }
 
-export const ROUTES: RouteDefinition[] = [];
+export const ROUTES: RouteDefinition[] = [
+  { method: 'POST', path: '/api/v1/credentials', permission: 'credential.submit', scopeType: 'SELF' },
+  { method: 'GET', path: '/api/v1/credentials', permission: 'credential.document.read', scopeType: 'SELF' },
+  { method: 'GET', path: '/api/v1/credentials', permission: 'credential.document.read', scopeType: 'PLATFORM' },
+  {
+    method: 'POST',
+    path: '/api/v1/credentials/document-upload-url',
+    permission: 'credential.submit',
+    scopeType: 'SELF',
+  },
+  {
+    method: 'POST',
+    path: '/api/v1/credentials/:id/review',
+    permission: 'credential.review',
+    scopeType: 'PLATFORM',
+  },
+  {
+    method: 'POST',
+    path: '/api/v1/credentials/:id/document-url',
+    permission: 'credential.document.read',
+    scopeType: 'SELF',
+  },
+  {
+    method: 'POST',
+    path: '/api/v1/credentials/:id/document-url',
+    permission: 'credential.document.read',
+    scopeType: 'PLATFORM',
+  },
+];

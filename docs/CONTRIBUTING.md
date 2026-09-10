@@ -71,9 +71,20 @@ export async function GET(request: Request) {
 ```
 
 Add the route to the module's `routes.ts` table, which is what a reviewer
-reads instead of every route file, and add the 403 cases to
-`tests/integration/authorization.test.ts` — one for the permission, one for a
-grant scoped elsewhere. See `docs/stage-4-3-4-4-authorization.md`.
+reads instead of every route file, and add the 403 cases — one for the
+permission, one for a grant scoped elsewhere — to that module's own
+integration test file (`tests/integration/<module>.test.ts`), following
+`practitioner-profile.test.ts` or `credential-verification.test.ts`, not
+`authorization.test.ts`. That file proved the guard mechanics generically
+against the first endpoint that used them (Stage 4.3/4.4); every module
+since has kept its own 401/403/2xx cases with the rest of its tests instead
+of piling into a shared file. See `docs/stage-4-3-4-4-authorization.md`.
+
+An endpoint whose path has a dynamic segment (`[id]`) takes a third,
+optional `routeParams` argument — `handleGuardedRequest(request, options,
+params)` — merged into the parsed input after the query/body, so the URL
+always wins over a same-named field. See
+`src/app/api/v1/credentials/[id]/review/route.ts` for the shape.
 
 ## Money
 
