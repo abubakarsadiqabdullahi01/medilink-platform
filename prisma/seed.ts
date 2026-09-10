@@ -105,6 +105,29 @@ async function seedCredentialTypes() {
  * operator who disables a misbehaving sweep must not have it switched back on
  * by the next deploy's seed run.
  */
+/**
+ * The sanctioned and quack lists (step 5.6). Deliberately empty.
+ *
+ * Owner: Compliance. The real lists are MDCN's to publish and compliance's to
+ * transcribe; an invented one would be worse than none, because a screening
+ * step that matches nothing real still reports "clear" and looks like it
+ * worked. Add rows here, or through a compliance tool when one exists.
+ */
+async function seedSanctionedEntries() {
+  const entries: {
+    sourceList: 'MDCN_QUACK_LIST' | 'MDCN_SANCTIONS' | 'INTERNAL';
+    fullName: string;
+    normalisedName: string;
+    folioNumber: string | null;
+    reason: string;
+    listedAt: Date;
+  }[] = [];
+
+  for (const entry of entries) {
+    await prisma.sanctionedEntry.create({ data: { ...entry, owner: OWNER_COMPLIANCE } });
+  }
+}
+
 async function seedScheduledJobs() {
   for (const job of JOB_DEFINITIONS) {
     await prisma.scheduledJob.upsert({
@@ -220,6 +243,7 @@ async function main() {
   await seedStates();
   await seedHolidays();
   await seedRateFloors();
+  await seedSanctionedEntries();
   await seedScheduledJobs();
 
   const counts = {
@@ -233,6 +257,7 @@ async function main() {
     lgas: await prisma.lga.count(),
     holidays: await prisma.publicHoliday.count(),
     rateFloors: await prisma.rateFloor.count(),
+    sanctionedEntries: await prisma.sanctionedEntry.count(),
     scheduledJobs: await prisma.scheduledJob.count(),
   };
   console.log('seed complete', counts);

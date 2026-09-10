@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/db';
 import { PERMISSIONS, type Permission } from '@/lib/authz/permissions';
 import type { ScopeType } from '@/lib/authz/guard';
+import { normaliseFolio, normaliseName } from '@/modules/practitioners/domain/screening';
 
 /**
  * Users and grants for authorisation tests. The seed's roles are not reused:
@@ -183,6 +184,30 @@ export async function createLga(stateId: string, input: { name?: string } = {}) 
     where: { stateId_name: { stateId, name } },
     update: { stateId, name },
     create: { stateId, name },
+  });
+}
+
+/**
+ * An entry on a sanctioned or quack list. `normalisedName` is computed with
+ * the same function the screening path uses, because a fixture that
+ * normalises differently would test nothing.
+ */
+export async function createSanctionedEntry(input: {
+  fullName: string;
+  folioNumber?: string;
+  sourceList?: 'MDCN_QUACK_LIST' | 'MDCN_SANCTIONS' | 'INTERNAL';
+  reason?: string;
+}) {
+  return prisma.sanctionedEntry.create({
+    data: {
+      sourceList: input.sourceList ?? 'MDCN_QUACK_LIST',
+      fullName: input.fullName,
+      normalisedName: normaliseName(input.fullName),
+      folioNumber: normaliseFolio(input.folioNumber),
+      reason: input.reason ?? 'Test entry',
+      listedAt: new Date('2026-01-01T00:00:00.000Z'),
+      owner: 'test-fixture',
+    },
   });
 }
 

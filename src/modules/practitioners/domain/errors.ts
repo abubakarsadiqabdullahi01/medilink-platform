@@ -75,4 +75,18 @@ export const PractitionerErrors = {
       'That folio number is already registered to another account.',
       409,
     ),
+
+  screeningNotFound: () =>
+    new PractitionerError(
+      'screening_not_found',
+      'That practitioner has not been screened yet.',
+      404,
+    ),
+
+  screeningNotFlagged: () =>
+    new PractitionerError(
+      'screening_not_flagged',
+      'That screening result is not flagged, so there is nothing to clear.',
+      409,
+    ),
 } as const;

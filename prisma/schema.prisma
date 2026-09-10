@@ -45,6 +45,7 @@ model User {
   credentialSubmissions CredentialSubmission[]
   representedFacilities Facility[]
   identityVerification IdentityVerification?
+  screeningResult ScreeningResult?
   professionalRegistrations ProfessionalRegistration[]
 
   @@map("users")
@@ -703,6 +704,73 @@ enum RegistrationStatus {
 enum VerificationSource {
   MANUAL
   REGULATOR_API
+
+  @@schema("practitioners")
+}
+
+// Step 5.6: the sanctioned and "quack" lists a practitioner is screened
+// against. Seeded empty with a named owner — the real lists are compliance's
+// to supply, and an invented one would be worse than none.
+model SanctionedEntry {
+  id             String             @id @default(uuid()) @db.Uuid
+  sourceList     SanctionSourceList @map("source_list")
+  fullName       String             @map("full_name")
+  // The comparable form, computed once on write so a sweep over every
+  // practitioner is an indexed lookup rather than a scan that normalises as
+  // it goes.
+  normalisedName String             @map("normalised_name")
+  folioNumber    String?            @map("folio_number")
+  reason         String?
+  listedAt       DateTime           @map("listed_at")
+  owner          String
+  createdAt      DateTime           @default(now()) @map("created_at")
+
+  screenings ScreeningResult[]
+
+  @@index([normalisedName])
+  @@index([folioNumber])
+  @@map("sanctioned_entries")
+  @@schema("config")
+}
+
+enum SanctionSourceList {
+  MDCN_QUACK_LIST
+  MDCN_SANCTIONS
+  // Someone Medilink itself has barred, after an incident or a dispute.
+  INTERNAL
+
+  @@schema("config")
+}
+
+model ScreeningResult {
+  id             String          @id @default(uuid()) @db.Uuid
+  userId         String          @unique @map("user_id") @db.Uuid
+  status         ScreeningStatus
+  matchedEntryId String?         @map("matched_entry_id") @db.Uuid
+  /// 'name' or 'folio' — which field matched, so a reviewer knows what to check.
+  matchedOn      String?         @map("matched_on")
+  screenedAt     DateTime        @map("screened_at")
+  // A compliance officer's override of a false positive. Two people with the
+  // same name is common enough that a flag has to be answerable.
+  clearedBy      String?         @map("cleared_by") @db.Uuid
+  notes          String?
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
+
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  matchedEntry SanctionedEntry? @relation(fields: [matchedEntryId], references: [id])
+
+  @@index([status])
+  @@map("screening_results")
+  @@schema("practitioners")
+}
+
+enum ScreeningStatus {
+  // Never screened, or screened against a list that has since changed. Not
+  // the same as CLEAR, and the eligibility rule refuses it.
+  PENDING
+  CLEAR
+  FLAGGED
 
   @@schema("practitioners")
 }

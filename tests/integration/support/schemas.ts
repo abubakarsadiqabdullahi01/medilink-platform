@@ -24,3 +24,13 @@ export const APP_SCHEMAS = [
  * not test state — so it is never truncated.
  */
 export const MUTABLE_SCHEMAS = APP_SCHEMAS.filter((schema) => schema !== 'config');
+
+/**
+ * Tables inside `config` that are test state rather than reference data.
+ *
+ * `sanctioned_entries` is compliance-owned like every other config list, so
+ * that is where it belongs — but it ships empty and the tests write to it, and
+ * a listed name left behind would flag an unrelated practitioner in every case
+ * that followed.
+ */
+export const MUTABLE_CONFIG_TABLES = ['config.sanctioned_entries'] as const;

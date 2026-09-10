@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db';
-import { MUTABLE_SCHEMAS } from './schemas';
+import { MUTABLE_CONFIG_TABLES, MUTABLE_SCHEMAS } from './schemas';
 
 /**
  * Truncates the mutable schemas between cases. `config` is left alone: it
@@ -24,7 +24,7 @@ async function mutableTables(): Promise<string[]> {
     );
   }
 
-  tables = rows.map((row) => row.qualified);
+  tables = [...rows.map((row) => row.qualified), ...MUTABLE_CONFIG_TABLES];
   return tables;
 }
 

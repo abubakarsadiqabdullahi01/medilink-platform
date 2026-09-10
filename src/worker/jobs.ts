@@ -1,3 +1,4 @@
+import { screenAllPractitioners } from '../modules/practitioners/application/screening';
 import type { JobHandler } from './scheduler';
 
 /**
@@ -22,8 +23,19 @@ export interface JobDefinition {
 export const HOURLY = 60 * 60;
 export const DAILY = 24 * HOURLY;
 
-export const JOB_DEFINITIONS: JobDefinition[] = [];
+export const JOB_DEFINITIONS: JobDefinition[] = [
+  {
+    key: 'screening.sweep',
+    description:
+      'Re-screen every practitioner against the sanctioned and quack lists. Daily, because the list changes: someone struck off in March was not on it in February.',
+    intervalSeconds: DAILY,
+  },
+];
 
-export const jobs: Record<string, JobHandler> = {};
+export const jobs: Record<string, JobHandler> = {
+  'screening.sweep': async () => {
+    await screenAllPractitioners();
+  },
+};
 
 export type { JobHandler };
