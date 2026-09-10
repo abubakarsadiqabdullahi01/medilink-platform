@@ -575,3 +575,38 @@ enum FacilityStatus {
 
   @@schema("facilities")
 }
+
+// Scheduled jobs. The sweeps Stage 5 needs — credential expiry, sanctions
+// screening, eligibility recomputation — and the ones Stage 7 will need. Runs
+// in the same worker process as the outbox, claimed the same way, because the
+// stack decision is "Postgres outbox plus worker; Redis/BullMQ only if
+// needed" and this needs neither.
+model ScheduledJob {
+  id              String    @id @default(uuid()) @db.Uuid
+  key             String    @unique
+  description     String
+  intervalSeconds Int       @map("interval_seconds")
+  // An operator's off switch: a sweep misbehaving in production is disabled
+  // in one row, without a deploy.
+  enabled         Boolean   @default(true)
+  nextRunAt       DateTime  @default(now()) @map("next_run_at")
+  lastRunAt       DateTime? @map("last_run_at")
+  lastStatus      ScheduledJobStatus? @map("last_status")
+  lastError       String?   @map("last_error")
+  lastDurationMs  Int?      @map("last_duration_ms")
+  failureCount    Int       @default(0) @map("failure_count")
+  runCount        Int       @default(0) @map("run_count")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@index([enabled, nextRunAt])
+  @@map("scheduled_jobs")
+  @@schema("audit")
+}
+
+enum ScheduledJobStatus {
+  SUCCEEDED
+  FAILED
+
+  @@schema("audit")
+}

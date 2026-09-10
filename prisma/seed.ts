@@ -11,6 +11,7 @@
  */
 import { PrismaClient } from '@prisma/client';
 import { PERMISSIONS, ROLE_PERMISSIONS } from '../src/lib/authz/permissions';
+import { JOB_DEFINITIONS } from '../src/worker/jobs';
 
 const prisma = new PrismaClient();
 
@@ -94,6 +95,26 @@ async function seedCredentialTypes() {
       where: { key: type.key },
       update: { ...type, owner: OWNER_COMPLIANCE },
       create: { ...type, owner: OWNER_COMPLIANCE },
+    });
+  }
+}
+
+/**
+ * Scheduled jobs come from JOB_DEFINITIONS so the code and the rows cannot
+ * drift. `enabled` and `nextRunAt` are deliberately not in `update`: an
+ * operator who disables a misbehaving sweep must not have it switched back on
+ * by the next deploy's seed run.
+ */
+async function seedScheduledJobs() {
+  for (const job of JOB_DEFINITIONS) {
+    await prisma.scheduledJob.upsert({
+      where: { key: job.key },
+      update: { description: job.description, intervalSeconds: job.intervalSeconds },
+      create: {
+        key: job.key,
+        description: job.description,
+        intervalSeconds: job.intervalSeconds,
+      },
     });
   }
 }
@@ -199,6 +220,7 @@ async function main() {
   await seedStates();
   await seedHolidays();
   await seedRateFloors();
+  await seedScheduledJobs();
 
   const counts = {
     permissions: await prisma.permission.count(),
@@ -211,6 +233,7 @@ async function main() {
     lgas: await prisma.lga.count(),
     holidays: await prisma.publicHoliday.count(),
     rateFloors: await prisma.rateFloor.count(),
+    scheduledJobs: await prisma.scheduledJob.count(),
   };
   console.log('seed complete', counts);
 }

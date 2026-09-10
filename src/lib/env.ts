@@ -29,8 +29,15 @@ const schema = z.object({
   PAYSTACK_SECRET_KEY: z.string().optional(),
   PAYSTACK_WEBHOOK_SECRET: z.string().optional(),
 
-  NIN_VERIFICATION_PROVIDER: z.enum(['sandbox', 'live', 'none']).default('sandbox'),
+  // Identity and professional-registration checks default to `none` — both
+  // need a paid provider subscription this project does not have, and the
+  // fallback is a compliance officer recording the evidence by hand. See
+  // src/lib/verification/index.ts.
+  NIN_VERIFICATION_PROVIDER: z.enum(['none', 'sandbox', 'live']).default('none'),
   NIN_VERIFICATION_API_KEY: z.string().optional(),
+
+  MDCN_VERIFICATION_PROVIDER: z.enum(['none', 'sandbox', 'live']).default('none'),
+  MDCN_VERIFICATION_API_KEY: z.string().optional(),
 
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 });

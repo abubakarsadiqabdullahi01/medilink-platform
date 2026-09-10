@@ -58,6 +58,8 @@ export const EXEMPT_MODELS: Readonly<Record<string, string>> = {
     'Append-only security evidence in its own right, written by the platform rather than by an actor.',
   LoginAttempt:
     'Append-only evidence of every sign-in attempt, and the input to the lockout throttle. Auditing each failed guess would bury real state changes under noise.',
+  ScheduledJob:
+    'Scheduling bookkeeping, not domain state. A nextRunAt or a failure count is not a decision anyone made; what a sweep actually changed is audited by the sweep itself.',
 };
 
 const MUTATIONS = new Set([
