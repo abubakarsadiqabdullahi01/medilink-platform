@@ -18,6 +18,7 @@ export const APP_SCHEMAS = [
   'credentials',
   'facilities',
   'availability',
+  'service_requests',
 ] as const;
 
 /**

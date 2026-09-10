@@ -49,6 +49,7 @@ export const AUDITED_MODELS: Readonly<Record<string, string>> = {
   SanctionedEntry: 'config.sanctioned_entries',
   AvailabilitySlot: 'availability.availability_slots',
   BlockedPeriod: 'availability.blocked_periods',
+  ServiceRequest: 'service_requests.service_requests',
   CredentialRequirement: 'config.credential_requirements',
 };
 

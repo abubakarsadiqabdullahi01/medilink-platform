@@ -17,7 +17,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-  schemas  = ["identity", "audit", "config", "storage", "practitioners", "credentials", "facilities", "availability"]
+  schemas  = ["identity", "audit", "config", "storage", "practitioners", "credentials", "facilities", "availability", "service_requests"]
 }
 
 // ---------------------------------------------------------------- identity
@@ -301,6 +301,7 @@ model ProfessionalCategory {
 
   specialties Specialty[]
   credentialRequirements CredentialRequirement[]
+  serviceRequests ServiceRequest[]
   practitionerProfiles PractitionerProfile[]
 
   @@map("professional_categories")
@@ -318,6 +319,7 @@ model Specialty {
 
   category ProfessionalCategory @relation(fields: [categoryId], references: [id])
   practitionerProfiles PractitionerProfile[]
+  serviceRequests ServiceRequest[]
 
   @@map("specialties")
   @@schema("config")
@@ -572,6 +574,8 @@ model Facility {
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
+
+  serviceRequests ServiceRequest[]
 
   facilityType FacilityType @relation(fields: [facilityTypeId], references: [id])
   state        State        @relation(fields: [stateId], references: [id])
@@ -887,4 +891,80 @@ model BlockedPeriod {
   @@index([userId, startsAt])
   @@map("blocked_periods")
   @@schema("availability")
+}
+
+// ---------------------------------------------------------- service requests
+
+// Step 6.1. A facility's stated need: who, when, at what rate, and on what
+// cancellation terms.
+model ServiceRequest {
+  id                     String  @id @default(uuid()) @db.Uuid
+  facilityId             String  @map("facility_id") @db.Uuid
+  professionalCategoryId String  @map("professional_category_id") @db.Uuid
+  specialtyId            String? @map("specialty_id") @db.Uuid
+
+  shiftType ShiftType @map("shift_type")
+  startsAt  DateTime  @map("starts_at")
+  endsAt    DateTime  @map("ends_at")
+  // Facilities staff wards in threes. The request stays open until this many
+  // assignments are confirmed against it.
+  headcount Int       @default(1)
+
+  // Integer kobo, never a float (rule 3). Checked against config.rate_floors
+  // at creation and again at publish, because a floor can move in between.
+  hourlyRateKobo Int    @map("hourly_rate_kobo")
+  currency       String @default("NGN")
+
+  urgency           RequestUrgency @default(ROUTINE)
+  cancellationTerms String         @map("cancellation_terms")
+  notes             String?
+
+  status             ServiceRequestStatus @default(DRAFT)
+  createdBy          String               @map("created_by") @db.Uuid
+  publishedBy        String?              @map("published_by") @db.Uuid
+  publishedAt        DateTime?            @map("published_at")
+  cancelledAt        DateTime?            @map("cancelled_at")
+  cancellationReason String?              @map("cancellation_reason")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  facility             Facility             @relation(fields: [facilityId], references: [id])
+  professionalCategory ProfessionalCategory @relation(fields: [professionalCategoryId], references: [id])
+  specialty            Specialty?           @relation(fields: [specialtyId], references: [id])
+
+  @@index([status, startsAt])
+  @@index([facilityId, status])
+  @@map("service_requests")
+  @@schema("service_requests")
+}
+
+// Uppercase here, lowercase in config.rate_floors.shift_type, which predates
+// this model. The lookup lowercases; see domain/rate-floor.ts.
+enum ShiftType {
+  DAY
+  NIGHT
+
+  @@schema("service_requests")
+}
+
+enum RequestUrgency {
+  ROUTINE
+  URGENT
+  EMERGENCY
+
+  @@schema("service_requests")
+}
+
+enum ServiceRequestStatus {
+  DRAFT
+  PUBLISHED
+  // Headcount reached. Still readable, no longer matchable.
+  FILLED
+  CANCELLED
+  // The shift started and it was never filled.
+  EXPIRED
+
+  @@schema("service_requests")
 }

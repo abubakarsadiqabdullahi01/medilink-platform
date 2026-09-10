@@ -2,4 +2,7 @@
 // src/lib/authz/permissions.ts; this file records which ones service requests uses.
 import type { Permission } from '@/lib/authz/permissions';
 
-export const MODULE_PERMISSIONS: Permission[] = [];
+export const MODULE_PERMISSIONS: Permission[] = [
+  'service_request.read',
+  'service_request.publish',
+];
