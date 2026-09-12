@@ -23,4 +23,42 @@ export const ROUTES: RouteDefinition[] = [
     permission: 'service_request.read',
     scopeType: 'FACILITY',
   },
+  {
+    method: 'POST',
+    path: '/api/v1/service-requests/:id/invite',
+    permission: 'assignment.confirm',
+    scopeType: 'FACILITY',
+  },
+  {
+    method: 'POST',
+    path: '/api/v1/service-requests/:id/confirm',
+    permission: 'assignment.confirm',
+    scopeType: 'FACILITY',
+  },
+  // The practitioner's own side: answering, and seeing what they hold.
+  {
+    method: 'GET',
+    path: '/api/v1/invitations',
+    permission: 'service_request.read',
+    scopeType: 'SELF',
+  },
+  {
+    method: 'POST',
+    path: '/api/v1/invitations/:id/respond',
+    permission: 'service_request.read',
+    scopeType: 'SELF',
+  },
+  { method: 'GET', path: '/api/v1/assignments', permission: 'service_request.read', scopeType: 'SELF' },
+  {
+    method: 'GET',
+    path: '/api/v1/assignments',
+    permission: 'service_request.read',
+    scopeType: 'FACILITY',
+  },
+  {
+    method: 'POST',
+    path: '/api/v1/assignments/:id/cancel',
+    permission: 'assignment.cancel',
+    scopeType: 'FACILITY',
+  },
 ];

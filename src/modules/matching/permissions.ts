@@ -4,4 +4,8 @@ import type { Permission } from '@/lib/authz/permissions';
 
 // Running a match puts names in front of a facility, so it sits with the
 // permission to confirm one rather than with the permission to read requests.
-export const MODULE_PERMISSIONS: Permission[] = ['assignment.confirm', 'service_request.read'];
+export const MODULE_PERMISSIONS: Permission[] = [
+  'assignment.confirm',
+  'assignment.cancel',
+  'service_request.read',
+];

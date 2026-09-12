@@ -70,6 +70,8 @@ export const EXEMPT_MODELS: Readonly<Record<string, string>> = {
     'Append-only evidence of every sign-in attempt, and the input to the lockout throttle. Auditing each failed guess would bury real state changes under noise.',
   ScheduledJob:
     'Scheduling bookkeeping, not domain state. A nextRunAt or a failure count is not a decision anyone made; what a sweep actually changed is audited by the sweep itself.',
+  NotificationMessage:
+    'A record of a message that was sent, written by the platform rather than by an actor — the same shape as audit.security_events. The state change that caused it is audited where it happened.',
   MatchRun:
     'The record of a computation, not a state change. A match run alters nothing; the run itself is audited once as matching.run, and the rows are its output rather than decisions taken.',
   MatchCandidate:

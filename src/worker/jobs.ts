@@ -2,6 +2,7 @@ import { screenAllPractitioners } from '../modules/practitioners/application/scr
 import { activateEligiblePractitioners } from '../modules/practitioners/application/eligibility';
 import { expireRegistrations } from '../modules/practitioners/application/expiry';
 import { expireCredentials } from '../modules/credentials/application/expiry';
+import { expireStartedRequests } from '../modules/service-requests/application/expiry';
 import type { JobHandler } from './scheduler';
 
 /**
@@ -51,9 +52,18 @@ export const JOB_DEFINITIONS: JobDefinition[] = [
       'Promote UNDER_REVIEW practitioners to ACTIVE once every eligibility requirement is satisfied. Daily: nothing activates an account synchronously, so this is the only thing that does.',
     intervalSeconds: DAILY,
   },
+  {
+    key: 'service_request.expiry_sweep',
+    description:
+      'Close published requests whose shift has already started, and withdraw any invitation still awaiting an answer. Hourly, because a stale request keeps appearing in lists and distorts the fill-rate metric.',
+    intervalSeconds: HOURLY,
+  },
 ];
 
 export const jobs: Record<string, JobHandler> = {
+  'service_request.expiry_sweep': async () => {
+    await expireStartedRequests();
+  },
   'screening.sweep': async () => {
     await screenAllPractitioners();
   },

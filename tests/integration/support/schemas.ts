@@ -20,6 +20,7 @@ export const APP_SCHEMAS = [
   'availability',
   'service_requests',
   'matching',
+  'notifications',
 ] as const;
 
 /**

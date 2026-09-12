@@ -17,7 +17,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-  schemas  = ["identity", "audit", "config", "storage", "practitioners", "credentials", "facilities", "availability", "service_requests", "matching"]
+  schemas  = ["identity", "audit", "config", "storage", "practitioners", "credentials", "facilities", "availability", "service_requests", "matching", "notifications"]
 }
 
 // ---------------------------------------------------------------- identity
@@ -1105,4 +1105,30 @@ model AssignmentStatusHistory {
   @@index([assignmentId, createdAt])
   @@map("assignment_status_history")
   @@schema("matching")
+}
+
+// -------------------------------------------------------------- notifications
+
+// Step 6.5 requires that both parties are notified on confirmation, and an
+// assertion about a record is worth more than one about a mock. Delivery goes
+// through the existing SMS adapter; this is what was sent, to whom, and when.
+model NotificationMessage {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  channel     String
+  kind        String
+  // Masked, never the full number: this table is read by more people than
+  // identity.users is, for the same reason the audit trail carries no NIN.
+  recipient   String
+  body        String
+  relatedType String?   @map("related_type")
+  relatedId   String?   @map("related_id") @db.Uuid
+  sentAt      DateTime? @map("sent_at")
+  failureReason String? @map("failure_reason")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@index([userId, createdAt])
+  @@index([relatedType, relatedId])
+  @@map("messages")
+  @@schema("notifications")
 }

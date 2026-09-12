@@ -50,6 +50,22 @@ as failed. It means a deploy dropped the code but not the row, and the sweep
 it names is silently not happening — which is precisely the failure that would
 otherwise go unnoticed for months.
 
+## A trap worth knowing
+
+The worker container keeps its **own** `node_modules` volume. Running
+`prisma migrate dev` inside `web` regenerates *web's* client, not the
+worker's — so after a migration adds a model, every sweep touching it fails
+with `Cannot read properties of undefined (reading 'findMany')` until you run
+
+```bash
+docker compose exec worker pnpm prisma generate
+docker compose restart worker
+```
+
+This is not hypothetical: `service_request.expiry_sweep` failed exactly this
+way on its first real run, while the four older sweeps carried on succeeding
+because they only touch models the worker's client already knew.
+
 ## Not in this stage
 
 - **No alerting.** `failureCount` and `lastError` are recorded and nothing
