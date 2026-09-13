@@ -17,7 +17,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-  schemas  = ["identity", "audit", "config", "storage", "practitioners", "credentials", "facilities", "availability", "service_requests", "matching", "notifications"]
+  schemas  = ["identity", "audit", "config", "storage", "practitioners", "credentials", "facilities", "availability", "service_requests", "matching", "notifications", "attendance", "timesheets"]
 }
 
 // ---------------------------------------------------------------- identity
@@ -48,6 +48,7 @@ model User {
   screeningResult ScreeningResult?
   availabilitySlots AvailabilitySlot[]
   assignments       Assignment[]
+  checkInEvents     CheckInEvent[]
   blockedPeriods    BlockedPeriod[]
   professionalRegistrations ProfessionalRegistration[]
 
@@ -1067,6 +1068,7 @@ model Assignment {
   serviceRequest ServiceRequest            @relation(fields: [serviceRequestId], references: [id])
   user           User                      @relation(fields: [userId], references: [id])
   history        AssignmentStatusHistory[]
+  attendance     AttendanceRecord?
 
   // A practitioner is confirmed onto a given request once.
   @@unique([serviceRequestId, userId])
@@ -1131,4 +1133,178 @@ model NotificationMessage {
   @@index([relatedType, relatedId])
   @@map("messages")
   @@schema("notifications")
+}
+
+// ------------------------------------------------------------- attendance
+
+// Step 7.1. One record per assignment, carrying the nine states of Section
+// 9.16. Every transition goes through domain/state-machine.ts, which is what
+// makes "attendance cannot reach an illegal state through any code path" a
+// property of the code rather than a hope.
+model AttendanceRecord {
+  id           String           @id @default(uuid()) @db.Uuid
+  assignmentId String           @unique @map("assignment_id") @db.Uuid
+  status       AttendanceState  @default(NOT_STARTED)
+
+  checkedInAt  DateTime? @map("checked_in_at")
+  checkedOutAt DateTime? @map("checked_out_at")
+  // Unpaid time within the shift, deducted before hours are billed.
+  breakMinutes Int       @default(0) @map("break_minutes")
+
+  submittedAt DateTime? @map("submitted_at")
+  submittedBy String?   @map("submitted_by") @db.Uuid
+  reviewedAt  DateTime? @map("reviewed_at")
+  reviewedBy  String?   @map("reviewed_by") @db.Uuid
+  // Mandatory on a rejection; a rejection nobody can act on is worse than none.
+  reviewNotes String?   @map("review_notes")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  assignment Assignment     @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  events     CheckInEvent[]
+  tokens     CheckInToken[]
+  timesheet  Timesheet?
+
+  @@index([status])
+  @@map("attendance_records")
+  @@schema("attendance")
+}
+
+enum AttendanceState {
+  NOT_STARTED
+  CHECK_IN_PENDING
+  CHECKED_IN
+  CHECKED_OUT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  // Module 14 is Stage 8; nothing moves a record out of here yet.
+  DISPUTED
+  MANUALLY_CORRECTED
+
+  @@schema("attendance")
+}
+
+// Append-only. The record holds the current state; this holds how it got
+// there, which is what a dispute months later actually needs.
+model CheckInEvent {
+  id                 String            @id @default(uuid()) @db.Uuid
+  attendanceRecordId String            @map("attendance_record_id") @db.Uuid
+  kind               CheckInEventKind
+  method             CheckInMethod
+  actorId            String            @map("actor_id") @db.Uuid
+  occurredAt         DateTime          @map("occurred_at")
+  recordedAt         DateTime          @default(now()) @map("recorded_at")
+  // Mandatory for a MANUAL method: step 7.3's whole point.
+  reason             String?
+  deviceLabel        String?           @map("device_label")
+
+  attendanceRecord AttendanceRecord @relation(fields: [attendanceRecordId], references: [id], onDelete: Cascade)
+  actor            User             @relation(fields: [actorId], references: [id])
+
+  @@index([attendanceRecordId, recordedAt])
+  @@map("checkin_events")
+  @@schema("attendance")
+}
+
+enum CheckInEventKind {
+  CHECK_IN
+  CHECK_OUT
+
+  @@schema("attendance")
+}
+
+enum CheckInMethod {
+  // The six-digit code a supervisor reads out.
+  SUPERVISOR_CODE
+  // The same secret, scanned.
+  QR
+  // No token could be exchanged; a supervisor recorded it afterwards.
+  MANUAL
+
+  @@schema("attendance")
+}
+
+// The short-lived secret behind both the supervisor code and the QR — see
+// domain/check-in-token.ts. Stored as an HMAC keyed with SESSION_SECRET, for
+// the reason one-time codes are: six digits is reversible under a bare hash.
+model CheckInToken {
+  id                 String           @id @default(uuid()) @db.Uuid
+  attendanceRecordId String           @map("attendance_record_id") @db.Uuid
+  purpose            CheckInEventKind
+  codeHash           String           @map("code_hash")
+  expiresAt          DateTime         @map("expires_at")
+  attempts           Int              @default(0)
+  consumedAt         DateTime?        @map("consumed_at")
+  issuedBy           String           @map("issued_by") @db.Uuid
+  createdAt          DateTime         @default(now()) @map("created_at")
+
+  attendanceRecord AttendanceRecord @relation(fields: [attendanceRecordId], references: [id], onDelete: Cascade)
+
+  @@index([attendanceRecordId, purpose, consumedAt])
+  @@map("checkin_tokens")
+  @@schema("attendance")
+}
+
+// ------------------------------------------------------------- timesheets
+
+// Step 7.4. Hours are classified into bands and priced at the rate both
+// parties already agreed on the request. The allowance multipliers for night,
+// weekend and overtime are module 10, which is Stage 8 — inventing them here
+// would be setting commercial terms.
+model Timesheet {
+  id                 String @id @default(uuid()) @db.Uuid
+  attendanceRecordId String @unique @map("attendance_record_id") @db.Uuid
+
+  // Minutes, not hours: an integer avoids the rounding argument entirely, and
+  // a shift is never billed in fractions of a minute.
+  workedMinutes   Int @map("worked_minutes")
+  breakMinutes    Int @map("break_minutes")
+  billableMinutes Int @map("billable_minutes")
+
+  // Bands. They sum to billableMinutes; overtime and holiday overlap the
+  // others by design, so they are recorded separately rather than summed.
+  nightMinutes    Int @map("night_minutes")
+  overtimeMinutes Int @map("overtime_minutes")
+  holidayMinutes  Int @map("holiday_minutes")
+  onCallMinutes   Int @default(0) @map("on_call_minutes")
+
+  // Integer kobo (rule 3), at the request's agreed hourly rate.
+  hourlyRateKobo Int @map("hourly_rate_kobo")
+  amountKobo     Int @map("amount_kobo")
+  currency       String @default("NGN")
+
+  // Bumped by every correction; revisions carry what it was before.
+  revision  Int      @default(1)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  attendanceRecord AttendanceRecord    @relation(fields: [attendanceRecordId], references: [id], onDelete: Cascade)
+  revisions        TimesheetRevision[]
+
+  @@map("timesheets")
+  @@schema("timesheets")
+}
+
+// Step 7.6: "no correction destroys the value it replaces". A correction
+// writes one of these and never overwrites — the previous values, the actor
+// and the reason all survive, linked to the timesheet they belonged to.
+model TimesheetRevision {
+  id          String   @id @default(uuid()) @db.Uuid
+  timesheetId String   @map("timesheet_id") @db.Uuid
+  revision    Int
+  // The whole previous state, not a diff: a diff can only be read against a
+  // history nobody kept.
+  previous    Json
+  actorId     String   @map("actor_id") @db.Uuid
+  reason      String
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  timesheet Timesheet @relation(fields: [timesheetId], references: [id], onDelete: Cascade)
+
+  @@unique([timesheetId, revision])
+  @@index([timesheetId, createdAt])
+  @@map("timesheet_revisions")
+  @@schema("timesheets")
 }

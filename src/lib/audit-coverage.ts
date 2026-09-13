@@ -52,6 +52,8 @@ export const AUDITED_MODELS: Readonly<Record<string, string>> = {
   ServiceRequest: 'service_requests.service_requests',
   Invitation: 'matching.invitations',
   Assignment: 'matching.assignments',
+  AttendanceRecord: 'attendance.attendance_records',
+  Timesheet: 'timesheets.timesheets',
   CredentialRequirement: 'config.credential_requirements',
 };
 
@@ -70,6 +72,12 @@ export const EXEMPT_MODELS: Readonly<Record<string, string>> = {
     'Append-only evidence of every sign-in attempt, and the input to the lockout throttle. Auditing each failed guess would bury real state changes under noise.',
   ScheduledJob:
     'Scheduling bookkeeping, not domain state. A nextRunAt or a failure count is not a decision anyone made; what a sweep actually changed is audited by the sweep itself.',
+  CheckInEvent:
+    'Append-only evidence of a check-in attempt, in its own right — the state change it caused is audited on the attendance record. The same shape as audit.security_events.',
+  CheckInToken:
+    'A short-lived credential and its attempt counter, not domain state. What the token was used to do is audited where it happened.',
+  TimesheetRevision:
+    'The timesheet audit trail in its own right, with actor and reason as required columns. Auditing the history of an audited change is circular.',
   NotificationMessage:
     'A record of a message that was sent, written by the platform rather than by an actor — the same shape as audit.security_events. The state change that caused it is audited where it happened.',
   MatchRun:

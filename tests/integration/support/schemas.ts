@@ -21,6 +21,8 @@ export const APP_SCHEMAS = [
   'service_requests',
   'matching',
   'notifications',
+  'attendance',
+  'timesheets',
 ] as const;
 
 /**

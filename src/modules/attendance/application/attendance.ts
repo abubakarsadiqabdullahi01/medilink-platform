@@ -1,0 +1,403 @@
+import { prisma, type Tx } from '@/lib/db';
+import { env } from '@/lib/env';
+import { recordAudit } from '@/lib/audit';
+import { publishEvent } from '@/lib/outbox';
+import { EVENTS } from '@/lib/events';
+import {
+  assertTransition,
+  canTransition,
+  type AttendanceState,
+} from '../domain/state-machine';
+import {
+  checkInTokenExpiry,
+  evaluateCheckInToken,
+  generateCheckInCode,
+  hashCheckInCode,
+  parseQrPayload,
+  qrPayload,
+  type CheckInPurpose,
+} from '../domain/check-in-token';
+import { IllegalAttendanceTransition } from '../domain/state-machine';
+import { AttendanceErrors } from '../domain/errors';
+
+/**
+ * Attendance: what actually happened during the shift (steps 7.1–7.3).
+ *
+ * Every status change goes through `assertTransition`, so the state machine
+ * is the only way a record moves and the gate condition — "attendance cannot
+ * reach an illegal state through any code path" — holds by construction
+ * rather than by review.
+ */
+
+export interface AttendanceView {
+  id: string;
+  assignmentId: string;
+  status: AttendanceState;
+  checkedInAt: Date | null;
+  checkedOutAt: Date | null;
+  breakMinutes: number;
+  submittedAt: Date | null;
+  reviewedAt: Date | null;
+  reviewedBy: string | null;
+  reviewNotes: string | null;
+}
+
+interface AttendanceRow extends AttendanceView {
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+function toView(row: AttendanceRow): AttendanceView {
+  return {
+    id: row.id,
+    assignmentId: row.assignmentId,
+    status: row.status,
+    checkedInAt: row.checkedInAt,
+    checkedOutAt: row.checkedOutAt,
+    breakMinutes: row.breakMinutes,
+    submittedAt: row.submittedAt,
+    reviewedAt: row.reviewedAt,
+    reviewedBy: row.reviewedBy,
+    reviewNotes: row.reviewNotes,
+  };
+}
+
+/** Translates the domain's refusal into an HTTP-shaped one. */
+function guardTransition(from: AttendanceState, to: AttendanceState): void {
+  try {
+    assertTransition(from, to);
+  } catch (error) {
+    if (error instanceof IllegalAttendanceTransition) {
+      throw AttendanceErrors.illegalTransition(from, to);
+    }
+    throw error;
+  }
+}
+
+async function loadAssignment(assignmentId: string) {
+  const assignment = await prisma.assignment.findUnique({ where: { id: assignmentId } });
+  if (!assignment) throw AttendanceErrors.assignmentNotFound();
+  return assignment;
+}
+
+/**
+ * Every shift gets a record the first time anybody touches it, rather than
+ * one being created when the assignment is confirmed. A confirmed assignment
+ * nobody ever attends should still be findable as unhonoured (step 7.7), and
+ * that is the sweep's job rather than a row's existence.
+ */
+export async function ensureAttendanceRecord(assignmentId: string): Promise<AttendanceView> {
+  const assignment = await loadAssignment(assignmentId);
+  if (assignment.status !== 'CONFIRMED') throw AttendanceErrors.assignmentNotConfirmed();
+
+  const existing = await prisma.attendanceRecord.findUnique({ where: { assignmentId } });
+  if (existing) return toView(existing);
+
+  const created = await prisma.attendanceRecord.create({ data: { assignmentId } });
+  return toView(created);
+}
+
+export async function getAttendance(assignmentId: string): Promise<AttendanceView> {
+  const record = await prisma.attendanceRecord.findUnique({ where: { assignmentId } });
+  if (!record) throw AttendanceErrors.recordNotFound();
+  return toView(record);
+}
+
+export interface IssueTokenParams {
+  assignmentId: string;
+  purpose: CheckInPurpose;
+  actorId: string;
+}
+
+export interface IssuedToken {
+  /** The six digits a supervisor reads aloud. */
+  code: string;
+  /** The same secret, for a QR image. */
+  qr: string;
+  expiresAt: Date;
+}
+
+/**
+ * The facility issues the token; the practitioner presents it. That direction
+ * is what makes it evidence of presence — a code the practitioner could
+ * generate themselves would prove only that they own a phone.
+ *
+ * The plaintext is returned once, here, and never stored.
+ */
+export async function issueCheckInToken(input: IssueTokenParams): Promise<IssuedToken> {
+  const record = await ensureAttendanceRecord(input.assignmentId);
+
+  const nextStatus: AttendanceState =
+    input.purpose === 'CHECK_IN' ? 'CHECK_IN_PENDING' : record.status;
+
+  if (input.purpose === 'CHECK_IN') {
+    // Re-issuing while already pending is ordinary: a supervisor re-reads the
+    // code because the practitioner mistyped it, or the first one lapsed. The
+    // machine has no self-transitions, so only a real move is guarded.
+    if (record.status !== nextStatus) guardTransition(record.status, nextStatus);
+  } else if (record.status !== 'CHECKED_IN') {
+    throw AttendanceErrors.notCheckedIn();
+  }
+
+  const code = generateCheckInCode();
+  const now = new Date();
+  const expiresAt = checkInTokenExpiry(now);
+
+  await prisma.$transaction(async (tx: Tx) => {
+    // Any token still outstanding for this purpose is superseded, so a stale
+    // code read out earlier cannot be used after a new one is issued.
+    await tx.checkInToken.updateMany({
+      where: { attendanceRecordId: record.id, purpose: input.purpose, consumedAt: null },
+      data: { consumedAt: now },
+    });
+
+    await tx.checkInToken.create({
+      data: {
+        attendanceRecordId: record.id,
+        purpose: input.purpose,
+        codeHash: hashCheckInCode(code, input.assignmentId, input.purpose, env.SESSION_SECRET),
+        expiresAt,
+        issuedBy: input.actorId,
+      },
+    });
+
+    if (input.purpose === 'CHECK_IN' && record.status !== nextStatus) {
+      await tx.attendanceRecord.update({
+        where: { id: record.id },
+        data: { status: nextStatus },
+      });
+    }
+
+    await recordAudit(tx, {
+      action: 'attendance.token_issued',
+      entityType: 'attendance.checkin_tokens',
+      entityId: record.id,
+      actorId: input.actorId,
+      scopeType: 'FACILITY',
+      scopeId: (await loadAssignment(input.assignmentId)).facilityId,
+      // The code itself is never audited — it is a live credential for the
+      // next five minutes.
+      after: { purpose: input.purpose, expiresAt },
+    });
+  });
+
+  return { code, qr: qrPayload(input.assignmentId, input.purpose, code), expiresAt };
+}
+
+export interface PresentTokenParams {
+  assignmentId: string;
+  purpose: CheckInPurpose;
+  /** Either the six digits, or a scanned QR payload. */
+  code: string;
+  userId: string;
+  deviceLabel?: string;
+  occurredAt?: Date;
+}
+
+/**
+ * The practitioner presents the code, by typing it or by scanning. Both
+ * arrive here, because they are the same secret.
+ */
+export async function presentCheckInToken(
+  input: PresentTokenParams,
+): Promise<AttendanceView> {
+  const assignment = await loadAssignment(input.assignmentId);
+  const record = await prisma.attendanceRecord.findUnique({
+    where: { assignmentId: input.assignmentId },
+  });
+  if (!record) throw AttendanceErrors.recordNotFound();
+
+  // A scanned payload carries its own assignment and purpose; a typed code
+  // does not. Either way the digest is derived from all three, so a payload
+  // naming another shift cannot match this record's token.
+  const scanned = parseQrPayload(input.code);
+  const code = scanned?.code ?? input.code.trim();
+  const method = scanned ? 'QR' : 'SUPERVISOR_CODE';
+  if (scanned && (scanned.assignmentId !== input.assignmentId || scanned.purpose !== input.purpose)) {
+    throw AttendanceErrors.tokenInvalid('it was issued for another shift');
+  }
+
+  const now = input.occurredAt ?? new Date();
+  const nextStatus: AttendanceState = input.purpose === 'CHECK_IN' ? 'CHECKED_IN' : 'CHECKED_OUT';
+  guardTransition(record.status, nextStatus);
+
+  if (input.purpose === 'CHECK_OUT' && record.checkedInAt && now <= record.checkedInAt) {
+    throw AttendanceErrors.checkoutBeforeCheckIn();
+  }
+
+  const token = await prisma.checkInToken.findFirst({
+    where: { attendanceRecordId: record.id, purpose: input.purpose },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  const verdict = evaluateCheckInToken(
+    token,
+    hashCheckInCode(code, input.assignmentId, input.purpose, env.SESSION_SECRET),
+    now,
+  );
+
+  if (!verdict.ok) {
+    // The attempt is counted before the caller learns the result, so
+    // abandoning the request mid-flight does not buy a free guess — the same
+    // reasoning consumeOtp already follows.
+    if (token && verdict.reason === 'mismatch') {
+      await prisma.checkInToken.update({
+        where: { id: token.id },
+        data: { attempts: { increment: 1 } },
+      });
+    }
+    throw AttendanceErrors.tokenInvalid(verdict.reason.replace(/_/g, ' '));
+  }
+
+  return prisma.$transaction(async (tx: Tx) => {
+    await tx.checkInToken.updateMany({
+      where: { id: token!.id, consumedAt: null },
+      data: { consumedAt: now },
+    });
+
+    const updated = await tx.attendanceRecord.update({
+      where: { id: record.id },
+      data: {
+        status: nextStatus,
+        ...(input.purpose === 'CHECK_IN' ? { checkedInAt: now } : { checkedOutAt: now }),
+      },
+    });
+
+    await tx.checkInEvent.create({
+      data: {
+        attendanceRecordId: record.id,
+        kind: input.purpose,
+        method,
+        actorId: input.userId,
+        occurredAt: now,
+        deviceLabel: input.deviceLabel,
+      },
+    });
+
+    await recordAudit(tx, {
+      action: input.purpose === 'CHECK_IN' ? 'attendance.checked_in' : 'attendance.checked_out',
+      entityType: 'attendance.attendance_records',
+      entityId: record.id,
+      actorId: input.userId,
+      scopeType: 'SELF',
+      scopeId: assignment.userId,
+      before: toView(record),
+      after: toView(updated),
+    });
+
+    await publishEvent(tx, {
+      eventType: input.purpose === 'CHECK_IN' ? EVENTS.ShiftStarted : EVENTS.ShiftCompleted,
+      aggregateType: 'attendance.attendance_records',
+      aggregateId: record.id,
+      payload: {
+        assignmentId: input.assignmentId,
+        userId: assignment.userId,
+        facilityId: assignment.facilityId,
+        occurredAt: now.toISOString(),
+      },
+    });
+
+    return toView(updated);
+  });
+}
+
+export interface ManualRecordParams {
+  assignmentId: string;
+  actorId: string;
+  checkedInAt: Date;
+  checkedOutAt: Date;
+  breakMinutes?: number;
+  /** Mandatory. Step 7.3 exists so a dispute can read why. */
+  reason: string;
+}
+
+/**
+ * Step 7.3 — the fallback for a facility whose network failed.
+ *
+ * Recorded afterwards by a supervisor, with a mandatory reason, and marked
+ * `MANUALLY_CORRECTED` so nobody later mistakes it for a token-backed
+ * check-in. Both events are written, so the log still says what happened and
+ * when it was recorded — `occurredAt` and `recordedAt` are different columns
+ * for exactly this case.
+ */
+export async function recordManualAttendance(
+  input: ManualRecordParams,
+): Promise<AttendanceView> {
+  if (!input.reason?.trim()) throw AttendanceErrors.manualReasonRequired();
+  if (input.checkedOutAt.getTime() <= input.checkedInAt.getTime()) {
+    throw AttendanceErrors.checkoutBeforeCheckIn();
+  }
+
+  const assignment = await loadAssignment(input.assignmentId);
+  const record = await ensureAttendanceRecord(input.assignmentId);
+  const existing = await prisma.attendanceRecord.findUniqueOrThrow({
+    where: { assignmentId: input.assignmentId },
+  });
+
+  guardTransition(record.status, 'MANUALLY_CORRECTED');
+  const now = new Date();
+
+  return prisma.$transaction(async (tx: Tx) => {
+    const updated = await tx.attendanceRecord.update({
+      where: { id: record.id },
+      data: {
+        status: 'MANUALLY_CORRECTED',
+        checkedInAt: input.checkedInAt,
+        checkedOutAt: input.checkedOutAt,
+        breakMinutes: input.breakMinutes ?? existing.breakMinutes,
+      },
+    });
+
+    for (const [kind, occurredAt] of [
+      ['CHECK_IN', input.checkedInAt],
+      ['CHECK_OUT', input.checkedOutAt],
+    ] as const) {
+      await tx.checkInEvent.create({
+        data: {
+          attendanceRecordId: record.id,
+          kind,
+          method: 'MANUAL',
+          actorId: input.actorId,
+          occurredAt,
+          recordedAt: now,
+          reason: input.reason,
+        },
+      });
+    }
+
+    await recordAudit(tx, {
+      action: 'attendance.recorded_manually',
+      entityType: 'attendance.attendance_records',
+      entityId: record.id,
+      actorId: input.actorId,
+      scopeType: 'FACILITY',
+      scopeId: assignment.facilityId,
+      reason: input.reason,
+      before: toView(existing),
+      after: toView(updated),
+    });
+
+    return toView(updated);
+  });
+}
+
+export async function listCheckInEvents(assignmentId: string) {
+  const record = await prisma.attendanceRecord.findUnique({ where: { assignmentId } });
+  if (!record) throw AttendanceErrors.recordNotFound();
+
+  return prisma.checkInEvent.findMany({
+    where: { attendanceRecordId: record.id },
+    orderBy: { recordedAt: 'asc' },
+    select: {
+      kind: true,
+      method: true,
+      actorId: true,
+      occurredAt: true,
+      recordedAt: true,
+      reason: true,
+      deviceLabel: true,
+    },
+  });
+}
+
+export { canTransition };
