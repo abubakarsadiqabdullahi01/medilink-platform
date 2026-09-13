@@ -125,9 +125,14 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     'suggestion.submit', 'suggestion.triage',
   ],
   compliance_officer: [
+    // facility.read alongside facility.verify: a compliance officer who can
+    // approve a facility and cannot list the ones waiting has a queue they
+    // cannot open. Found by building the console — the API refused the list
+    // while accepting the verify, which no test asked about because no test
+    // needed to see a queue before working it.
     'user.read', 'user.suspend', 'practitioner.profile.read', 'credential.review',
-    'credential.document.read', 'facility.verify', 'sanction.apply', 'incident.manage',
-    'audit.read',
+    'credential.document.read', 'facility.read', 'facility.verify', 'sanction.apply',
+    'incident.manage', 'audit.read',
   ],
   finance_officer: ['invoice.read', 'payout.manage', 'audit.read'],
   super_administrator: Object.keys(PERMISSIONS) as Permission[],
