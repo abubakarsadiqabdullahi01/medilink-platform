@@ -59,6 +59,9 @@ export const AUDITED_MODELS: Readonly<Record<string, string>> = {
   Excusal: 'cancellations_sanctions.excusals',
   Dispute: 'disputes.disputes',
   DisputeEvidence: 'disputes.dispute_evidence',
+  ClinicalIncident: 'clinical_incidents.clinical_incidents',
+  IncidentAttachment: 'clinical_incidents.incident_attachments',
+  AccountSuspension: 'identity.users',
 };
 
 /**

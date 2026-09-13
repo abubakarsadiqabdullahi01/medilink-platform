@@ -20,7 +20,7 @@ internal shape: `domain/`, `application/`, `infrastructure/`, `presentation/`,
 | `billing-settlement` | 12. Billing, ledger and settlement | 8 | Folder only |
 | `cancellations-sanctions` | 13. Cancellations, no-shows and sanctions | 7 | Unhonoured sweep, fault, excusals |
 | `disputes` | 14. Disputes | 8 | Cases, evidence, adjudication |
-| `clinical-incidents` | 15. Clinical incidents | 5 | Folder only |
+| `clinical-incidents` | 15. Clinical incidents | 5 | Reports, review, suspension |
 | `notifications` | 16. Notifications | 4 | SMS adapter + recorded messages |
 | `audit-compliance` | 17. Audit, consent and compliance | 4 | Scoped audit-trail read |
 | `suggestions` | 18. Suggestion log | 9 | Folder only |

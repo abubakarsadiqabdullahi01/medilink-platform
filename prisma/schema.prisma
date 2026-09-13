@@ -17,7 +17,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-  schemas  = ["identity", "audit", "config", "storage", "practitioners", "credentials", "facilities", "availability", "service_requests", "matching", "notifications", "attendance", "timesheets", "cancellations_sanctions", "disputes"]
+  schemas  = ["identity", "audit", "config", "storage", "practitioners", "credentials", "facilities", "availability", "service_requests", "matching", "notifications", "attendance", "timesheets", "cancellations_sanctions", "disputes", "clinical_incidents"]
 }
 
 // ---------------------------------------------------------------- identity
@@ -45,6 +45,7 @@ model User {
   credentialSubmissions CredentialSubmission[]
   representedFacilities Facility[]
   identityVerification IdentityVerification?
+  suspensions   AccountSuspension[]
   screeningResult ScreeningResult?
   availabilitySlots AvailabilitySlot[]
   assignments       Assignment[]
@@ -578,6 +579,7 @@ model Facility {
   deletedAt DateTime? @map("deleted_at")
 
   serviceRequests ServiceRequest[]
+  incidents       ClinicalIncident[]
 
   facilityType FacilityType @relation(fields: [facilityTypeId], references: [id])
   state        State        @relation(fields: [stateId], references: [id])
@@ -1072,6 +1074,7 @@ model Assignment {
   unhonoured     UnhonouredAssignment?
   excusals       Excusal[]
   disputes       Dispute[]
+  incidents      ClinicalIncident[]
 
   // A practitioner is confirmed onto a given request once.
   @@unique([serviceRequestId, userId])
@@ -1511,4 +1514,160 @@ model DisputeEvidence {
   @@index([disputeId, createdAt])
   @@map("dispute_evidence")
   @@schema("disputes")
+}
+
+// -------------------------------------------------------- clinical_incidents
+
+// Module 15. A patient-safety event during or around a shift.
+//
+// **A report is not an accusation.** The patient-safety literature is
+// unanimous that a reporting system which punishes reporters stops receiving
+// reports, and a platform that learns nothing about near misses is worth less
+// than one that never asked. So: near misses are first-class, nothing here is
+// ever deleted, and the practitioner a report names is a `subjectUserId`
+// rather than a defendant. Whether anything follows is a separate decision by
+// somebody with `incident.manage`.
+model ClinicalIncident {
+  id String @id @default(uuid()) @db.Uuid
+
+  // Where it happened. Always known — somebody at a facility is reporting.
+  facilityId String @map("facility_id") @db.Uuid
+
+  // The shift, when there was one. Nullable: an incident found during a
+  // week-later case note review may not be traceable to a single assignment,
+  // and refusing the report because the paperwork is untidy loses the report.
+  assignmentId String? @map("assignment_id") @db.Uuid
+
+  // The practitioner involved, when a report names one. Also nullable: a
+  // medication error found in a shared drug cupboard may involve nobody in
+  // particular, and a system fault is the most valuable kind to hear about.
+  subjectUserId String? @map("subject_user_id") @db.Uuid
+
+  reportedBy String   @map("reported_by") @db.Uuid
+  occurredAt DateTime @map("occurred_at")
+  reportedAt DateTime @default(now()) @map("reported_at")
+
+  severity IncidentSeverity
+  category IncidentCategory
+  summary  String
+
+  status IncidentStatus @default(REPORTED)
+
+  // Filled when compliance closes it. A closure needs an outcome and a
+  // reason, the same rule a dispute resolution and a fault finding follow.
+  outcome     IncidentOutcome?
+  closedBy    String?   @map("closed_by") @db.Uuid
+  closedAt    DateTime? @map("closed_at")
+  closureNotes String?  @map("closure_notes")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  facility    Facility             @relation(fields: [facilityId], references: [id])
+  assignment  Assignment?          @relation(fields: [assignmentId], references: [id])
+  attachments IncidentAttachment[]
+
+  @@index([facilityId, reportedAt])
+  @@index([subjectUserId, reportedAt])
+  @@index([status, severity])
+  @@map("clinical_incidents")
+  @@schema("clinical_incidents")
+}
+
+enum IncidentSeverity {
+  // Nothing reached the patient. The most useful reports and the easiest to
+  // lose, which is why it is first in the list rather than an afterthought.
+  NEAR_MISS
+  MINOR
+  MODERATE
+  SEVERE
+  DEATH
+
+  @@schema("clinical_incidents")
+}
+
+enum IncidentCategory {
+  MEDICATION
+  CLINICAL_PROCEDURE
+  DOCUMENTATION
+  INFECTION_CONTROL
+  EQUIPMENT
+  STAFFING
+  CONDUCT
+  OTHER
+
+  @@schema("clinical_incidents")
+}
+
+enum IncidentStatus {
+  REPORTED
+  UNDER_REVIEW
+  CLOSED
+
+  @@schema("clinical_incidents")
+}
+
+enum IncidentOutcome {
+  // The report was right and the cause was the system, not a person. The
+  // commonest true answer, and the one a blame-first process never reaches.
+  SYSTEM_ISSUE
+  NO_ACTION
+  ADVICE_GIVEN
+  TRAINING_REQUIRED
+  PRACTITIONER_SUSPENDED
+  REFERRED_TO_REGULATOR
+
+  @@schema("clinical_incidents")
+}
+
+// Photographs, drug charts, incident forms. Only the key, per the convention
+// at the top of this schema. Append-only, like dispute evidence.
+model IncidentAttachment {
+  id         String  @id @default(uuid()) @db.Uuid
+  incidentId String  @map("incident_id") @db.Uuid
+  objectKey  String  @map("object_key")
+  attachedBy String  @map("attached_by") @db.Uuid
+  note       String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  incident ClinicalIncident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  @@unique([incidentId, objectKey])
+  @@index([incidentId, createdAt])
+  @@map("incident_attachments")
+  @@schema("clinical_incidents")
+}
+
+// Every suspension and every reinstatement, kept whichever way it went.
+//
+// `identity.users.status` says what a user is now; this says how it got there
+// and why. A suspension with no recorded reason is one nobody can lift with
+// any confidence, and the reinstatement is as much a decision as the
+// suspension was.
+model AccountSuspension {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @map("user_id") @db.Uuid
+
+  reason      String
+  suspendedBy String   @map("suspended_by") @db.Uuid
+  suspendedAt DateTime @default(now()) @map("suspended_at")
+
+  // The incident that caused it, when one did. A suspension can also come
+  // from compliance directly, so this is nullable.
+  incidentId String? @map("incident_id") @db.Uuid
+
+  liftedBy     String?   @map("lifted_by") @db.Uuid
+  liftedAt     DateTime? @map("lifted_at")
+  liftedReason String?   @map("lifted_reason")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, suspendedAt])
+  @@index([liftedAt])
+  @@map("account_suspensions")
+  @@schema("clinical_incidents")
 }
