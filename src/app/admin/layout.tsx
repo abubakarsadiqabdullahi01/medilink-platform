@@ -1,95 +1,85 @@
 'use client';
 
-import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
-import { clsx } from 'clsx';
-import { api } from '@/lib/ui/api';
-import { SessionProvider, useSession } from '@/lib/ui/session';
+import {
+  Building2,
+  FileCheck2,
+  FileClock,
+  Gavel,
+  LayoutDashboard,
+  MessageSquareText,
+  ScrollText,
+  Stethoscope,
+} from 'lucide-react';
+import { SessionProvider } from '@/lib/ui/session';
+import { ConsoleShell, type NavSection } from '@/components/app/console-shell';
 
 /**
- * The console shell.
+ * Operations and compliance: the people who work queues.
  *
- * Every entry names the permission it needs, so the navigation is built from
- * the same question the guard asks rather than from role names that would
- * drift from it. A queue somebody cannot work simply is not offered.
+ * Grouped by what the work *is* rather than by module number, because
+ * somebody clearing a morning's queue thinks "who is waiting to be verified"
+ * and never "module 3".
  */
-const NAV = [
-  { href: '/admin', label: 'Overview', permission: null },
-  { href: '/admin/credentials', label: 'Credentials', permission: 'credential.review' },
-  { href: '/admin/facilities', label: 'Facilities', permission: 'facility.verify' },
-  { href: '/admin/incidents', label: 'Incidents', permission: 'incident.manage' },
-  { href: '/admin/disputes', label: 'Disputes', permission: 'dispute.manage' },
-  { href: '/admin/unhonoured', label: 'Unhonoured shifts', permission: 'sanction.apply' },
-  { href: '/admin/suggestions', label: 'Suggestions', permission: 'suggestion.triage' },
-  { href: '/admin/audit', label: 'Audit trail', permission: 'audit.read' },
-] as const;
-
-function Shell({ children }: { children: React.ReactNode }) {
-  const session = useSession();
-  const pathname = usePathname();
-  const router = useRouter();
-
-  const visible = NAV.filter(
-    (item) => item.permission === null || session.permissions.includes(item.permission),
-  );
-
-  async function signOut() {
-    await api.post('/api/v1/auth/logout').catch(() => undefined);
-    router.push('/login');
-  }
-
-  return (
-    <div className="flex min-h-dvh">
-      <aside className="hidden w-60 shrink-0 border-r bg-surface p-4 md:block">
-        <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-muted">Medilink</p>
-        <p className="mb-6 text-sm font-medium">Operations</p>
-
-        <nav className="space-y-1">
-          {visible.map((item) => {
-            const active = pathname === item.href;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={clsx(
-                  'block rounded px-3 py-2 text-sm',
-                  active ? 'bg-primary text-primary-foreground' : 'hover:bg-border/30',
-                )}
-              >
-                {item.label}
-              </Link>
-            );
-          })}
-        </nav>
-      </aside>
-
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-between border-b bg-surface px-6 py-3">
-          <div className="flex gap-2 overflow-x-auto md:hidden">
-            {visible.map((item) => (
-              <Link key={item.href} href={item.href} className="whitespace-nowrap text-sm">
-                {item.label}
-              </Link>
-            ))}
-          </div>
-          <div className="ml-auto flex items-center gap-4 text-sm">
-            <span className="text-muted">{session.user.fullName}</span>
-            <button onClick={signOut} className="rounded border px-2 py-1 hover:bg-border/30">
-              Sign out
-            </button>
-          </div>
-        </header>
-
-        <main className="min-w-0 flex-1 p-6">{children}</main>
-      </div>
-    </div>
-  );
-}
+const SECTIONS: NavSection[] = [
+  {
+    heading: 'Overview',
+    items: [{ href: '/admin', label: 'Dashboard', icon: LayoutDashboard, permission: null }],
+  },
+  {
+    heading: 'Onboarding',
+    items: [
+      {
+        href: '/admin/credentials',
+        label: 'Credentials',
+        icon: FileCheck2,
+        permission: 'credential.review',
+      },
+      {
+        href: '/admin/facilities',
+        label: 'Facilities',
+        icon: Building2,
+        permission: 'facility.verify',
+      },
+    ],
+  },
+  {
+    heading: 'Casework',
+    items: [
+      {
+        href: '/admin/incidents',
+        label: 'Clinical incidents',
+        icon: Stethoscope,
+        permission: 'incident.manage',
+      },
+      { href: '/admin/disputes', label: 'Disputes', icon: Gavel, permission: 'dispute.manage' },
+      {
+        href: '/admin/unhonoured',
+        label: 'Unhonoured shifts',
+        icon: FileClock,
+        permission: 'sanction.apply',
+      },
+    ],
+  },
+  {
+    heading: 'The pilot',
+    items: [
+      {
+        href: '/admin/suggestions',
+        label: 'Suggestions',
+        icon: MessageSquareText,
+        permission: 'suggestion.triage',
+      },
+      { href: '/admin/audit', label: 'Audit trail', icon: ScrollText, permission: 'audit.read' },
+    ],
+  },
+];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   return (
     <SessionProvider>
-      <Shell>{children}</Shell>
+      <ConsoleShell title="Operations" sections={SECTIONS}>
+        {children}
+      </ConsoleShell>
     </SessionProvider>
   );
 }

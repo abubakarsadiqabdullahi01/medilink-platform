@@ -1,19 +1,19 @@
 'use client';
 
 import { useState } from 'react';
+import { Gavel, TriangleAlert } from 'lucide-react';
 import { api } from '@/lib/ui/api';
-import { useQueue } from '@/lib/ui/queue';
-import {
-  Badge,
-  Button,
-  Card,
-  Empty,
-  ErrorNote,
-  PageHeader,
-  inputClass,
-  toneFor,
-  when,
-} from '@/components/ui/primitives';
+import { useQueue, useQueueAction } from '@/lib/ui/queue';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Label } from '@/components/ui/label';
+import { Separator } from '@/components/ui/separator';
+import { Textarea } from '@/components/ui/textarea';
+import { StatusBadge, humanise } from '@/components/app/status-badge';
+import { Detail, DetailGrid, EmptyState, PageHeader, QueueSkeleton } from '@/components/app/page-shell';
+import { formatAgo, shortId } from '@/components/app/format';
 
 interface Dispute {
   id: string;
@@ -27,94 +27,148 @@ interface Dispute {
   createdAt: string;
 }
 
+const MIN_NOTE = 20;
+
 /**
  * Disputes — module 14.
  *
- * Both outcomes carry a consequence worth stating on the button rather than
- * leaving to be discovered: upholding sends the figures back to be decided
- * again, and dismissing puts the shift back exactly where it was. An
- * adjudicator who does not know which is which will pick wrong.
+ * The two outcomes do different things to the shift, and the buttons say so
+ * rather than leaving it to be learned. An adjudicator working at speed
+ * should not have to remember which of "uphold" and "dismiss" reopens the
+ * figures.
  */
 export default function DisputesPage() {
-  const queue = useQueue<Dispute>(
-    '/api/v1/disputes',
-    (body: never) => (body as { disputes?: Dispute[] }).disputes ?? [],
-  );
+  const queueKey = ['disputes'];
+  const queue = useQueue<Dispute>(queueKey, '/api/v1/disputes', (body) => (body as { disputes?: Dispute[] }).disputes ?? []);
+
   const [notes, setNotes] = useState<Record<string, string>>({});
 
-  async function resolve(id: string, outcome: 'UPHELD' | 'DISMISSED') {
-    await queue.act(() =>
-      api.post(`/api/v1/disputes/${id}/resolve`, { outcome, notes: notes[id]?.trim() }),
-    );
-  }
+  const take = useQueueAction<{ id: string }>({
+    queueKey,
+    run: ({ id }) => api.post(`/api/v1/disputes/${id}/review`),
+    success: 'Case taken',
+  });
 
-  async function take(id: string) {
-    await queue.act(() => api.post(`/api/v1/disputes/${id}/review`));
-  }
+  const resolve = useQueueAction<{ id: string; outcome: 'UPHELD' | 'DISMISSED' }>({
+    queueKey,
+    run: ({ id, outcome }) =>
+      api.post(`/api/v1/disputes/${id}/resolve`, { outcome, notes: notes[id]?.trim() }),
+    success: ({ outcome }) =>
+      outcome === 'UPHELD' ? 'Upheld — the figures go back' : 'Dismissed — the record is restored',
+  });
 
   return (
     <>
       <PageHeader
         title="Disputes"
-        description="A shift the two sides disagree about, after it was decided. Upholding sends the figures back to be decided again; dismissing restores the record exactly as it was."
+        description="A shift the two sides disagree about, after it was decided. You decide who was right; the facility then corrects the timesheet through the ordinary route, so the change is visible in the revisions."
       />
 
-      <ErrorNote error={queue.error} />
-
-      {queue.loading ? (
-        <p className="text-sm text-muted">Loading…</p>
-      ) : queue.rows.length === 0 ? (
-        <Empty>No live cases.</Empty>
+      {queue.isPending ? (
+        <QueueSkeleton />
+      ) : queue.isError ? (
+        <Alert variant="destructive">
+          <TriangleAlert />
+          <AlertDescription>This queue could not be loaded.</AlertDescription>
+        </Alert>
+      ) : queue.data.length === 0 ? (
+        <EmptyState
+          icon={<Gavel />}
+          title="No live cases"
+          description="Every dispute has been resolved or withdrawn."
+        />
       ) : (
         <div className="space-y-4">
-          {queue.rows.map((row) => (
-            <Card key={row.id}>
-              <div className="mb-2 flex flex-wrap gap-2">
-                <Badge tone={row.raisedParty === 'PRACTITIONER' ? 'neutral' : 'warn'}>
-                  raised by {row.raisedParty.toLowerCase()}
-                </Badge>
-                <Badge>{row.category}</Badge>
-                <Badge tone={toneFor(row.status)}>{row.status}</Badge>
-              </div>
+          {queue.data.map((row) => {
+            const note = notes[row.id]?.trim() ?? '';
+            const ready = note.length >= MIN_NOTE;
 
-              <p className="text-sm">{row.reason}</p>
-              <p className="mt-2 text-xs text-muted">
-                Shift {row.assignmentId.slice(0, 8)} · practitioner {row.userId.slice(0, 8)} ·
-                opened {when(row.createdAt)}
-              </p>
+            return (
+              <Card key={row.id}>
+                <CardHeader className="space-y-3 pb-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant={row.raisedParty === 'PRACTITIONER' ? 'info' : 'warning'}>
+                      Raised by the {row.raisedParty.toLowerCase()}
+                    </Badge>
+                    <Badge variant="secondary">{humanise(row.category)}</Badge>
+                    <StatusBadge status={row.status} />
+                    <span className="text-xs text-muted-foreground">
+                      opened {formatAgo(row.createdAt)}
+                    </span>
+                  </div>
+                  <p className="text-sm leading-relaxed">{row.reason}</p>
+                </CardHeader>
 
-              <textarea
-                className={`${inputClass} mt-4`}
-                rows={2}
-                placeholder="What was found. Required, and both sides will read it."
-                value={notes[row.id] ?? ''}
-                onChange={(event) =>
-                  setNotes((current) => ({ ...current, [row.id]: event.target.value }))
-                }
-              />
+                <CardContent className="space-y-4">
+                  <DetailGrid>
+                    <Detail label="Shift">{shortId(row.assignmentId)}</Detail>
+                    <Detail label="Practitioner">{shortId(row.userId)}</Detail>
+                    <Detail label="Facility">{shortId(row.facilityId)}</Detail>
+                  </DetailGrid>
 
-              <div className="mt-3 flex flex-wrap gap-2">
-                {row.status === 'OPEN' ? (
-                  <Button variant="secondary" onClick={() => take(row.id)} disabled={queue.busy}>
-                    Take this case
-                  </Button>
-                ) : null}
-                <Button
-                  onClick={() => resolve(row.id, 'UPHELD')}
-                  disabled={queue.busy || (notes[row.id]?.trim().length ?? 0) < 20}
-                >
-                  Uphold — send the figures back
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => resolve(row.id, 'DISMISSED')}
-                  disabled={queue.busy || (notes[row.id]?.trim().length ?? 0) < 20}
-                >
-                  Dismiss — restore the record
-                </Button>
-              </div>
-            </Card>
-          ))}
+                  <Separator />
+
+                  <div className="space-y-2">
+                    <Label htmlFor={`notes-${row.id}`}>
+                      Your finding{' '}
+                      <span className="font-normal text-muted-foreground">
+                        — required, and both sides will read it
+                      </span>
+                    </Label>
+                    <Textarea
+                      id={`notes-${row.id}`}
+                      rows={3}
+                      placeholder="What the evidence showed."
+                      value={notes[row.id] ?? ''}
+                      onChange={(event) =>
+                        setNotes((current) => ({ ...current, [row.id]: event.target.value }))
+                      }
+                    />
+                    {note.length > 0 && !ready ? (
+                      <p className="text-xs text-muted-foreground">
+                        {MIN_NOTE - note.length} more characters needed.
+                      </p>
+                    ) : null}
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    {row.status === 'OPEN' ? (
+                      <Button
+                        variant="outline"
+                        loading={take.isPending && take.variables?.id === row.id}
+                        onClick={() => take.mutate({ id: row.id })}
+                      >
+                        Take this case
+                      </Button>
+                    ) : null}
+                    <Button
+                      disabled={!ready || resolve.isPending}
+                      loading={
+                        resolve.isPending &&
+                        resolve.variables?.id === row.id &&
+                        resolve.variables?.outcome === 'UPHELD'
+                      }
+                      onClick={() => resolve.mutate({ id: row.id, outcome: 'UPHELD' })}
+                    >
+                      Uphold — send the figures back
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      disabled={!ready || resolve.isPending}
+                      loading={
+                        resolve.isPending &&
+                        resolve.variables?.id === row.id &&
+                        resolve.variables?.outcome === 'DISMISSED'
+                      }
+                      onClick={() => resolve.mutate({ id: row.id, outcome: 'DISMISSED' })}
+                    >
+                      Dismiss — restore the record
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       )}
     </>

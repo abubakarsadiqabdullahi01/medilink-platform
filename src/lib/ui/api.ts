@@ -1,12 +1,10 @@
-'use client';
-
 /**
  * The console's one way of talking to the API.
  *
  * Same origin, so the session cookie goes automatically and nothing here
  * handles a token. `credentials: 'same-origin'` is stated rather than left to
- * the default because the default has changed between browsers before and
- * silently losing the cookie would look like a permissions bug.
+ * the default because the default has changed between browsers before, and
+ * silently losing the cookie would present as a permissions bug.
  */
 
 export interface ApiFailure {
@@ -21,6 +19,20 @@ export class ApiError extends Error {
     super(failure.message);
     this.name = 'ApiError';
   }
+
+  /** Field-level messages from Zod, flattened into something readable. */
+  get fieldMessages(): string[] {
+    const details = this.failure.details as
+      | { fieldErrors?: Record<string, string[]>; formErrors?: string[] }
+      | undefined;
+    if (!details) return [];
+
+    const messages = [...(details.formErrors ?? [])];
+    for (const [field, list] of Object.entries(details.fieldErrors ?? {})) {
+      for (const message of list) messages.push(`${field}: ${message}`);
+    }
+    return messages;
+  }
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -33,7 +45,18 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   });
 
   const text = await response.text();
-  const parsed: unknown = text ? JSON.parse(text) : {};
+  let parsed: unknown = {};
+  try {
+    parsed = text ? JSON.parse(text) : {};
+  } catch {
+    // A non-JSON body means Next served an HTML error page rather than a
+    // route — almost always a new segment the dev server has not picked up.
+    throw new ApiError({
+      code: 'unexpected_response',
+      message: `The server did not return JSON (${response.status}). If this route is new, restart the web container.`,
+      status: response.status,
+    });
+  }
 
   if (!response.ok) {
     const envelope = parsed as { error?: { code: string; message: string; details?: unknown } };
@@ -54,17 +77,9 @@ export const api = {
   patch: <T>(path: string, body?: unknown) => request<T>('PATCH', path, body ?? {}),
 };
 
-/** Turns a Zod field-error payload into something a person can read. */
-export function fieldErrors(error: unknown): string[] {
-  if (!(error instanceof ApiError)) return [];
-  const details = error.failure.details as
-    | { fieldErrors?: Record<string, string[]>; formErrors?: string[] }
-    | undefined;
-  if (!details) return [];
-
-  const messages: string[] = [...(details.formErrors ?? [])];
-  for (const [field, list] of Object.entries(details.fieldErrors ?? {})) {
-    for (const message of list) messages.push(`${field}: ${message}`);
-  }
-  return messages;
+/** The message to show a person, field errors included. */
+export function errorMessage(error: unknown): string {
+  if (!(error instanceof ApiError)) return 'Something went wrong.';
+  const fields = error.fieldMessages;
+  return fields.length > 0 ? `${error.message} ${fields.join('; ')}` : error.message;
 }

@@ -2,8 +2,14 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { api, ApiError } from '@/lib/ui/api';
-import { Button, Card, ErrorNote, Field, inputClass } from '@/components/ui/primitives';
+import { useMutation } from '@tanstack/react-query';
+import { ShieldCheck, TriangleAlert } from 'lucide-react';
+import { api, errorMessage } from '@/lib/ui/api';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
 /**
  * Sign in. The session is a cookie the API sets, so there is nothing to store
@@ -13,66 +19,114 @@ export default function LoginPage() {
   const router = useRouter();
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
 
-  async function submit(event: React.FormEvent) {
-    event.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      await api.post('/api/v1/auth/login', { phone, password });
+  const signIn = useMutation({
+    mutationFn: () => api.post('/api/v1/auth/login', { phone, password }),
+    onSuccess: () => {
       router.push('/admin');
       router.refresh();
-    } catch (caught) {
-      // The API says "those details are not right" without saying which,
-      // because a message that distinguishes them is an account oracle.
-      setError(caught instanceof ApiError ? caught.message : 'Could not sign in.');
-    } finally {
-      setBusy(false);
-    }
-  }
+    },
+  });
 
   return (
-    <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-6">
-      <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-muted">Medilink</p>
-      <h1 className="mb-6 text-2xl font-semibold tracking-tight">Operations console</h1>
+    <main className="grid min-h-dvh lg:grid-cols-2">
+      <div className="flex items-center justify-center px-6 py-12">
+        <div className="w-full max-w-sm">
+          <p className="text-[0.7rem] font-semibold uppercase tracking-widest text-muted-foreground">
+            Medilink
+          </p>
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight">Sign in</h1>
+          <p className="mt-1.5 text-sm text-muted-foreground">
+            Verified healthcare workforce management.
+          </p>
 
-      <Card>
-        <form onSubmit={submit} className="space-y-4">
-          <ErrorNote error={error} />
+          <Card className="mt-6">
+            <CardContent className="pt-6">
+              <form
+                className="space-y-4"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  signIn.mutate();
+                }}
+              >
+                {signIn.isError ? (
+                  <Alert variant="destructive">
+                    <TriangleAlert />
+                    <AlertDescription>{errorMessage(signIn.error)}</AlertDescription>
+                  </Alert>
+                ) : null}
 
-          <Field label="Phone number" hint="The number the account was registered with.">
-            <input
-              className={inputClass}
-              value={phone}
-              onChange={(event) => setPhone(event.target.value)}
-              placeholder="+2348031100001"
-              autoComplete="username"
-              inputMode="tel"
-            />
-          </Field>
+                <div className="space-y-1.5">
+                  <Label htmlFor="phone">Phone number</Label>
+                  <Input
+                    id="phone"
+                    value={phone}
+                    onChange={(event) => setPhone(event.target.value)}
+                    placeholder="+234 803 000 0000"
+                    autoComplete="username"
+                    inputMode="tel"
+                  />
+                </div>
 
-          <Field label="Password">
-            <input
-              className={inputClass}
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              autoComplete="current-password"
-            />
-          </Field>
+                <div className="space-y-1.5">
+                  <Label htmlFor="password">Password</Label>
+                  <Input
+                    id="password"
+                    type="password"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    autoComplete="current-password"
+                  />
+                </div>
 
-          <Button type="submit" disabled={busy || !phone || !password}>
-            {busy ? 'Signing in…' : 'Sign in'}
-          </Button>
-        </form>
-      </Card>
+                <Button
+                  type="submit"
+                  className="w-full"
+                  loading={signIn.isPending}
+                  disabled={!phone || !password}
+                >
+                  Sign in
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
 
-      <p className="mt-4 text-xs text-muted">
-        Locally, <code>scripts/bootstrap-demo.ts</code> creates the operations, compliance and
-        administrator accounts. See <code>docs/end-to-end.md</code>.
-      </p>
+          <p className="mt-6 text-xs leading-relaxed text-muted-foreground">
+            Locally, <code className="rounded bg-muted px-1 py-0.5">bootstrap-demo.ts</code> creates
+            the operations, compliance and administrator accounts. See{' '}
+            <code className="rounded bg-muted px-1 py-0.5">docs/end-to-end.md</code>.
+          </p>
+        </div>
+      </div>
+
+      {/* A panel rather than a hero image: this is a tool, and the useful
+          thing to say beside a login box is what the tool guarantees. */}
+      <div className="hidden bg-primary p-12 text-primary-foreground lg:flex lg:flex-col lg:justify-center">
+        <ShieldCheck className="size-10 opacity-90" />
+        <p className="mt-6 max-w-md text-2xl font-semibold leading-snug tracking-tight">
+          Every decision on this platform has a name and a reason against it.
+        </p>
+        <div className="mt-8 space-y-4 text-sm leading-relaxed text-primary-foreground/85">
+          <Card className="border-white/15 bg-white/10 text-primary-foreground shadow-none">
+            <CardHeader className="p-4">
+              <CardTitle className="text-sm">Nothing closes itself</CardTitle>
+              <CardDescription className="text-primary-foreground/75">
+                No shift is marked a no-show, no credential is approved and no dispute is resolved
+                without a person deciding it.
+              </CardDescription>
+            </CardHeader>
+          </Card>
+          <Card className="border-white/15 bg-white/10 text-primary-foreground shadow-none">
+            <CardHeader className="p-4">
+              <CardTitle className="text-sm">Nothing is overwritten</CardTitle>
+              <CardDescription className="text-primary-foreground/75">
+                A correction keeps what it replaced. A refused excusal stays on the record next to
+                the one that was granted.
+              </CardDescription>
+            </CardHeader>
+          </Card>
+        </div>
+      </div>
     </main>
   );
 }

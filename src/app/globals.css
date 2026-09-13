@@ -2,20 +2,120 @@
 @tailwind components;
 @tailwind utilities;
 
+/**
+ * The shadcn token set, in Medilink's colours.
+ *
+ * The primary is the deep teal already in the manifest and the theme-colour
+ * meta tag, so the installed PWA and the pages agree. The neutrals are warm
+ * rather than the default slate: the greys sit under a lot of clinical white
+ * in this product, and a cold grey next to white reads as "unfinished
+ * wireframe" in a way a warm one does not.
+ */
 @layer base {
   :root {
-    --background: 40 20% 97%;
-    --foreground: 40 14% 13%;
-    --muted: 40 6% 48%;
-    --border: 40 10% 82%;
-    --surface: 0 0% 100%;
+    --background: 40 20% 98%;
+    --foreground: 40 14% 12%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 40 14% 12%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 40 14% 12%;
+
     --primary: 184 82% 22%;
     --primary-foreground: 0 0% 100%;
-    --destructive: 320 58% 40%;
-    --radius: 0.5rem;
+
+    --secondary: 40 12% 94%;
+    --secondary-foreground: 40 14% 20%;
+
+    --muted: 40 12% 94%;
+    --muted-foreground: 40 6% 44%;
+
+    --accent: 184 40% 94%;
+    --accent-foreground: 184 82% 18%;
+
+    --destructive: 358 68% 46%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Severity and outcome colours, named for what they mean rather than for
+       what they look like, so a queue badge and a chart agree. */
+    --success: 152 55% 32%;
+    --success-foreground: 0 0% 100%;
+    --warning: 32 88% 42%;
+    --warning-foreground: 0 0% 100%;
+    --info: 214 70% 44%;
+    --info-foreground: 0 0% 100%;
+
+    --border: 40 12% 88%;
+    --input: 40 12% 86%;
+    --ring: 184 82% 30%;
+
+    --radius: 0.625rem;
   }
 
+  .dark {
+    --background: 200 18% 8%;
+    --foreground: 40 12% 94%;
+
+    --card: 200 16% 11%;
+    --card-foreground: 40 12% 94%;
+
+    --popover: 200 16% 11%;
+    --popover-foreground: 40 12% 94%;
+
+    --primary: 184 62% 48%;
+    --primary-foreground: 200 20% 8%;
+
+    --secondary: 200 12% 18%;
+    --secondary-foreground: 40 12% 94%;
+
+    --muted: 200 12% 17%;
+    --muted-foreground: 40 6% 62%;
+
+    --accent: 184 40% 20%;
+    --accent-foreground: 184 60% 82%;
+
+    --destructive: 358 62% 54%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 152 45% 46%;
+    --success-foreground: 200 20% 8%;
+    --warning: 32 78% 54%;
+    --warning-foreground: 200 20% 8%;
+    --info: 214 66% 60%;
+    --info-foreground: 200 20% 8%;
+
+    --border: 200 12% 20%;
+    --input: 200 12% 22%;
+    --ring: 184 62% 44%;
+  }
+}
+
+@layer base {
   * {
-    border-color: hsl(var(--border));
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings:
+      'rlig' 1,
+      'calt' 1;
+  }
+
+  /* Tabular figures everywhere a number is compared to another number. A
+     queue count that jitters as it changes width is a queue count nobody
+     trusts. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer utilities {
+  /* Used by the shell so a long queue scrolls inside the page rather than
+     taking the sidebar with it. */
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
   }
 }

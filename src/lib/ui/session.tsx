@@ -1,20 +1,22 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
+import { Loader2 } from 'lucide-react';
 import { api } from '@/lib/ui/api';
 
 /**
  * Who is signed in and what they may do.
  *
  * The session endpoint returns **permissions rather than roles**, and this
- * carries them through unchanged. The console hides a button because the
+ * carries them through unchanged. The console hides a control because the
  * permission is absent, which is the same question the server asks — a menu
  * built from role names would drift from the guard the first time a bundle
  * changed.
  *
- * Hiding is a courtesy, not a control. Every one of these endpoints refuses
- * the call on its own; nothing here is load-bearing for security.
+ * Hiding is a courtesy, never a control. Every endpoint refuses on its own;
+ * nothing here is load-bearing for security.
  */
 
 export interface SessionUser {
@@ -36,7 +38,7 @@ const SessionContext = createContext<SessionState | null>(null);
 
 export function useSession(): SessionState {
   const session = useContext(SessionContext);
-  if (!session) throw new Error('useSession used outside the console shell');
+  if (!session) throw new Error('useSession used outside a signed-in shell');
   return session;
 }
 
@@ -44,37 +46,46 @@ export function useCan(permission: string): boolean {
   return useSession().permissions.includes(permission);
 }
 
+/**
+ * The scopes a permission is held at.
+ *
+ * A facility user holds their permissions at one or more `FACILITY` scopes,
+ * and the console has to send that id with the request. Reading it off the
+ * grants is what lets a page work for somebody at two hospitals without
+ * asking them which they are.
+ */
+export function useScopeIds(permission: string, scopeType: string): string[] {
+  const session = useSession();
+  return session.grants
+    .filter((grant) => grant.permission === permission && grant.scopeType === scopeType)
+    .map((grant) => grant.scopeId)
+    .filter((id): id is string => Boolean(id));
+}
+
 export function SessionProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
-  const [session, setSession] = useState<SessionState | null>(null);
-  const [checked, setChecked] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    api
-      .get<SessionState>('/api/v1/auth/session')
-      .then((value) => {
-        if (!cancelled) setSession(value);
-      })
-      .catch(() => {
-        if (!cancelled) router.replace('/login');
-      })
-      .finally(() => {
-        if (!cancelled) setChecked(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [router]);
+  const { data, isPending, isError } = useQuery({
+    queryKey: ['session'],
+    queryFn: () => api.get<SessionState>('/api/v1/auth/session'),
+    retry: false,
+    staleTime: 60_000,
+  });
 
-  if (!checked) {
-    return <p className="p-8 text-sm text-muted">Loading…</p>;
+  if (isPending) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center">
+        <Loader2 className="size-5 animate-spin text-muted-foreground" />
+      </div>
+    );
   }
-  if (!session) {
-    // The redirect is already in flight; rendering the console for an instant
-    // with no session would flash empty queues at somebody signing out.
+
+  if (isError || !data) {
+    // Redirect during render is not allowed, so this fires on the next tick
+    // and the shell renders nothing rather than flashing empty queues.
+    queueMicrotask(() => router.replace('/login'));
     return null;
   }
 
-  return <SessionContext.Provider value={session}>{children}</SessionContext.Provider>;
+  return <SessionContext.Provider value={data}>{children}</SessionContext.Provider>;
 }

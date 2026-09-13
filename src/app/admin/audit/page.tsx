@@ -1,7 +1,21 @@
 'use client';
 
+import { ScrollText, TriangleAlert } from 'lucide-react';
 import { useQueue } from '@/lib/ui/queue';
-import { Badge, Card, Empty, ErrorNote, PageHeader, when } from '@/components/ui/primitives';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Card } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { EmptyState, PageHeader } from '@/components/app/page-shell';
+import { formatWhen, shortId } from '@/components/app/format';
 
 interface AuditEntry {
   id: string;
@@ -16,68 +30,84 @@ interface AuditEntry {
 }
 
 /**
- * The audit trail — module 17.
+ * The audit trail — module 17. Read-only, and there is no filter by actor.
  *
- * Read-only, and there is no filter by actor here on purpose. The trail
- * exists to answer "what happened to this record", and a console that made it
- * easy to answer "what has this person been doing all week" is a surveillance
- * tool wearing a compliance badge. Scope and entity are the axes it is meant
- * to be read on.
+ * The trail exists to answer "what happened to this record". A console that
+ * made it easy to answer "what has this person been doing all week" is a
+ * surveillance tool wearing a compliance badge, and the omission is the
+ * design rather than a missing feature.
  */
 export default function AuditPage() {
   const queue = useQueue<AuditEntry>(
+    ['audit'],
     '/api/v1/audit?scopeType=PLATFORM&limit=100',
-    (body: never) => (body as { entries?: AuditEntry[] }).entries ?? [],
+    (body) => (body as { entries?: AuditEntry[] }).entries ?? [],
   );
 
   return (
     <>
       <PageHeader
         title="Audit trail"
-        description="Every state change in the platform, with who made it and why. Nothing here can be edited or deleted, including by the people who can read it."
+        description="Every state change, with who made it and why. Nothing here can be edited or deleted — including by the people who can read it."
       />
 
-      <ErrorNote error={queue.error} />
-
-      {queue.loading ? (
-        <p className="text-sm text-muted">Loading…</p>
-      ) : queue.rows.length === 0 ? (
-        <Empty>Nothing recorded at platform scope yet.</Empty>
+      {queue.isPending ? (
+        <Card className="p-4">
+          <div className="space-y-3">
+            {Array.from({ length: 8 }).map((_, index) => (
+              <Skeleton key={index} className="h-9 w-full" />
+            ))}
+          </div>
+        </Card>
+      ) : queue.isError ? (
+        <Alert variant="destructive">
+          <TriangleAlert />
+          <AlertDescription>The trail could not be loaded.</AlertDescription>
+        </Alert>
+      ) : queue.data.length === 0 ? (
+        <EmptyState icon={<ScrollText />} title="Nothing recorded at platform scope yet" />
       ) : (
-        <Card className="overflow-x-auto p-0">
-          <table className="w-full text-left text-sm">
-            <thead className="border-b bg-border/20">
-              <tr>
-                <th className="px-4 py-2 font-medium">When</th>
-                <th className="px-4 py-2 font-medium">Action</th>
-                <th className="px-4 py-2 font-medium">Record</th>
-                <th className="px-4 py-2 font-medium">Actor</th>
-                <th className="px-4 py-2 font-medium">Reason</th>
-              </tr>
-            </thead>
-            <tbody>
-              {queue.rows.map((row) => (
-                <tr key={row.id} className="border-b last:border-0">
-                  <td className="whitespace-nowrap px-4 py-2 text-xs text-muted">
-                    {when(row.createdAt)}
-                  </td>
-                  <td className="px-4 py-2">
-                    <Badge>{row.action}</Badge>
-                  </td>
-                  <td className="px-4 py-2 text-xs">
-                    <span className="text-muted">{row.entityType}</span>
-                    <br />
-                    {row.entityId.slice(0, 8)}
-                  </td>
-                  <td className="px-4 py-2 text-xs">
-                    {/* No actor is a real answer: a sweep is not a person. */}
-                    {row.actorId ? row.actorId.slice(0, 8) : <span className="text-muted">system</span>}
-                  </td>
-                  <td className="max-w-xs px-4 py-2 text-xs">{row.reason ?? '—'}</td>
-                </tr>
+        <Card>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-[170px]">When</TableHead>
+                <TableHead>Action</TableHead>
+                <TableHead>Record</TableHead>
+                <TableHead className="w-[110px]">Actor</TableHead>
+                <TableHead>Reason</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {queue.data.map((row) => (
+                <TableRow key={row.id}>
+                  <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                    {formatWhen(row.createdAt)}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="secondary" className="font-mono text-[0.7rem]">
+                      {row.action}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-xs">
+                    <span className="block text-muted-foreground">{row.entityType}</span>
+                    <span className="font-mono">{shortId(row.entityId)}</span>
+                  </TableCell>
+                  <TableCell className="font-mono text-xs">
+                    {/* No actor is a real answer: a sweep is not a person, and
+                        a name against a finding nobody made would be worse
+                        than a blank. */}
+                    {row.actorId ? (
+                      shortId(row.actorId)
+                    ) : (
+                      <span className="font-sans italic text-muted-foreground">system</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="max-w-xs text-xs">{row.reason ?? '—'}</TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </Card>
       )}
     </>
