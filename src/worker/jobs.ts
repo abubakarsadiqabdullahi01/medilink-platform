@@ -3,6 +3,7 @@ import { activateEligiblePractitioners } from '../modules/practitioners/applicat
 import { expireRegistrations } from '../modules/practitioners/application/expiry';
 import { expireCredentials } from '../modules/credentials/application/expiry';
 import { expireStartedRequests } from '../modules/service-requests/application/expiry';
+import { sweepUnhonouredAssignments } from '../modules/cancellations-sanctions/application/fault';
 import type { JobHandler } from './scheduler';
 
 /**
@@ -58,11 +59,20 @@ export const JOB_DEFINITIONS: JobDefinition[] = [
       'Close published requests whose shift has already started, and withdraw any invitation still awaiting an answer. Hourly, because a stale request keeps appearing in lists and distorts the fill-rate metric.',
     intervalSeconds: HOURLY,
   },
+  {
+    key: 'assignment.unhonoured_sweep',
+    description:
+      'Flag CONFIRMED assignments whose shift has ended with no sign of attendance, awaiting a fault decision. Hourly, and it decides nothing: an absence has a dozen innocent explanations and the platform cannot tell them apart from a database row.',
+    intervalSeconds: HOURLY,
+  },
 ];
 
 export const jobs: Record<string, JobHandler> = {
   'service_request.expiry_sweep': async () => {
     await expireStartedRequests();
+  },
+  'assignment.unhonoured_sweep': async () => {
+    await sweepUnhonouredAssignments();
   },
   'screening.sweep': async () => {
     await screenAllPractitioners();

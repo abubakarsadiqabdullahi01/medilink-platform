@@ -17,7 +17,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-  schemas  = ["identity", "audit", "config", "storage", "practitioners", "credentials", "facilities", "availability", "service_requests", "matching", "notifications", "attendance", "timesheets"]
+  schemas  = ["identity", "audit", "config", "storage", "practitioners", "credentials", "facilities", "availability", "service_requests", "matching", "notifications", "attendance", "timesheets", "cancellations_sanctions"]
 }
 
 // ---------------------------------------------------------------- identity
@@ -1069,6 +1069,8 @@ model Assignment {
   user           User                      @relation(fields: [userId], references: [id])
   history        AssignmentStatusHistory[]
   attendance     AttendanceRecord?
+  unhonoured     UnhonouredAssignment?
+  excusals       Excusal[]
 
   // A practitioner is confirmed onto a given request once.
   @@unique([serviceRequestId, userId])
@@ -1307,4 +1309,92 @@ model TimesheetRevision {
   @@index([timesheetId, createdAt])
   @@map("timesheet_revisions")
   @@schema("timesheets")
+}
+
+// ------------------------------------------------ cancellations_sanctions
+
+// Step 7.7. A sweep finds assignments nobody honoured; a *person* decides
+// whose fault it was. Nothing closes itself and nothing accuses a
+// practitioner unreviewed — an absence has a dozen innocent explanations, and
+// the platform cannot tell them apart from a database row.
+model UnhonouredAssignment {
+  id           String @id @default(uuid()) @db.Uuid
+  assignmentId String @unique @map("assignment_id") @db.Uuid
+
+  // Why it was flagged, recorded when it was: the shift ended and attendance
+  // never started.
+  shiftEndedAt DateTime @map("shift_ended_at")
+  detectedAt   DateTime @default(now()) @map("detected_at")
+
+  status UnhonouredStatus @default(AWAITING_DECISION)
+
+  // Null until somebody decides. The gate condition is that no unhonoured
+  // assignment reaches a final state without a fault value, and this column
+  // being nullable while `status` is AWAITING_DECISION is what makes the
+  // absence visible rather than implied.
+  fault     Fault?
+  decidedBy String?   @map("decided_by") @db.Uuid
+  decidedAt DateTime? @map("decided_at")
+  reason    String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  assignment Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+
+  @@index([status, detectedAt])
+  @@map("unhonoured_assignments")
+  @@schema("cancellations_sanctions")
+}
+
+enum UnhonouredStatus {
+  AWAITING_DECISION
+  CLOSED
+
+  @@schema("cancellations_sanctions")
+}
+
+enum Fault {
+  PRACTITIONER
+  FACILITY
+  // Neither: the shift did not happen and nobody is answerable for it.
+  // A real outcome, not a way of avoiding the question.
+  NEITHER
+
+  @@schema("cancellations_sanctions")
+}
+
+// Step 7.8. A practitioner asks to be excused; an officer grants or refuses.
+// Not unique per assignment: **both outcomes are retained**, so a refusal is
+// still on the record when a later request is granted. Nothing is deleted and
+// nothing is overwritten.
+model Excusal {
+  id           String @id @default(uuid()) @db.Uuid
+  assignmentId String @map("assignment_id") @db.Uuid
+  requestedBy  String @map("requested_by") @db.Uuid
+  reason       String
+
+  status        ExcusalStatus @default(REQUESTED)
+  decidedBy     String?       @map("decided_by") @db.Uuid
+  decidedAt     DateTime?     @map("decided_at")
+  // Mandatory on a refusal, for the reason a timesheet rejection's is.
+  decisionNotes String?       @map("decision_notes")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  assignment Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+
+  @@index([assignmentId, createdAt])
+  @@index([status])
+  @@map("excusals")
+  @@schema("cancellations_sanctions")
+}
+
+enum ExcusalStatus {
+  REQUESTED
+  GRANTED
+  REFUSED
+
+  @@schema("cancellations_sanctions")
 }

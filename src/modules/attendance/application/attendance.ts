@@ -406,3 +406,25 @@ export async function listCheckInEvents(assignmentId: string) {
 }
 
 export { canTransition };
+
+/**
+ * Which of these assignments show any sign of the shift having happened.
+ *
+ * Exposed as a function rather than as a table to join: the unhonoured sweep
+ * in `cancellations-sanctions` needs to know whether attendance ever started,
+ * and a module never reads another module's tables.
+ *
+ * "Any sign" is deliberately generous — a record still at NOT_STARTED means
+ * nobody touched it, but anything else, including a check-in that was only
+ * ever pending, means somebody was there doing something. A sweep that
+ * accused on a narrower test would be accusing on a network failure.
+ */
+export async function assignmentsWithAttendance(assignmentIds: string[]): Promise<Set<string>> {
+  if (assignmentIds.length === 0) return new Set();
+
+  const rows = await prisma.attendanceRecord.findMany({
+    where: { assignmentId: { in: assignmentIds }, status: { not: 'NOT_STARTED' } },
+    select: { assignmentId: true },
+  });
+  return new Set(rows.map((row) => row.assignmentId));
+}

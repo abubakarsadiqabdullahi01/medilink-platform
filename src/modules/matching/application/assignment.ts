@@ -539,3 +539,91 @@ export async function assignmentHistory(assignmentId: string): Promise<StatusHis
     createdAt: row.createdAt,
   }));
 }
+
+/**
+ * Assignments still CONFIRMED whose shift has already ended.
+ *
+ * The unhonoured sweep in `cancellations-sanctions` starts from this list and
+ * then asks attendance which of them show any sign of having happened. Both
+ * halves go through their own module's application layer.
+ */
+export async function listEndedConfirmedAssignments(before: Date): Promise<AssignmentView[]> {
+  const rows = await prisma.assignment.findMany({
+    where: { status: 'CONFIRMED', endsAt: { lt: before } },
+    orderBy: { endsAt: 'asc' },
+  });
+  return rows.map(toAssignmentView);
+}
+
+/**
+ * Closes an assignment nobody honoured, once a person has decided the fault.
+ *
+ * Practitioner fault is the only thing that produces a NO_SHOW; everything
+ * else lands on CANCELLED. The caller decides which — this only writes it,
+ * with the actor and the reason the history column requires, and publishes
+ * the event when a no-show is what it turned out to be.
+ */
+export async function settleUnhonouredAssignment(input: {
+  assignmentId: string;
+  outcome: Extract<AssignmentStatusValue, 'NO_SHOW' | 'CANCELLED'>;
+  actorId: string;
+  reason: string;
+}): Promise<AssignmentView> {
+  const current = await prisma.assignment.findUnique({ where: { id: input.assignmentId } });
+  if (!current) throw AssignmentErrors.assignmentNotFound();
+
+  const from = current.status as AssignmentStatusValue;
+  if (!canTransitionAssignment(from, input.outcome)) {
+    throw AssignmentErrors.invalidTransition(from, input.outcome);
+  }
+
+  return prisma.$transaction(async (tx: Tx) => {
+    // Compare-and-set on the status we checked, so two officers deciding at
+    // once cannot both write a finding.
+    const applied = await tx.assignment.updateMany({
+      where: { id: input.assignmentId, status: from },
+      data: { status: input.outcome },
+    });
+    if (applied.count !== 1) throw AssignmentErrors.invalidTransition(from, input.outcome);
+
+    const updated = await tx.assignment.findUniqueOrThrow({ where: { id: input.assignmentId } });
+
+    await tx.assignmentStatusHistory.create({
+      data: {
+        assignmentId: input.assignmentId,
+        fromStatus: from,
+        toStatus: input.outcome,
+        actorId: input.actorId,
+        reason: input.reason,
+      },
+    });
+
+    await recordAudit(tx, {
+      action: input.outcome === 'NO_SHOW' ? 'assignment.no_show' : 'assignment.cancelled',
+      entityType: 'matching.assignments',
+      entityId: input.assignmentId,
+      actorId: input.actorId,
+      scopeType: 'FACILITY',
+      scopeId: updated.facilityId,
+      reason: input.reason,
+      before: toAssignmentView(current),
+      after: toAssignmentView(updated),
+    });
+
+    if (input.outcome === 'NO_SHOW') {
+      await publishEvent(tx, {
+        eventType: EVENTS.NoShowRecorded,
+        aggregateType: 'matching.assignments',
+        aggregateId: input.assignmentId,
+        payload: {
+          assignmentId: input.assignmentId,
+          userId: updated.userId,
+          facilityId: updated.facilityId,
+          reason: input.reason,
+        },
+      });
+    }
+
+    return toAssignmentView(updated);
+  });
+}

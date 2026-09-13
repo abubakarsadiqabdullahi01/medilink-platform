@@ -18,7 +18,7 @@ internal shape: `domain/`, `application/`, `infrastructure/`, `presentation/`,
 | `timesheets` | 10. Timesheets | 7 | Hours, submission, approval, revisions |
 | `rates-contracts` | 11. Rates and contracts | 8 | Folder only |
 | `billing-settlement` | 12. Billing, ledger and settlement | 8 | Folder only |
-| `cancellations-sanctions` | 13. Cancellations, no-shows and sanctions | 7 | Folder only |
+| `cancellations-sanctions` | 13. Cancellations, no-shows and sanctions | 7 | Unhonoured sweep, fault, excusals |
 | `disputes` | 14. Disputes | 8 | Folder only |
 | `clinical-incidents` | 15. Clinical incidents | 5 | Folder only |
 | `notifications` | 16. Notifications | 4 | SMS adapter + recorded messages |

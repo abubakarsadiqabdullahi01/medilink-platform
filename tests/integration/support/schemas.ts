@@ -23,6 +23,7 @@ export const APP_SCHEMAS = [
   'notifications',
   'attendance',
   'timesheets',
+  'cancellations_sanctions',
 ] as const;
 
 /**

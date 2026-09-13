@@ -55,6 +55,8 @@ export const AUDITED_MODELS: Readonly<Record<string, string>> = {
   AttendanceRecord: 'attendance.attendance_records',
   Timesheet: 'timesheets.timesheets',
   CredentialRequirement: 'config.credential_requirements',
+  UnhonouredAssignment: 'cancellations_sanctions.unhonoured_assignments',
+  Excusal: 'cancellations_sanctions.excusals',
 };
 
 /**
