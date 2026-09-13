@@ -62,6 +62,7 @@ export const AUDITED_MODELS: Readonly<Record<string, string>> = {
   ClinicalIncident: 'clinical_incidents.clinical_incidents',
   IncidentAttachment: 'clinical_incidents.incident_attachments',
   AccountSuspension: 'identity.users',
+  Suggestion: 'suggestions.suggestions',
 };
 
 /**

@@ -26,6 +26,7 @@ export const APP_SCHEMAS = [
   'cancellations_sanctions',
   'disputes',
   'clinical_incidents',
+  'suggestions',
 ] as const;
 
 /**

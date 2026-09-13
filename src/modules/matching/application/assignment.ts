@@ -13,6 +13,7 @@ import {
   type InvitationStatusValue,
 } from '../domain/assignment';
 import type { AssignmentOutcomes } from '../domain/reliability';
+import { recordDeclineAsSuggestion } from '@/modules/suggestions/application/suggestion';
 
 /**
  * Steps 6.5, 6.6 and 6.7: invitation, acceptance, confirmation — and the
@@ -176,6 +177,18 @@ export async function respondToInvitation(input: RespondParams): Promise<Invitat
       before: toInvitationView(invitation),
       after: toInvitationView(updated),
     });
+
+    // Step 9.5. A decline reason is already a practitioner saying why a shift
+    // did not suit them, which is what the pilot's suggestion log is for —
+    // in this transaction, so a decline and its suggestion are one write or
+    // neither. The practitioner is not recorded as the author: they were
+    // answering an invitation, not filing a suggestion.
+    if (!accepted && input.reason) {
+      await recordDeclineAsSuggestion(tx, {
+        invitationId: updated.id,
+        reason: input.reason,
+      });
+    }
 
     // Accepting is not being confirmed: the facility still decides, which is
     // why there is no event for a decline.

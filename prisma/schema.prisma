@@ -17,7 +17,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-  schemas  = ["identity", "audit", "config", "storage", "practitioners", "credentials", "facilities", "availability", "service_requests", "matching", "notifications", "attendance", "timesheets", "cancellations_sanctions", "disputes", "clinical_incidents"]
+  schemas  = ["identity", "audit", "config", "storage", "practitioners", "credentials", "facilities", "availability", "service_requests", "matching", "notifications", "attendance", "timesheets", "cancellations_sanctions", "disputes", "clinical_incidents", "suggestions"]
 }
 
 // ---------------------------------------------------------------- identity
@@ -1670,4 +1670,83 @@ model AccountSuspension {
   @@index([liftedAt])
   @@map("account_suspensions")
   @@schema("clinical_incidents")
+}
+
+// -------------------------------------------------------------- suggestions
+
+// Module 18, step 9.5. What people said did not work.
+//
+// The pilot's whole purpose is to find out what the specification got wrong,
+// and that only works if there is somewhere for the finding to go that is not
+// a WhatsApp message to the founder. Two sources feed it: somebody typing
+// one, and a decline reason from step 6.5, which is already a practitioner
+// saying why a shift did not suit them.
+model Suggestion {
+  id String @id @default(uuid()) @db.Uuid
+
+  source SuggestionSource @default(USER)
+  // Null for a derived one: an invitation decline has an author, but they
+  // were answering an invitation rather than filing a suggestion, and
+  // attributing it to them would be putting words in their mouth.
+  raisedBy String? @map("raised_by") @db.Uuid
+
+  // What it is about, so the log can be read by theme rather than by date.
+  area SuggestionArea
+  body String
+
+  // Where a derived one came from, e.g. the invitation whose decline reason
+  // this is. Free-form because the sources are in different schemas and a
+  // foreign key to "one of three tables" is not a thing.
+  sourceRef String? @map("source_ref")
+
+  status SuggestionStatus @default(NEW)
+
+  triagedBy String?   @map("triaged_by") @db.Uuid
+  triagedAt DateTime? @map("triaged_at")
+  // Why it was planned, done or declined. A declined suggestion with no
+  // reason is how a pilot teaches people not to bother.
+  response  String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([status, createdAt])
+  @@index([area, createdAt])
+  @@map("suggestions")
+  @@schema("suggestions")
+}
+
+enum SuggestionSource {
+  USER
+  // A decline reason from step 6.5. The comment there says the suggestion
+  // log is built from exactly this.
+  DECLINE_REASON
+
+  @@schema("suggestions")
+}
+
+enum SuggestionArea {
+  ONBOARDING
+  CREDENTIALS
+  MATCHING
+  SCHEDULING
+  ATTENDANCE
+  TIMESHEETS
+  PAYMENTS
+  SUPPORT
+  OTHER
+
+  @@schema("suggestions")
+}
+
+enum SuggestionStatus {
+  NEW
+  TRIAGED
+  PLANNED
+  DONE
+  // Kept, with a reason. Nothing is deleted from a log whose value is that it
+  // records what people actually asked for.
+  DECLINED
+
+  @@schema("suggestions")
 }

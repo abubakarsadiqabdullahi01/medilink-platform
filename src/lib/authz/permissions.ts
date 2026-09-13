@@ -45,6 +45,16 @@ export const PERMISSIONS = {
   'incident.manage': 'Manage a clinical incident, including suspension',
   'audit.read': 'Read the audit trail',
   'config.manage': 'Edit controlled vocabularies and rate floors',
+
+  // Module 18, the pilot's suggestion log. These two are the only keys added
+  // to Section 8.8's catalogue by this codebase, and the reason is that no
+  // existing key fits: submitting a suggestion is something every signed-in
+  // user should be able to do, and there is no "any authenticated user"
+  // permission by design — the guard requires a permission and a scope for
+  // everything. Reusing an unrelated key to avoid the addition would have
+  // made the route table lie about what it authorises.
+  'suggestion.submit': 'Submit a suggestion or a complaint about the platform',
+  'suggestion.triage': 'Triage and respond to the suggestion log',
 } as const;
 
 export type Permission = keyof typeof PERMISSIONS;
@@ -86,12 +96,13 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     'practitioner.profile.read', 'practitioner.profile.write', 'credential.submit',
     'credential.document.read', 'service_request.read', 'attendance.record',
     'timesheet.submit', 'invoice.read', 'payout.account.change', 'dispute.manage',
+    'suggestion.submit',
   ],
   facility_owner: [
     'facility.read', 'facility.write', 'facility.user.manage', 'service_request.read',
     'service_request.publish', 'assignment.confirm', 'assignment.cancel',
     'timesheet.approve', 'invoice.read', 'payout.manage', 'dispute.manage',
-    'incident.report',
+    'incident.report', 'suggestion.submit',
   ],
   facility_administrator: [
     'facility.read', 'facility.write', 'facility.user.manage', 'service_request.read',
@@ -111,6 +122,7 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     'availability.read',
     'user.read', 'practitioner.profile.read', 'facility.read', 'facility.write',
     'service_request.read', 'assignment.confirm', 'assignment.cancel', 'dispute.manage',
+    'suggestion.submit', 'suggestion.triage',
   ],
   compliance_officer: [
     'user.read', 'user.suspend', 'practitioner.profile.read', 'credential.review',
