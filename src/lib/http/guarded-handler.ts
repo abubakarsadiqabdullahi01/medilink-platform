@@ -2,7 +2,7 @@ import { ZodError, type ZodType, type ZodTypeDef } from 'zod';
 import { fail, handleError, ok } from './responses';
 import { contextLogger, requestContextFrom, type RequestContext } from './request-context';
 import { AuthorizationError, requirePermission, type RequestedScope } from '../authz/guard';
-import type { Permission } from '../authz/permissions';
+import { requiresStepUp, type Permission } from '../authz/permissions';
 import { HttpError } from './errors';
 import { requireSession, type CurrentSession } from '@/modules/auth/application/session-service';
 
@@ -88,6 +88,21 @@ export async function handleGuardedRequest<TInput, TOutput>(
 
     const raw = await inputFrom(request, options.source);
     const input = options.schema.parse(mergeRouteParams(raw, routeParams));
+
+    // Step 4.8, checked here rather than per route: the requirement is a
+    // property of the permission, so a route that names one cannot forget it.
+    //
+    // Before the permission check, not after. After it, a `step_up_required`
+    // response would tell the caller they hold the permission — which is
+    // precisely what the 403 below refuses to disclose. Before it, everybody
+    // asking gets the same answer whatever they hold.
+    if (requiresStepUp(options.permission) && !session.stepUpFresh) {
+      throw new HttpError(
+        'step_up_required',
+        'Confirm your password to continue.',
+        401,
+      );
+    }
 
     await requirePermission(session.userId, options.permission, options.scope(input, session));
 

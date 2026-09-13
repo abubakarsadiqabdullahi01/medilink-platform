@@ -12,6 +12,8 @@ import {
   SESSION_COOKIE_NAME,
 } from '../domain/session';
 import { AuthErrors } from '../domain/errors';
+import { lockoutState, LOGIN_FAILURE_WINDOW_SECONDS } from '../domain/lockout';
+import { verifyPassword } from '@/lib/password';
 
 const isProductionLike = env.APP_ENV !== 'local';
 
@@ -163,4 +165,90 @@ export async function revokeAllSessions(input: {
 
     return result.count;
   });
+}
+
+/**
+ * Step 4.8: re-authenticate an existing session, so a step-up permission can
+ * be exercised for the next few minutes.
+ *
+ * A password, not a fresh sign-in. The point is to prove the person at the
+ * keyboard is still the account holder — the risk being an unattended laptop
+ * with a live session — and issuing a new session would discard the one they
+ * are already working in.
+ *
+ * **It shares the login lockout rather than having its own.** Failures are
+ * written as `login_attempts` rows against the same identifier and the same
+ * window is checked before a guess is allowed, because a step-up prompt with
+ * no throttle would simply be a softer door into the same house. There is no
+ * point locking one and leaving the other open.
+ */
+export async function stepUpSession(input: {
+  sessionId: string;
+  userId: string;
+  password: string;
+  ipAddress?: string;
+  now?: Date;
+}): Promise<{ stepUpAt: Date }> {
+  const now = input.now ?? new Date();
+
+  const user = await prisma.user.findUnique({
+    where: { id: input.userId },
+    select: { id: true, phone: true, passwordHash: true },
+  });
+  if (!user?.passwordHash) throw AuthErrors.invalidCredentials();
+
+  const attempts = await prisma.loginAttempt.findMany({
+    where: {
+      identifier: user.phone,
+      createdAt: { gt: new Date(now.getTime() - LOGIN_FAILURE_WINDOW_SECONDS * 1000) },
+    },
+    select: { succeeded: true, createdAt: true },
+  });
+
+  const lock = lockoutState(attempts, now);
+  if (lock.locked) {
+    await prisma.loginAttempt.create({
+      data: {
+        identifier: user.phone,
+        userId: user.id,
+        succeeded: false,
+        reason: 'locked_out',
+        ipAddress: input.ipAddress,
+      },
+    });
+    throw AuthErrors.accountLocked(lock.retryAfterSeconds);
+  }
+
+  const verified = await verifyPassword(user.passwordHash, input.password);
+
+  await prisma.loginAttempt.create({
+    data: {
+      identifier: user.phone,
+      userId: user.id,
+      succeeded: verified,
+      reason: verified ? 'step_up' : 'step_up_bad_password',
+      ipAddress: input.ipAddress,
+    },
+  });
+
+  if (!verified) throw AuthErrors.invalidCredentials();
+
+  await prisma.$transaction(async (tx: Tx) => {
+    await tx.session.update({
+      where: { id: input.sessionId },
+      data: { stepUpAt: now },
+    });
+
+    await recordAudit(tx, {
+      action: 'auth.step_up',
+      entityType: 'identity.sessions',
+      entityId: input.sessionId,
+      actorId: user.id,
+      scopeType: 'SELF',
+      scopeId: user.id,
+      after: { stepUpAt: now.toISOString() },
+    });
+  });
+
+  return { stepUpAt: now };
 }

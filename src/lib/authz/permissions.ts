@@ -50,6 +50,33 @@ export const PERMISSIONS = {
 export type Permission = keyof typeof PERMISSIONS;
 
 /**
+ * Permissions that need a recently re-authenticated session, not merely a
+ * signed-in one. Step 4.8.
+ *
+ * **Declared against the permission, not the route.** A per-route flag is a
+ * thing somebody forgets on the eleventh route; a permission that carries its
+ * own requirement is enforced by `handleGuardedRequest` for every route that
+ * ever names it, including ones not written yet. `payout.account.change` is
+ * here because the catalogue entry above already says so in words — this is
+ * the same statement in a form the code can act on.
+ *
+ * The bar for adding one: an act that moves money to a new destination, or
+ * that hands somebody else the ability to. Both are what a stolen laptop with
+ * an open session is used for, and neither is undone by noticing quickly.
+ */
+export const STEP_UP_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
+  'payout.account.change',
+  // Granting a role is how an attacker with one session gets a durable
+  // second one. It is also rare enough that asking for a password again
+  // costs an administrator seconds a month.
+  'role.grant',
+]);
+
+export function requiresStepUp(permission: Permission): boolean {
+  return STEP_UP_PERMISSIONS.has(permission);
+}
+
+/**
  * Starting bundles. Roles are convenience only — every check in application
  * code names a permission, never a role.
  */
