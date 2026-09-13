@@ -10,4 +10,23 @@ export interface RouteDefinition {
   scopeType: ScopeType;
 }
 
-export const ROUTES: RouteDefinition[] = [];
+/**
+ * Raising is a party's act, so SELF or FACILITY; adjudicating is PLATFORM.
+ * An operations officer holding `dispute.manage` at PLATFORM can resolve a
+ * case and cannot open one — `partyFor` returns null for them, which
+ * `openBlockers` turns into `not_a_party`.
+ */
+export const ROUTES: RouteDefinition[] = [
+  { method: 'POST', path: '/api/v1/assignments/:id/disputes', permission: 'dispute.manage', scopeType: 'SELF' },
+  { method: 'POST', path: '/api/v1/assignments/:id/disputes', permission: 'dispute.manage', scopeType: 'FACILITY' },
+  { method: 'GET', path: '/api/v1/assignments/:id/disputes', permission: 'dispute.manage', scopeType: 'SELF' },
+  { method: 'GET', path: '/api/v1/assignments/:id/disputes', permission: 'dispute.manage', scopeType: 'FACILITY' },
+  { method: 'GET', path: '/api/v1/disputes', permission: 'dispute.manage', scopeType: 'PLATFORM' },
+  { method: 'GET', path: '/api/v1/disputes/:id', permission: 'dispute.manage', scopeType: 'PLATFORM' },
+  { method: 'POST', path: '/api/v1/disputes/:id/review', permission: 'dispute.manage', scopeType: 'PLATFORM' },
+  { method: 'POST', path: '/api/v1/disputes/:id/resolve', permission: 'dispute.manage', scopeType: 'PLATFORM' },
+  { method: 'POST', path: '/api/v1/disputes/:id/withdraw', permission: 'dispute.manage', scopeType: 'SELF' },
+  { method: 'POST', path: '/api/v1/disputes/:id/evidence/upload-url', permission: 'dispute.manage', scopeType: 'SELF' },
+  { method: 'POST', path: '/api/v1/disputes/:id/evidence', permission: 'dispute.manage', scopeType: 'SELF' },
+  { method: 'GET', path: '/api/v1/disputes/:id/evidence', permission: 'dispute.manage', scopeType: 'PLATFORM' },
+];

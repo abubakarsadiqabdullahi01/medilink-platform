@@ -17,7 +17,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-  schemas  = ["identity", "audit", "config", "storage", "practitioners", "credentials", "facilities", "availability", "service_requests", "matching", "notifications", "attendance", "timesheets", "cancellations_sanctions"]
+  schemas  = ["identity", "audit", "config", "storage", "practitioners", "credentials", "facilities", "availability", "service_requests", "matching", "notifications", "attendance", "timesheets", "cancellations_sanctions", "disputes"]
 }
 
 // ---------------------------------------------------------------- identity
@@ -1071,6 +1071,7 @@ model Assignment {
   attendance     AttendanceRecord?
   unhonoured     UnhonouredAssignment?
   excusals       Excusal[]
+  disputes       Dispute[]
 
   // A practitioner is confirmed onto a given request once.
   @@unique([serviceRequestId, userId])
@@ -1159,6 +1160,12 @@ model AttendanceRecord {
   reviewedBy  String?   @map("reviewed_by") @db.Uuid
   // Mandatory on a rejection; a rejection nobody can act on is worse than none.
   reviewNotes String?   @map("review_notes")
+
+  // What the record was in when a dispute was opened over it, so a dismissed
+  // dispute can put it back exactly there rather than guessing. Attendance
+  // owns this because the state machine is attendance's invariant; the
+  // disputes module holds the case, not the record's history.
+  preDisputeStatus AttendanceState? @map("pre_dispute_status")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -1397,4 +1404,111 @@ enum ExcusalStatus {
   REFUSED
 
   @@schema("cancellations_sanctions")
+}
+
+// ----------------------------------------------------------------- disputes
+
+// Module 14. A case opened over a shift that has already been decided —
+// approved or rejected — by whichever party disagrees with the outcome.
+//
+// The case lives here; the attendance record's *state* stays attendance's,
+// reached through its application layer. The two are not the same thing: a
+// dispute can be withdrawn, refused as out of time, or resolved either way,
+// and none of that is the shift's state machine's business.
+model Dispute {
+  id           String @id @default(uuid()) @db.Uuid
+  assignmentId String @map("assignment_id") @db.Uuid
+
+  // Who is complaining, and on which side. The party matters at resolution:
+  // a practitioner disputing their hours and a facility disputing them are
+  // the same case shape with opposite interests.
+  raisedBy    String        @map("raised_by") @db.Uuid
+  raisedParty DisputeParty  @map("raised_party")
+  category    DisputeCategory
+  reason      String
+
+  status  DisputeStatus  @default(OPEN)
+  outcome DisputeOutcome?
+
+  // Null until somebody adjudicates. A dispute cannot be resolved without an
+  // outcome and a reason, the same shape as a fault determination.
+  resolvedBy      String?   @map("resolved_by") @db.Uuid
+  resolvedAt      DateTime? @map("resolved_at")
+  resolutionNotes String?   @map("resolution_notes")
+
+  withdrawnAt DateTime? @map("withdrawn_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  assignment Assignment        @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  evidence   DisputeEvidence[]
+
+  // Not unique per assignment: a shift can be disputed again after a
+  // dismissal, on new evidence. Only one may be open at a time, which is the
+  // application layer's rule because a partial index is not expressible here.
+  @@index([assignmentId, createdAt])
+  @@index([status, createdAt])
+  @@map("disputes")
+  @@schema("disputes")
+}
+
+enum DisputeParty {
+  PRACTITIONER
+  FACILITY
+
+  @@schema("disputes")
+}
+
+enum DisputeCategory {
+  // The times or the break are wrong.
+  HOURS
+  // The hours are right and the money is not.
+  PAY
+  // The shift did not happen as agreed: cover never arrived, ward was shut.
+  NON_ATTENDANCE
+  CONDUCT
+  OTHER
+
+  @@schema("disputes")
+}
+
+enum DisputeStatus {
+  OPEN
+  UNDER_REVIEW
+  RESOLVED
+  // Withdrawn by the party that raised it. Kept, not deleted.
+  WITHDRAWN
+
+  @@schema("disputes")
+}
+
+enum DisputeOutcome {
+  // The complaint was right: the figures go back to be decided again.
+  UPHELD
+  // The complaint was not made out: the record returns to where it was.
+  DISMISSED
+
+  @@schema("disputes")
+}
+
+// Evidence attached to a case. The file itself lives in Tigris under the
+// `dispute_evidence` purpose; only its key and metadata are here, per the
+// convention at the top of this schema.
+model DisputeEvidence {
+  id         String @id @default(uuid()) @db.Uuid
+  disputeId  String @map("dispute_id") @db.Uuid
+  objectKey  String @map("object_key")
+  // Who attached it. Either party may, and a reader needs to know which.
+  attachedBy String @map("attached_by") @db.Uuid
+  note       String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  dispute Dispute @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+
+  @@unique([disputeId, objectKey])
+  @@index([disputeId, createdAt])
+  @@map("dispute_evidence")
+  @@schema("disputes")
 }

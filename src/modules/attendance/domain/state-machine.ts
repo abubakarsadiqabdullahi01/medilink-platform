@@ -35,6 +35,11 @@ export type AttendanceState = (typeof ATTENDANCE_STATES)[number];
  * `APPROVED` is terminal except for a dispute. A shift that has been approved
  * and paid cannot quietly become something else; the only way back is a
  * dispute, which is a visible act with a case attached.
+ *
+ * `DISPUTED` leads back to three places rather than one, because a dispute has
+ * more than one honest ending: upheld, and the figures are decided again;
+ * dismissed, and the record returns to whichever of `APPROVED` or `REJECTED`
+ * it was in when the case was opened.
  */
 const TRANSITIONS: Record<AttendanceState, readonly AttendanceState[]> = {
   NOT_STARTED: ['CHECK_IN_PENDING', 'MANUALLY_CORRECTED'],
@@ -47,9 +52,11 @@ const TRANSITIONS: Record<AttendanceState, readonly AttendanceState[]> = {
   APPROVED: ['DISPUTED'],
   // A rejected record goes back for correction and is submitted again.
   REJECTED: ['MANUALLY_CORRECTED', 'SUBMITTED', 'DISPUTED'],
-  // Where a dispute lands is module 14's business, in Stage 8. Nothing moves
-  // a record out of here yet, and the empty list says so.
-  DISPUTED: [],
+  // Module 14, Stage 8. A dispute that is upheld sends the record back to be
+  // decided again; one that is dismissed puts it back exactly where it was,
+  // which is why the attendance record remembers what that was. Nothing here
+  // says which of the three is right — the dispute's outcome does.
+  DISPUTED: ['SUBMITTED', 'APPROVED', 'REJECTED'],
   MANUALLY_CORRECTED: ['SUBMITTED'],
 };
 
@@ -61,7 +68,16 @@ export function allowedTransitionsFrom(state: AttendanceState): readonly Attenda
   return TRANSITIONS[state];
 }
 
-/** States from which no further move is defined. */
+/**
+ * States from which no further move is defined.
+ *
+ * There are none, and that is the honest answer rather than an oversight: an
+ * approved shift can be disputed and a dispute resolves back into the machine,
+ * so no attendance record is ever permanently frozen. What stops a record
+ * cycling forever is the dispute module's policy — one open case at a time —
+ * not the machine, which describes what is possible rather than what is
+ * allowed.
+ */
 export function isTerminal(state: AttendanceState): boolean {
   return TRANSITIONS[state].length === 0;
 }

@@ -428,3 +428,106 @@ export async function assignmentsWithAttendance(assignmentIds: string[]): Promis
   });
   return new Set(rows.map((row) => row.assignmentId));
 }
+
+/**
+ * Module 14 opens a case; this is what that does to the shift.
+ *
+ * Only `APPROVED` and `REJECTED` can be disputed — the machine says so — and
+ * the state the record was in is remembered here rather than in the dispute,
+ * because putting it back is attendance's invariant and not the case file's.
+ */
+export async function openDispute(input: {
+  assignmentId: string;
+  actorId: string;
+  reason: string;
+}): Promise<AttendanceView> {
+  const record = await prisma.attendanceRecord.findUnique({
+    where: { assignmentId: input.assignmentId },
+  });
+  if (!record) throw AttendanceErrors.recordNotFound();
+
+  const assignment = await loadAssignment(input.assignmentId);
+  const from = record.status as AttendanceState;
+  guardTransition(from, 'DISPUTED');
+
+  return prisma.$transaction(async (tx: Tx) => {
+    const applied = await tx.attendanceRecord.updateMany({
+      where: { id: record.id, status: from },
+      data: { status: 'DISPUTED', preDisputeStatus: from },
+    });
+    if (applied.count !== 1) throw AttendanceErrors.illegalTransition(from, 'DISPUTED');
+
+    const updated = await tx.attendanceRecord.findUniqueOrThrow({ where: { id: record.id } });
+
+    await recordAudit(tx, {
+      action: 'attendance.disputed',
+      entityType: 'attendance.attendance_records',
+      entityId: record.id,
+      actorId: input.actorId,
+      scopeType: 'FACILITY',
+      scopeId: assignment.facilityId,
+      reason: input.reason,
+      before: { status: from },
+      after: { status: updated.status, preDisputeStatus: updated.preDisputeStatus },
+    });
+
+    return toView(updated);
+  });
+}
+
+/**
+ * And this is what resolving one does.
+ *
+ * Upheld sends the figures back to be decided again, because a complaint that
+ * was right means the record is wrong and somebody has to say what it should
+ * be. Dismissed puts it back exactly where it was — which is only possible
+ * because `preDisputeStatus` was written when the case opened.
+ */
+export async function closeDispute(input: {
+  assignmentId: string;
+  actorId: string;
+  outcome: 'UPHELD' | 'DISMISSED';
+  reason: string;
+}): Promise<AttendanceView> {
+  const record = await prisma.attendanceRecord.findUnique({
+    where: { assignmentId: input.assignmentId },
+  });
+  if (!record) throw AttendanceErrors.recordNotFound();
+
+  const assignment = await loadAssignment(input.assignmentId);
+  const from = record.status as AttendanceState;
+  // A record that is not disputed has no dispute to close, and saying so here
+  // is clearer than letting the transition table refuse it obliquely.
+  if (from !== 'DISPUTED') throw AttendanceErrors.illegalTransition(from, 'SUBMITTED');
+
+  // Falling back to SUBMITTED rather than throwing: a dispute opened before
+  // this column existed has nothing to restore, and sending it to be decided
+  // again is the safe reading of an unknown previous state.
+  const restored = (record.preDisputeStatus as AttendanceState | null) ?? 'SUBMITTED';
+  const to: AttendanceState = input.outcome === 'UPHELD' ? 'SUBMITTED' : restored;
+  guardTransition(from, to);
+
+  return prisma.$transaction(async (tx: Tx) => {
+    const applied = await tx.attendanceRecord.updateMany({
+      where: { id: record.id, status: 'DISPUTED' },
+      data: { status: to, preDisputeStatus: null },
+    });
+    if (applied.count !== 1) throw AttendanceErrors.illegalTransition(from, to);
+
+    const updated = await tx.attendanceRecord.findUniqueOrThrow({ where: { id: record.id } });
+
+    await recordAudit(tx, {
+      action: input.outcome === 'UPHELD' ? 'attendance.dispute_upheld' : 'attendance.dispute_dismissed',
+      entityType: 'attendance.attendance_records',
+      entityId: record.id,
+      actorId: input.actorId,
+      scopeType: 'FACILITY',
+      scopeId: assignment.facilityId,
+      reason: input.reason,
+      before: { status: from, preDisputeStatus: record.preDisputeStatus },
+      after: { status: updated.status },
+    });
+
+    return toView(updated);
+  });
+}

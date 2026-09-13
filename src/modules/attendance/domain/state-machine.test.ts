@@ -33,6 +33,11 @@ const LEGAL: ReadonlyArray<[AttendanceState, AttendanceState]> = [
   ['REJECTED', 'SUBMITTED'],
   ['REJECTED', 'DISPUTED'],
   ['MANUALLY_CORRECTED', 'SUBMITTED'],
+  // Module 14. Upheld sends the figures back to be decided again; dismissed
+  // puts the record back in whichever state it was in when the case opened.
+  ['DISPUTED', 'SUBMITTED'],
+  ['DISPUTED', 'APPROVED'],
+  ['DISPUTED', 'REJECTED'],
 ];
 
 function isLegal(from: AttendanceState, to: AttendanceState): boolean {
@@ -100,11 +105,25 @@ describe('shape of the machine', () => {
     expect([...reached].sort()).toEqual([...ATTENDANCE_STATES].sort());
   });
 
-  it('treats DISPUTED as the only terminal state', () => {
-    // Module 14 is Stage 8; nothing moves a record out of a dispute yet, and
-    // the empty transition list is how that is said rather than implied.
-    const terminal = ATTENDANCE_STATES.filter(isTerminal);
-    expect(terminal).toEqual(['DISPUTED']);
+  it('has no terminal state at all, now that a dispute resolves', () => {
+    // It had exactly one until module 14 landed. An approved shift can be
+    // disputed and a dispute resolves back into the machine, so no record is
+    // ever permanently frozen. What stops a record cycling forever is the
+    // dispute module's one-open-case rule, not the machine.
+    expect(ATTENDANCE_STATES.filter(isTerminal)).toEqual([]);
+  });
+
+  it('gives a dispute three endings and no more', () => {
+    expect([...allowedTransitionsFrom('DISPUTED')].sort()).toEqual([
+      'APPROVED',
+      'REJECTED',
+      'SUBMITTED',
+    ]);
+    // Not back to a state the record could never have been in when the case
+    // was opened: only APPROVED and REJECTED can be disputed.
+    for (const to of ['NOT_STARTED', 'CHECKED_IN', 'CHECKED_OUT', 'MANUALLY_CORRECTED'] as const) {
+      expect(canTransition('DISPUTED', to), to).toBe(false);
+    }
   });
 
   it('lets an approved record only be disputed', () => {

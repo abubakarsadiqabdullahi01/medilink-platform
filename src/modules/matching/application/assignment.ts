@@ -439,6 +439,15 @@ export async function markAssignmentCompleted(input: {
 }): Promise<AssignmentView> {
   const existing = await prisma.assignment.findUnique({ where: { id: input.assignmentId } });
   if (!existing) throw AssignmentErrors.assignmentNotFound();
+
+  // Already there, so there is nothing to do and nothing wrong. A timesheet
+  // approved, disputed, upheld and approved again arrives here twice: the
+  // hours were in question, not whether the shift happened, so the assignment
+  // stayed completed throughout and completing it again is a no-op rather
+  // than an illegal move. Returning early keeps `assignment.completed` from
+  // appearing twice in the history for one shift.
+  if (existing.status === 'COMPLETED') return toAssignmentView(existing);
+
   if (!canTransitionAssignment(existing.status, 'COMPLETED')) {
     throw AssignmentErrors.invalidTransition(existing.status, 'COMPLETED');
   }
