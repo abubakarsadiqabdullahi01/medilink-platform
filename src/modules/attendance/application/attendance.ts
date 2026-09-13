@@ -18,6 +18,7 @@ import {
   type CheckInPurpose,
 } from '../domain/check-in-token';
 import { IllegalAttendanceTransition } from '../domain/state-machine';
+import { getAssignment } from '@/modules/matching/application/assignment';
 import { AttendanceErrors } from '../domain/errors';
 
 /**
@@ -74,8 +75,12 @@ function guardTransition(from: AttendanceState, to: AttendanceState): void {
   }
 }
 
+/**
+ * Through matching's own application layer rather than by querying
+ * `matching.assignments` — a module never reads another module's tables.
+ */
 async function loadAssignment(assignmentId: string) {
-  const assignment = await prisma.assignment.findUnique({ where: { id: assignmentId } });
+  const assignment = await getAssignment(assignmentId);
   if (!assignment) throw AttendanceErrors.assignmentNotFound();
   return assignment;
 }

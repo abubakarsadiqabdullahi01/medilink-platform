@@ -6,11 +6,13 @@ import { EVENTS } from '@/lib/events';
 import { HttpError } from '@/lib/http/errors';
 import {
   DEFAULT_INVITATION_HOURS,
+  canTransitionAssignment,
   confirmBlockers,
   isInvitationOpen,
   type AssignmentStatusValue,
   type InvitationStatusValue,
 } from '../domain/assignment';
+import type { AssignmentOutcomes } from '../domain/reliability';
 
 /**
  * Steps 6.5, 6.6 and 6.7: invitation, acceptance, confirmation — and the
@@ -410,6 +412,85 @@ export async function cancelAssignment(
 
     return toAssignmentView(updated);
   });
+}
+
+/**
+ * One assignment, for another module to read.
+ *
+ * `attendance` and `timesheets` both need to know when a shift was scheduled
+ * and who it belongs to. They reach it through here rather than by querying
+ * `matching.assignments`, because a module never reads another module's
+ * tables — the rule in docs/module-map.md.
+ */
+export async function getAssignment(assignmentId: string): Promise<AssignmentView | null> {
+  const row = await prisma.assignment.findUnique({ where: { id: assignmentId } });
+  return row ? toAssignmentView(row) : null;
+}
+
+/**
+ * Reached when an approved timesheet says the shift was worked (step 7.5).
+ * `COMPLETED` has been in the enum since Stage 6 with nothing setting it, and
+ * this is what ends cold start for the reliability score.
+ */
+export async function markAssignmentCompleted(input: {
+  assignmentId: string;
+  actorId: string;
+  reason: string;
+}): Promise<AssignmentView> {
+  const existing = await prisma.assignment.findUnique({ where: { id: input.assignmentId } });
+  if (!existing) throw AssignmentErrors.assignmentNotFound();
+  if (!canTransitionAssignment(existing.status, 'COMPLETED')) {
+    throw AssignmentErrors.invalidTransition(existing.status, 'COMPLETED');
+  }
+
+  return prisma.$transaction(async (tx: Tx) => {
+    const updated = await tx.assignment.update({
+      where: { id: existing.id },
+      data: { status: 'COMPLETED' },
+    });
+
+    await tx.assignmentStatusHistory.create({
+      data: {
+        assignmentId: updated.id,
+        fromStatus: existing.status,
+        toStatus: 'COMPLETED',
+        actorId: input.actorId,
+        reason: input.reason,
+      },
+    });
+
+    await recordAudit(tx, {
+      action: 'assignment.completed',
+      entityType: 'matching.assignments',
+      entityId: updated.id,
+      actorId: input.actorId,
+      scopeType: 'SELF',
+      scopeId: existing.userId,
+      reason: input.reason,
+      before: toAssignmentView(existing),
+      after: toAssignmentView(updated),
+    });
+
+    return toAssignmentView(updated);
+  });
+}
+
+/**
+ * What this practitioner's finished assignments came to. Cold start and the
+ * reliability factor both read this, and until Stage 7 approved a timesheet
+ * there was nothing here to read.
+ */
+export async function assignmentOutcomes(userId: string): Promise<AssignmentOutcomes> {
+  const [completed, noShow] = await Promise.all([
+    prisma.assignment.count({ where: { userId, status: 'COMPLETED' } }),
+    prisma.assignment.count({ where: { userId, status: 'NO_SHOW' } }),
+  ]);
+  return { completed, noShow };
+}
+
+/** How many shifts this practitioner has actually completed. */
+export async function countCompletedAssignments(userId: string): Promise<number> {
+  return prisma.assignment.count({ where: { userId, status: 'COMPLETED' } });
 }
 
 export async function listInvitationsFor(userId: string): Promise<InvitationView[]> {

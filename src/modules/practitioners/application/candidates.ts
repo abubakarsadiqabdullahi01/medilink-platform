@@ -20,9 +20,15 @@ export interface MatchCandidateProfile {
   homeLgaId: string | null;
   travelPreference: 'SAME_LGA' | 'SAME_STATE' | 'ANYWHERE';
   eligible: boolean;
-  completedAssignments: number;
-  reliabilityScore: number | null;
 }
+
+/*
+ * No completion count and no reliability score here. Those come from
+ * `matching.assignments`, which is matching's table, and matching already
+ * calls this function — a field on this shape would have made the dependency
+ * point both ways to carry a number the caller can read for itself. See
+ * `assignmentOutcomes` in src/modules/matching/application/assignment.ts.
+ */
 
 /**
  * Everyone in the requested category, with eligibility already decided.
@@ -66,10 +72,6 @@ export async function listMatchCandidates(input: {
       homeLgaId: profile.homeLgaId,
       travelPreference: profile.travelPreference,
       eligible: eligibility.eligible,
-      // Nothing completes an assignment until Stage 7, so every practitioner
-      // is in cold start today and reliability is neutral for all of them.
-      completedAssignments: 0,
-      reliabilityScore: null,
     });
   }
 

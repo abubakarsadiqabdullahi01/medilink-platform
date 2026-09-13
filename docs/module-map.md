@@ -15,7 +15,7 @@ internal shape: `domain/`, `application/`, `infrastructure/`, `presentation/`,
 | `matching` | 7. Matching and assignment | 6 | Ranking, invitations, assignments, conflict |
 | `scheduling` | 8. Scheduling | 6 | Schedule list lives in `matching` — see below |
 | `attendance` | 9. Attendance | 7 | State machine, tokens, manual fallback |
-| `timesheets` | 10. Timesheets | 7 | Folder only |
+| `timesheets` | 10. Timesheets | 7 | Hours, submission, approval, revisions |
 | `rates-contracts` | 11. Rates and contracts | 8 | Folder only |
 | `billing-settlement` | 12. Billing, ledger and settlement | 8 | Folder only |
 | `cancellations-sanctions` | 13. Cancellations, no-shows and sanctions | 7 | Folder only |

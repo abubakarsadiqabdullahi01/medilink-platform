@@ -12,6 +12,8 @@ import {
   type ExcludedCandidate,
   type RankedCandidate,
 } from '../domain/engine';
+import { reliabilityFrom } from '../domain/reliability';
+import { assignmentOutcomes } from './assignment';
 
 /**
  * Running a match: gather the inputs, hand them to the pure engine, and write
@@ -84,6 +86,11 @@ export async function runMatch(input: RunMatchParams): Promise<MatchRunView> {
       },
       select: { startsAt: true, endsAt: true },
     });
+    // Read here rather than in `listMatchCandidates`, because assignments are
+    // matching's own table: having practitioners count them would have that
+    // module reach into this one, and the two already point the other way.
+    const outcomes = await assignmentOutcomes(profile.userId);
+
     const hoursAssignedInWindow = committed.reduce(
       (sum, assignment) =>
         sum + (assignment.endsAt.getTime() - assignment.startsAt.getTime()) / (60 * 60 * 1000),
@@ -106,8 +113,8 @@ export async function runMatch(input: RunMatchParams): Promise<MatchRunView> {
       availability: availability.reason,
       hasConflictingAssignment: conflicting > 0,
       hoursAssignedInWindow,
-      completedAssignments: profile.completedAssignments,
-      reliabilityScore: profile.reliabilityScore,
+      completedAssignments: outcomes.completed,
+      reliabilityScore: reliabilityFrom(outcomes),
     });
   }
 
