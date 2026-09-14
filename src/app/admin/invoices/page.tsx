@@ -10,13 +10,6 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import {
   Table,
@@ -26,6 +19,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { Combobox } from '@/components/app/combobox';
 import { StatusBadge } from '@/components/app/status-badge';
 import { EmptyState, PageHeader, QueueSkeleton } from '@/components/app/page-shell';
 import { formatDate, formatMinutes, formatNaira, shortId } from '@/components/app/format';
@@ -152,20 +146,20 @@ export default function InvoicesPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap items-end gap-3">
-          <div className="min-w-[14rem] space-y-1.5">
-            <Label>Facility</Label>
-            <Select value={facilityId} onValueChange={setFacilityId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Choose one" />
-              </SelectTrigger>
-              <SelectContent>
-                {(facilities.data?.facilities ?? []).map((row) => (
-                  <SelectItem key={row.id} value={row.id}>
-                    {row.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="min-w-[18rem] space-y-1.5">
+            <Label htmlFor="facility">Facility</Label>
+            {/* Searchable: a plain dropdown is fine over four hospitals and
+                not over four hundred, and this list grows with the pilot. */}
+            <Combobox
+              id="facility"
+              options={(facilities.data?.facilities ?? []).map((row) => ({
+                value: row.id,
+                label: row.name,
+              }))}
+              value={facilityId}
+              onChange={setFacilityId}
+              searchPlaceholder="Search facilities…"
+            />
           </div>
 
           <div className="space-y-1.5">

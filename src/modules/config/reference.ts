@@ -20,7 +20,9 @@ export interface ReferenceData {
    */
   credentialTypes: { id: string; name: string; key: string; verificationMethod: string }[];
   facilityTypes: { id: string; name: string }[];
-  states: { id: string; name: string }[];
+  /** `zone` is one of the six geopolitical zones — shown under the state
+   *  name in the picker, and searchable, so "south east" narrows the list. */
+  states: { id: string; name: string; zone: string }[];
   lgas: { id: string; name: string; stateId: string }[];
 }
 
@@ -43,7 +45,10 @@ export async function getReferenceData(): Promise<ReferenceData> {
         select: { id: true, name: true },
         orderBy: { name: 'asc' },
       }),
-      prisma.state.findMany({ select: { id: true, name: true }, orderBy: { name: 'asc' } }),
+      prisma.state.findMany({
+        select: { id: true, name: true, zone: true },
+        orderBy: { name: 'asc' },
+      }),
       prisma.lga.findMany({
         select: { id: true, name: true, stateId: true },
         orderBy: { name: 'asc' },

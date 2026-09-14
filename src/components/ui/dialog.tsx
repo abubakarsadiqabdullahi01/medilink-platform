@@ -5,6 +5,21 @@ import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
+/**
+ * shadcn's dialog, with four changes this product needs. The CLI overwrites
+ * this file, so they are written down here to be put back.
+ *
+ * 1. The overlay is `foreground/40` rather than `black/80`. The palette is
+ *    theme-aware and a near-opaque black scrim reads as a modal error in
+ *    light mode.
+ * 2. The content scrolls at `90dvh`. "Publish a shift" is a twelve-field form
+ *    and on a laptop the canonical dialog simply ran off the screen with the
+ *    submit button below the fold.
+ * 3. The header is left-aligned at every width. Centred headings on a form
+ *    dialog fight the left-aligned fields under them.
+ * 4. The footer uses `gap-2`, so stacked buttons on a narrow screen are not
+ *    touching.
+ */
 const Dialog = DialogPrimitive.Root;
 const DialogTrigger = DialogPrimitive.Trigger;
 const DialogPortal = DialogPrimitive.Portal;

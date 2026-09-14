@@ -22,6 +22,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
+import { Combobox } from '@/components/app/combobox';
 import { PageHeader } from '@/components/app/page-shell';
 import { PhotoField } from './photo-field';
 
@@ -191,43 +192,36 @@ export default function ProfilePage() {
               </div>
 
               <div className="space-y-1.5">
-                <Label>State you live in</Label>
-                <Select
+                <Label htmlFor="state">State you live in</Label>
+                <Combobox
+                  id="state"
+                  options={(reference.data?.states ?? []).map((row) => ({
+                    value: row.id,
+                    label: row.name,
+                    hint: row.zone,
+                  }))}
                   value={stateId}
-                  onValueChange={(value) => {
+                  onChange={(value) => {
                     setStateId(value);
+                    // The LGA belonged to the old state, so it is no longer
+                    // an answer to this question.
                     setLgaId('');
                   }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Choose one" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(reference.data?.states ?? []).map((row) => (
-                      <SelectItem key={row.id} value={row.id}>
-                        {row.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  searchPlaceholder="Search 37 states…"
+                />
               </div>
 
               <div className="space-y-1.5">
-                <Label>Local government area</Label>
-                <Select value={lgaId} onValueChange={setLgaId} disabled={lgas.length === 0}>
-                  <SelectTrigger>
-                    <SelectValue
-                      placeholder={lgas.length === 0 ? 'Choose a state first' : 'Choose one'}
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {lgas.map((row) => (
-                      <SelectItem key={row.id} value={row.id}>
-                        {row.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="lga">Local government area</Label>
+                <Combobox
+                  id="lga"
+                  options={lgas.map((row) => ({ value: row.id, label: row.name }))}
+                  value={lgaId}
+                  onChange={setLgaId}
+                  disabled={lgas.length === 0}
+                  placeholder={lgas.length === 0 ? 'Choose a state first' : 'Choose one'}
+                  searchPlaceholder={`Search ${lgas.length} areas…`}
+                />
               </div>
 
               <div className="space-y-1.5">

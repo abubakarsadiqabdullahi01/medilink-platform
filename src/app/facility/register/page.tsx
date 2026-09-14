@@ -19,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Combobox } from '@/components/app/combobox';
 import { PageHeader } from '@/components/app/page-shell';
 
 /**
@@ -137,43 +138,34 @@ export default function RegisterFacilityPage() {
             </div>
 
             <div className="space-y-1.5">
-              <Label>State</Label>
-              <Select
+              <Label htmlFor="state">State</Label>
+              <Combobox
+                id="state"
+                options={(reference.data?.states ?? []).map((row) => ({
+                  value: row.id,
+                  label: row.name,
+                  hint: row.zone,
+                }))}
                 value={stateId}
-                onValueChange={(value) => {
+                onChange={(value) => {
                   setStateId(value);
                   setLgaId('');
                 }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Choose one" />
-                </SelectTrigger>
-                <SelectContent>
-                  {(reference.data?.states ?? []).map((row) => (
-                    <SelectItem key={row.id} value={row.id}>
-                      {row.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                searchPlaceholder="Search 37 states…"
+              />
             </div>
 
             <div className="space-y-1.5">
-              <Label>Local government area</Label>
-              <Select value={lgaId} onValueChange={setLgaId} disabled={lgas.length === 0}>
-                <SelectTrigger>
-                  <SelectValue
-                    placeholder={lgas.length === 0 ? 'Choose a state first' : 'Optional'}
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  {lgas.map((row) => (
-                    <SelectItem key={row.id} value={row.id}>
-                      {row.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label htmlFor="lga">Local government area</Label>
+              <Combobox
+                id="lga"
+                options={lgas.map((row) => ({ value: row.id, label: row.name }))}
+                value={lgaId}
+                onChange={setLgaId}
+                disabled={lgas.length === 0}
+                placeholder={lgas.length === 0 ? 'Choose a state first' : 'Optional'}
+                searchPlaceholder={`Search ${lgas.length} areas…`}
+              />
             </div>
 
             <div className="space-y-1.5 sm:col-span-2">

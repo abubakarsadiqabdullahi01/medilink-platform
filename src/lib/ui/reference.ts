@@ -8,7 +8,7 @@ export interface ReferenceData {
   specialties: { id: string; name: string; categoryId: string }[];
   credentialTypes: { id: string; name: string; key: string; verificationMethod: string }[];
   facilityTypes: { id: string; name: string }[];
-  states: { id: string; name: string }[];
+  states: { id: string; name: string; zone: string }[];
   lgas: { id: string; name: string; stateId: string }[];
 }
 
