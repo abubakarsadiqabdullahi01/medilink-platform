@@ -13,7 +13,8 @@ import { listDisputesFor, raiseDispute } from '@/modules/disputes/application/di
  * officer holds `dispute.manage` too and still cannot open one: `partyFor`
  * returns null for somebody on neither side of the shift.
  */
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {
@@ -38,7 +39,8 @@ export async function POST(request: Request, { params }: { params: { id: string 
 }
 
 /** GET — every case over this shift, withdrawn and dismissed included. */
-export async function GET(request: Request, { params }: { params: { id: string } }) {
+export async function GET(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {

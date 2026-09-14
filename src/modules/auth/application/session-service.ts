@@ -62,7 +62,7 @@ export async function issueSession(input: {
     return created;
   });
 
-  cookies().set({ ...sessionCookieOptions(expiresAt, isProductionLike), value: token });
+  (await cookies()).set({ ...sessionCookieOptions(expiresAt, isProductionLike), value: token });
 
   return { token, sessionId: session.id, expiresAt };
 }
@@ -78,7 +78,7 @@ export interface CurrentSession {
  * throwing, so a public route can call it to personalise a response.
  */
 export async function currentSession(now: Date = new Date()): Promise<CurrentSession | null> {
-  const token = cookies().get(SESSION_COOKIE_NAME)?.value;
+  const token = (await cookies()).get(SESSION_COOKIE_NAME)?.value;
   if (!token) return null;
 
   const session = await prisma.session.findUnique({
@@ -130,7 +130,7 @@ export async function revokeSession(input: {
     });
   });
 
-  cookies().delete(SESSION_COOKIE_NAME);
+  (await cookies()).delete(SESSION_COOKIE_NAME);
 }
 
 /**

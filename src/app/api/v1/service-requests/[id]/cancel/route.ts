@@ -10,7 +10,8 @@ import { cancelServiceRequest } from '@/modules/service-requests/application/req
  * `assignment.cancel` is about a confirmed person rather than an open
  * request. A reason is required — practitioners have already seen this.
  */
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {

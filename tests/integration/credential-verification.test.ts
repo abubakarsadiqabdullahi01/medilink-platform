@@ -70,7 +70,7 @@ async function callUploadUrl(body: unknown = {}): Promise<ApiResult> {
 async function callReview(id: string, body: unknown): Promise<ApiResult> {
   const response = await postReview(
     await jsonRequest(`http://localhost/api/v1/credentials/${id}/review`, body),
-    { params: { id } },
+    { params: Promise.resolve({ id }) },
   );
   return { status: response.status, body: await response.json() };
 }
@@ -78,7 +78,7 @@ async function callReview(id: string, body: unknown): Promise<ApiResult> {
 async function callDocumentUrl(id: string, body: unknown): Promise<ApiResult> {
   const response = await postDocumentUrl(
     await jsonRequest(`http://localhost/api/v1/credentials/${id}/document-url`, body),
-    { params: { id } },
+    { params: Promise.resolve({ id }) },
   );
   return { status: response.status, body: await response.json() };
 }
@@ -90,7 +90,7 @@ async function callResupply(id: string, body: unknown): Promise<ApiResult> {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
     }),
-    { params: { id } },
+    { params: Promise.resolve({ id }) },
   );
   return { status: response.status, body: await response.json() };
 }

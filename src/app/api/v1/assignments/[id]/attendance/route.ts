@@ -9,7 +9,8 @@ import { getAttendance, listCheckInEvents } from '@/modules/attendance/applicati
  * append-only log holds every check-in attempt, its method, and the reason
  * when it was manual. That log is what a dispute months later actually reads.
  */
-export async function GET(request: Request, { params }: { params: { id: string } }) {
+export async function GET(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {

@@ -13,7 +13,8 @@ import {
  * distinguish a bad night from a pattern, and that distinction is the whole
  * of the decision compliance has to make.
  */
-export async function GET(request: Request, { params }: { params: { id: string } }) {
+export async function GET(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {

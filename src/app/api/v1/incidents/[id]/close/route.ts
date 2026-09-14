@@ -10,7 +10,8 @@ import { closeIncident } from '@/modules/clinical-incidents/application/incident
  * of it on purpose: it is the commonest true answer to a clinical incident,
  * and the one a blame-first process never reaches.
  */
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {

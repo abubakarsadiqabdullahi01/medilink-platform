@@ -9,7 +9,8 @@ import { recordFault } from '@/modules/cancellations-sanctions/application/fault
  * practitioner was at fault for a shift that facility failed to open is not a
  * finding anyone should rely on.
  */
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {

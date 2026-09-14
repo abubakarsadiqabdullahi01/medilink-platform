@@ -11,7 +11,8 @@ import { reviewTimesheet } from '@/modules/timesheets/application/timesheet';
  * cold start for the reliability score. A rejection needs a reason, or the
  * practitioner has nothing to act on.
  */
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {

@@ -9,7 +9,8 @@ import { reinstateAccount } from '@/modules/clinical-incidents/application/suspe
  * reason and the suspension row is closed rather than deleted. A suspension
  * nobody can account for is how people stay suspended by accident.
  */
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {

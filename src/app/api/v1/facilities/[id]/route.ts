@@ -12,7 +12,8 @@ import { getFacility, updateFacility } from '@/modules/facilities/application/fa
  * and no other; a PLATFORM grant satisfies the same check, which is how
  * operations and compliance reach any facility without a separate route.
  */
-export async function GET(request: Request, { params }: { params: { id: string } }) {
+export async function GET(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {
@@ -26,7 +27,8 @@ export async function GET(request: Request, { params }: { params: { id: string }
   );
 }
 
-export async function PATCH(request: Request, { params }: { params: { id: string } }) {
+export async function PATCH(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {

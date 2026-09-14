@@ -12,7 +12,8 @@ import { HttpError } from '@/lib/http/errors';
  * in force at the time are stored on the run, so a ranking made under an older
  * set can still be read.
  */
-export async function GET(request: Request, { params }: { params: { id: string } }) {
+export async function GET(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {

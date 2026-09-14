@@ -10,7 +10,8 @@ import { invitePractitioners } from '@/modules/matching/application/assignment';
  * hand-reviewed for the first fifty engagements, so the platform ranks and a
  * person decides.
  */
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {

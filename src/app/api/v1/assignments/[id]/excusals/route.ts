@@ -14,7 +14,8 @@ import {
  * SELF-scoped, and the application layer checks the assignment is theirs:
  * the scope guard proves who is asking, not what they are asking about.
  */
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {
@@ -37,7 +38,8 @@ export async function POST(request: Request, { params }: { params: { id: string 
  * GET — every request on this assignment, refusals included. Both outcomes
  * are retained, and this is where that is legible.
  */
-export async function GET(request: Request, { params }: { params: { id: string } }) {
+export async function GET(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {

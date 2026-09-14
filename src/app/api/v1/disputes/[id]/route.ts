@@ -9,7 +9,8 @@ import { listEvidence } from '@/modules/disputes/application/evidence';
  * The evidence list comes back alongside because a case read without it is
  * one nobody can adjudicate.
  */
-export async function GET(request: Request, { params }: { params: { id: string } }) {
+export async function GET(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {

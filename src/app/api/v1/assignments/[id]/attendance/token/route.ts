@@ -10,7 +10,8 @@ import { issueCheckInToken } from '@/modules/attendance/application/attendance';
  * could generate themselves would prove only that they own a phone. The
  * plaintext is returned once here and never stored.
  */
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {

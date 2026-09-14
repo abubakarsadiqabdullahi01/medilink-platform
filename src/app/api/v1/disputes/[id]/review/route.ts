@@ -8,7 +8,8 @@ import { beginReview } from '@/modules/disputes/application/dispute';
  * A claim rather than a lock: two officers opening the same case is wasted
  * effort, not a correctness problem, and resolution is compare-and-set.
  */
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {

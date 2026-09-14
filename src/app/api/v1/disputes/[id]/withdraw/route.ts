@@ -9,7 +9,8 @@ import { withdrawDispute } from '@/modules/disputes/application/dispute';
  * vanished when somebody thought better of it would take the other party's
  * side of the story with it.
  */
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {

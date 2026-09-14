@@ -57,7 +57,7 @@ async function callMatch(requestId: string, facilityId: string): Promise<ApiResu
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ facilityId }),
     }),
-    { params: { id: requestId } },
+    { params: Promise.resolve({ id: requestId }) },
   );
   return { status: response.status, body: await response.json() };
 }
@@ -65,7 +65,7 @@ async function callMatch(requestId: string, facilityId: string): Promise<ApiResu
 async function callReadRun(runId: string, facilityId: string): Promise<ApiResult> {
   const response = await matchRunRoute(
     new Request(`http://localhost/api/v1/match-runs/${runId}?facilityId=${facilityId}`),
-    { params: { id: runId } },
+    { params: Promise.resolve({ id: runId }) },
   );
   return { status: response.status, body: await response.json() };
 }

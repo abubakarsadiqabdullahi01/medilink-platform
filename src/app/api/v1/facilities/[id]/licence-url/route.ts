@@ -11,7 +11,8 @@ import { requestLicenceDownloadUrl } from '@/modules/facilities/application/faci
  * facility itself and, through a PLATFORM grant, by compliance — the two
  * parties with a reason to look at it.
  */
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {

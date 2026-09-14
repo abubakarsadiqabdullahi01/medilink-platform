@@ -10,7 +10,8 @@ import { verifyFacility } from '@/modules/facilities/application/facility';
  * verifyFacility refuses a representative acting on their own facility even
  * if they somehow hold both grants.
  */
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {

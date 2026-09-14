@@ -66,7 +66,7 @@ async function callList(query: Record<string, string>): Promise<ApiResult> {
 
 async function callGet(id: string): Promise<ApiResult> {
   const response = await getFacilityRoute(new Request(`http://localhost/api/v1/facilities/${id}`), {
-    params: { id },
+    params: Promise.resolve({ id }),
   });
   return { status: response.status, body: await response.json() };
 }
@@ -74,7 +74,7 @@ async function callGet(id: string): Promise<ApiResult> {
 async function callPatch(id: string, body: unknown): Promise<ApiResult> {
   const response = await patchFacilityRoute(
     jsonRequest(`http://localhost/api/v1/facilities/${id}`, body, 'PATCH'),
-    { params: { id } },
+    { params: Promise.resolve({ id }) },
   );
   return { status: response.status, body: await response.json() };
 }
@@ -82,7 +82,7 @@ async function callPatch(id: string, body: unknown): Promise<ApiResult> {
 async function callVerify(id: string, body: unknown): Promise<ApiResult> {
   const response = await verifyRoute(
     jsonRequest(`http://localhost/api/v1/facilities/${id}/verify`, body),
-    { params: { id } },
+    { params: Promise.resolve({ id }) },
   );
   return { status: response.status, body: await response.json() };
 }
@@ -90,7 +90,7 @@ async function callVerify(id: string, body: unknown): Promise<ApiResult> {
 async function callLicenceUploadUrl(id: string, body: unknown): Promise<ApiResult> {
   const response = await licenceUploadUrlRoute(
     jsonRequest(`http://localhost/api/v1/facilities/${id}/licence-upload-url`, body),
-    { params: { id } },
+    { params: Promise.resolve({ id }) },
   );
   return { status: response.status, body: await response.json() };
 }
@@ -98,7 +98,7 @@ async function callLicenceUploadUrl(id: string, body: unknown): Promise<ApiResul
 async function callLicenceUrl(id: string): Promise<ApiResult> {
   const response = await licenceUrlRoute(
     jsonRequest(`http://localhost/api/v1/facilities/${id}/licence-url`, {}),
-    { params: { id } },
+    { params: Promise.resolve({ id }) },
   );
   return { status: response.status, body: await response.json() };
 }

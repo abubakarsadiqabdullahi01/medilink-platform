@@ -9,7 +9,8 @@ import { cancelAssignment } from '@/modules/matching/application/assignment';
  * the actor — step 6.6's "every change records actor and reason", enforced by
  * the columns rather than by remembering.
  */
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {

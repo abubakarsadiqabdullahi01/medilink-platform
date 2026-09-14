@@ -8,7 +8,8 @@ import { reviewCredential } from '@/modules/credentials/application/submission';
  * itself refuses a reviewer acting on their own submission even if they hold
  * both roles.
  */
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {

@@ -60,12 +60,12 @@ const callAddSlot = (body: unknown) => post(postSlot, '/api/v1/availability/slot
 const callAddBlock = (body: unknown) => post(postBlock, '/api/v1/availability/blocks', body);
 
 async function callRemove(
-  handler: (request: Request, context: { params: { id: string } }) => Promise<Response>,
+  handler: (request: Request, context: { params: Promise<{ id: string }> }) => Promise<Response>,
   path: string,
   id: string,
 ): Promise<ApiResult> {
   const response = await handler(new Request(`http://localhost${path}/${id}`, { method: 'DELETE' }), {
-    params: { id },
+    params: Promise.resolve({ id }),
   });
   return { status: response.status, body: await response.json() };
 }

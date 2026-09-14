@@ -14,7 +14,8 @@ import { publishServiceRequest } from '@/modules/service-requests/application/re
  * can move between drafting and publishing and the published rate is the one
  * that counts.
  */
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {

@@ -9,7 +9,8 @@ import { removeSlot } from '@/modules/availability/application/availability';
  * explained afterwards. Someone else's slot is a 404 rather than a 403, for
  * the same reason the credential document route gives one.
  */
-export async function DELETE(request: Request, { params }: { params: { id: string } }) {
+export async function DELETE(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {

@@ -12,7 +12,8 @@ import {
  * happened before. Lifted suspensions are included, because a history that
  * only showed the current one would hide the pattern that matters most.
  */
-export async function GET(request: Request, { params }: { params: { id: string } }) {
+export async function GET(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {
