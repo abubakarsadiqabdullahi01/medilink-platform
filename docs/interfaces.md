@@ -107,7 +107,20 @@ compliance badge. The omission is the design.
 ```
 docker compose up -d
 docker compose exec web pnpm tsx scripts/bootstrap-demo.ts
+docker compose exec web pnpm tsx scripts/seed-demo.ts
 ```
+
+`bootstrap-demo` creates the first administrator, which nothing else can.
+`seed-demo` then builds a pilot's worth of history — three months of shifts,
+four facilities, ten practitioners, invoices in every state — **through the
+application layer rather than by inserting rows**. That matters: the audit
+rows exist because the code that writes them ran, the outbox has events
+because something published them, and the ledger balances because
+`assertBalanced` refused anything that did not. A seed of straight
+`prisma.create` calls produces a database that looks right and is not.
+
+It is re-runnable and clears its own work first, so you get the same picture
+rather than three months of duplicates.
 
 Then <http://localhost:3000>. The bootstrap prints every demo account; they
 share one password, which is printed with them and is not a secret.

@@ -134,6 +134,10 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     'credential.document.read', 'facility.read', 'facility.verify', 'sanction.apply',
     'incident.manage', 'audit.read',
   ],
-  finance_officer: ['invoice.read', 'payout.manage', 'audit.read'],
+  // facility.read is not decoration: billing a facility means knowing which
+  // facilities exist, and without it a finance officer cannot open the page
+  // that raises their invoices. Found by seeding a real finance officer and
+  // watching the console 403.
+  finance_officer: ['facility.read', 'invoice.read', 'payout.manage', 'audit.read'],
   super_administrator: Object.keys(PERMISSIONS) as Permission[],
 };
