@@ -11,6 +11,13 @@ import { api, errorMessage } from '@/lib/ui/api';
  * refetch — so it is written once. What differs between pages is what a row
  * looks like and which buttons it has, which is the part worth writing by
  * hand.
+ *
+ * **One key, one shape.** What goes under a query key is the unwrapped list,
+ * never the `{ things: [...] }` envelope the API returns. A plain `useQuery`
+ * elsewhere that caches the envelope under a key this helper also uses will
+ * not fail where it is written: whichever page renders first wins the cache,
+ * and the other one throws `.filter is not a function` — on the page that did
+ * nothing wrong. Unwrap at the boundary, every time.
  */
 export function useQueue<T>(key: unknown[], path: string, pick: (body: unknown) => T[]) {
   return useQuery({

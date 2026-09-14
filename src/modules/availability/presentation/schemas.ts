@@ -8,14 +8,26 @@ import { z } from 'zod';
  */
 const MINUTES_IN_DAY = 24 * 60;
 
-const minuteOfDay = z.coerce.number().int().min(0).max(MINUTES_IN_DAY - 1);
+/**
+ * A start is a minute *within* the day, so 0 to 1439.
+ *
+ * An end may also be 1440 — midnight at the close of the day — and that is
+ * not pedantry. Without it there is no way to say "available all day": 1439
+ * leaves a one-minute hole at midnight, so Monday's slot and Tuesday's never
+ * join, and a practitioner marked available every day was refused *every*
+ * overnight shift. On a locum platform where nights are the core business
+ * that is not an edge case. Found by walking the product rather than by a
+ * test, because every test happened to use a daytime shift.
+ */
+const startMinuteOfDay = z.coerce.number().int().min(0).max(MINUTES_IN_DAY - 1);
+const endMinuteOfDay = z.coerce.number().int().min(0).max(MINUTES_IN_DAY);
 
 export const addSlotSchema = z.object({
   kind: z.enum(['RECURRING_WEEKLY', 'ONE_OFF']),
   /** 0 is Sunday, matching JavaScript's getUTCDay. */
   dayOfWeek: z.coerce.number().int().min(0).max(6).optional(),
-  startMinute: minuteOfDay.optional(),
-  endMinute: minuteOfDay.optional(),
+  startMinute: startMinuteOfDay.optional(),
+  endMinute: endMinuteOfDay.optional(),
   effectiveFrom: z.coerce.date().optional(),
   effectiveUntil: z.coerce.date().optional(),
   startsAt: z.coerce.date().optional(),

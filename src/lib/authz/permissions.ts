@@ -99,10 +99,16 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     'suggestion.submit',
   ],
   facility_owner: [
-    'facility.read', 'facility.write', 'facility.user.manage', 'service_request.read',
-    'service_request.publish', 'assignment.confirm', 'assignment.cancel',
-    'timesheet.approve', 'invoice.read', 'payout.manage', 'dispute.manage',
-    'incident.report', 'suggestion.submit',
+    // attendance.record and role.grant alongside the rest. Without the first,
+    // an owner could confirm somebody onto a shift and approve the timesheet
+    // afterwards but not check them in — a hole in the middle of their own
+    // workflow. Without the second, a facility could never add a second
+    // member of staff. Both found by walking the product as a newly granted
+    // ward manager rather than by a test.
+    'facility.read', 'facility.write', 'facility.user.manage', 'role.grant',
+    'service_request.read', 'service_request.publish', 'assignment.confirm',
+    'assignment.cancel', 'attendance.record', 'timesheet.approve', 'invoice.read',
+    'payout.manage', 'dispute.manage', 'incident.report', 'suggestion.submit',
   ],
   facility_administrator: [
     'facility.read', 'facility.write', 'facility.user.manage', 'service_request.read',

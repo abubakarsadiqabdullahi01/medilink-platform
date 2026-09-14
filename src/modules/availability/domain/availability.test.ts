@@ -205,3 +205,50 @@ describe('availabilityFor', () => {
     expect(coversWindow([recurring()], [], backwards)).toBe(false);
   });
 });
+
+describe('a full day, and the night shift that crosses it', () => {
+  /**
+   * The case a whole product turns on: somebody available every day, and a
+   * shift that starts one evening and ends the next morning.
+   *
+   * With an end of 1439 the two days never join — a one-minute hole at
+   * midnight — and the practitioner is reported unavailable for every
+   * overnight shift. 1440 means midnight at the close of the day, so Monday
+   * ends exactly where Tuesday begins and `mergeWindows` joins them.
+   */
+  const everyDay = (endMinute: number) =>
+    [0, 1, 2, 3, 4, 5, 6].map((dayOfWeek) => ({
+      kind: 'RECURRING_WEEKLY' as const,
+      dayOfWeek,
+      startMinute: 0,
+      endMinute,
+      effectiveFrom: null,
+      effectiveUntil: null,
+      startsAt: null,
+      endsAt: null,
+    }));
+
+  // 19:00 to 03:00 WAT, which is 18:00 to 02:00 UTC.
+  const overnight = {
+    startsAt: new Date('2026-09-14T18:00:00.000Z'),
+    endsAt: new Date('2026-09-15T02:00:00.000Z'),
+  };
+
+  it('leaves a hole at midnight when the day ends at 23:59', () => {
+    const verdict = availabilityFor(everyDay(1439), [], overnight);
+    expect(verdict.reason).not.toBe('available');
+  });
+
+  it('covers the shift when the day ends at midnight', () => {
+    const verdict = availabilityFor(everyDay(1440), [], overnight);
+    expect(verdict.reason).toBe('available');
+  });
+
+  it('still covers an ordinary daytime shift', () => {
+    const verdict = availabilityFor(everyDay(1440), [], {
+      startsAt: new Date('2026-09-14T07:00:00.000Z'),
+      endsAt: new Date('2026-09-14T15:00:00.000Z'),
+    });
+    expect(verdict.reason).toBe('available');
+  });
+});

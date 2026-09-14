@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma, type Tx } from '@/lib/db';
 import { env } from '@/lib/env';
 import { recordAudit } from '@/lib/audit';
-import { createUploadUrl, headObject } from '@/lib/storage/tigris';
+import { createDownloadUrl, createUploadUrl, headObject } from '@/lib/storage/tigris';
 import { isSpecialtyValidForCategory } from '../domain/profile';
 import { PractitionerErrors } from '../domain/errors';
 
@@ -334,4 +334,31 @@ export async function requestPhotoUploadUrl(
   });
 
   return { objectKey, uploadUrl: url, expiresInSeconds };
+}
+
+export interface PhotoDownloadUrl {
+  url: string;
+  expiresInSeconds: number;
+}
+
+/**
+ * A signed GET URL for the caller's **own** photograph.
+ *
+ * Upload has existed since 5.1 with no way to read the bytes back, which made
+ * the photo write-only — storable and never showable. This is the other half.
+ *
+ * Deliberately SELF and nothing else. A facility seeing a practitioner's face
+ * before a shift is a separate decision with a consent switch behind it
+ * (`Showing your credentials to a facility`), and widening the scope here
+ * would settle that question by accident.
+ */
+export async function requestPhotoDownloadUrl(userId: string): Promise<PhotoDownloadUrl> {
+  const profile = await prisma.practitionerProfile.findUnique({ where: { userId } });
+  if (!profile || profile.deletedAt) throw PractitionerErrors.profileNotFound();
+  if (!profile.photoObjectKey) throw PractitionerErrors.noPhotoOnProfile();
+
+  return {
+    url: await createDownloadUrl(profile.photoObjectKey),
+    expiresInSeconds: env.STORAGE_SIGNED_URL_TTL_SECONDS,
+  };
 }

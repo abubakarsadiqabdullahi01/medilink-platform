@@ -12,7 +12,13 @@ import { prisma } from '@/lib/db';
 export interface ReferenceData {
   professionalCategories: { id: string; name: string }[];
   specialties: { id: string; name: string; categoryId: string }[];
-  credentialTypes: { id: string; name: string }[];
+  /**
+   * `key` and `verificationMethod` are here because a client cannot otherwise
+   * tell which credentials need a document attached and which take a
+   * reference number — and submitting the wrong one is refused with a 422
+   * the form could have prevented.
+   */
+  credentialTypes: { id: string; name: string; key: string; verificationMethod: string }[];
   facilityTypes: { id: string; name: string }[];
   states: { id: string; name: string }[];
   lgas: { id: string; name: string; stateId: string }[];
@@ -30,7 +36,7 @@ export async function getReferenceData(): Promise<ReferenceData> {
         orderBy: { name: 'asc' },
       }),
       prisma.credentialType.findMany({
-        select: { id: true, name: true },
+        select: { id: true, name: true, key: true, verificationMethod: true },
         orderBy: { name: 'asc' },
       }),
       prisma.facilityType.findMany({

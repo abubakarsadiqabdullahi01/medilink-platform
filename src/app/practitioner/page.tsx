@@ -49,21 +49,36 @@ export default function PractitionerHome() {
     retry: false,
   });
 
+  /**
+   * These unwrap the envelope before caching, and that is load-bearing rather
+   * than tidy: `['invitations']` is also read by the offers queue, which
+   * caches the list itself. Two shapes under one key meant whichever page
+   * rendered first won the cache, and the other got a value it could not
+   * use — arriving as `.filter is not a function` on the *second* page, which
+   * is the page that looks broken. One key, one shape.
+   */
   const invitations = useQuery({
     queryKey: ['invitations'],
-    queryFn: () => api.get<{ invitations: Invitation[] }>('/api/v1/invitations'),
+    queryFn: async () => {
+      const body = await api.get<{ invitations?: Invitation[] }>('/api/v1/invitations');
+      return body.invitations ?? [];
+    },
     retry: false,
   });
 
   const assignments = useQuery({
     queryKey: ['my-assignments'],
-    queryFn: () =>
-      api.get<{ assignments: Assignment[] }>('/api/v1/assignments?scopeType=SELF&status=CONFIRMED'),
+    queryFn: async () => {
+      const body = await api.get<{ assignments?: Assignment[] }>(
+        '/api/v1/assignments?scopeType=SELF&status=CONFIRMED',
+      );
+      return body.assignments ?? [];
+    },
     retry: false,
   });
 
-  const open = (invitations.data?.invitations ?? []).filter((row) => row.status === 'INVITED');
-  const next = [...(assignments.data?.assignments ?? [])]
+  const open = (invitations.data ?? []).filter((row) => row.status === 'INVITED');
+  const next = [...(assignments.data ?? [])]
     .filter((row) => new Date(row.endsAt) > new Date())
     .sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime())[0];
 

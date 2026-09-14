@@ -47,6 +47,9 @@ export const PractitionerErrors = {
       422,
     ),
 
+  noPhotoOnProfile: () =>
+    new PractitionerError('no_photo_on_profile', 'There is no photograph on this profile.', 404),
+
   practitionerNotFound: () =>
     new PractitionerError('practitioner_not_found', 'That practitioner does not exist.', 404),
 

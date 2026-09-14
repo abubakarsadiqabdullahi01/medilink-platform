@@ -46,6 +46,12 @@ export const ROUTES: RouteDefinition[] = [
     permission: 'practitioner.profile.write',
     scopeType: 'SELF',
   },
+  {
+    method: 'POST',
+    path: '/api/v1/practitioners/me/photo-url',
+    permission: 'practitioner.profile.read',
+    scopeType: 'SELF',
+  },
   // Step 5.8. Read-only: activation itself only happens on the nightly
   // sweep, never as a side effect of this endpoint.
   {

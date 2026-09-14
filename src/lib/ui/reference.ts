@@ -6,7 +6,7 @@ import { api } from '@/lib/ui/api';
 export interface ReferenceData {
   professionalCategories: { id: string; name: string }[];
   specialties: { id: string; name: string; categoryId: string }[];
-  credentialTypes: { id: string; name: string }[];
+  credentialTypes: { id: string; name: string; key: string; verificationMethod: string }[];
   facilityTypes: { id: string; name: string }[];
   states: { id: string; name: string }[];
   lgas: { id: string; name: string; stateId: string }[];
