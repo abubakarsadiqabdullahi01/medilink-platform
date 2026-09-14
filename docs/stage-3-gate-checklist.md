@@ -18,9 +18,13 @@ production development.
 
 ## What is already in the repository
 
-* Step 3.7 — the seed structure exists with a named owner per list. The state,
-  LGA, holiday and rate-floor lists are partial and must be completed from an
-  authoritative source; the rate floors also wait on the 3.1 decision.
+* Step 3.7 — the seed structure exists with a named owner per list. **The
+  geography is now complete**: all 36 states, the FCT and all 774 LGAs, with
+  the counts asserted in the seed and in a unit test. The names still want
+  checking against INEC or the NBS — a count proves none is missing, not that
+  each is spelled as the register spells it. The holiday list stays partial
+  because the moveable Islamic and Christian dates are announced yearly, and
+  the rate floors wait on the 3.1 decision.
 * Step 3.9 — CI runs lint, typecheck, unit tests, migrate up/down/up, seed,
   dependency audit, secret scan and end-to-end tests. Staging and production
   deployment jobs are still to be wired to the chosen host.

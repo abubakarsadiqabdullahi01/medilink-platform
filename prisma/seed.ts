@@ -4,10 +4,11 @@
  * Every list below is a controlled vocabulary with a named owner. Seeding is
  * idempotent (upsert by natural key) so it can run on every deploy.
  *
- * The state/LGA and holiday lists here are deliberately partial: they are
- * shaped correctly and must be completed from an authoritative source before
- * the Stage 3 gate. The row-count assertion in the test suite is what proves
- * completion, not this file.
+ * The geography is complete: all 36 states, the FCT and all 774 LGAs, in
+ * `data/nigeria.ts`, with the counts asserted here rather than trusted. The
+ * holiday list is still partial — the moveable Islamic and Christian dates
+ * are announced each year and cannot be hard-coded for the ones after this,
+ * which is a real limitation rather than an omission.
  */
 import { PrismaClient } from '@prisma/client';
 import { PERMISSIONS, ROLE_PERMISSIONS } from '../src/lib/authz/permissions';
@@ -16,6 +17,8 @@ import { JOB_DEFINITIONS } from '../src/worker/jobs';
 const prisma = new PrismaClient();
 
 const OWNER_COMPLIANCE = 'compliance-officer';
+import { NIGERIA, TOTAL_LGAS, TOTAL_STATES } from './data/nigeria';
+
 const OWNER_OPERATIONS = 'operations-officer';
 const OWNER_FINANCE = 'finance-officer';
 
@@ -196,27 +199,41 @@ async function seedFacilityTypes() {
 }
 
 async function seedStates() {
-  // Partial by design — pilot state first. Complete all 36 + FCT and their
-  // LGAs from an authoritative source before the Stage 3 gate.
-  const states = [
-    { code: 'IM', name: 'Imo', zone: 'South East', lgas: ['Owerri Municipal', 'Owerri North', 'Owerri West', 'Okigwe', 'Orlu', 'Mbaitoli', 'Ikeduru'] },
-    { code: 'LA', name: 'Lagos', zone: 'South West', lgas: ['Ikeja', 'Eti-Osa', 'Surulere', 'Alimosho', 'Ikorodu'] },
-    { code: 'FC', name: 'Federal Capital Territory', zone: 'North Central', lgas: ['Abuja Municipal', 'Bwari', 'Gwagwalada'] },
-  ];
+  /**
+   * All 36 states, the Federal Capital Territory, and all 774 LGAs.
+   *
+   * Not cosmetic: the matcher scores proximity on a practitioner's home LGA
+   * and excludes a shift outside what they said they would travel to, so a
+   * short list quietly narrows the whole platform to the places in it. This
+   * carried three states and fifteen LGAs from Stage 3 until somebody opened
+   * the profile form and asked where the rest were.
+   *
+   * The counts are asserted rather than trusted. A hand-maintained list of
+   * 774 names is exactly the kind of thing that loses one in a merge, and a
+   * missing LGA is invisible until somebody cannot find their own.
+   */
+  const total = NIGERIA.reduce((count, state) => count + state.lgas.length, 0);
+  if (NIGERIA.length !== TOTAL_STATES) {
+    throw new Error(`Expected ${TOTAL_STATES} states, found ${NIGERIA.length}.`);
+  }
+  if (total !== TOTAL_LGAS) {
+    throw new Error(`Expected ${TOTAL_LGAS} local government areas, found ${total}.`);
+  }
 
-  for (const { code, name, zone, lgas } of states) {
+  for (const { code, name, zone, lgas } of NIGERIA) {
     const state = await prisma.state.upsert({
       where: { code },
       update: { name, zone, owner: OWNER_OPERATIONS },
       create: { code, name, zone, owner: OWNER_OPERATIONS },
     });
-    for (const lgaName of lgas) {
-      await prisma.lga.upsert({
-        where: { stateId_name: { stateId: state.id, name: lgaName } },
-        update: {},
-        create: { stateId: state.id, name: lgaName },
-      });
-    }
+
+    // createMany with skipDuplicates rather than 774 upserts: the seed runs
+    // on every deploy and on every integration run, and the difference is
+    // minutes.
+    await prisma.lga.createMany({
+      data: lgas.map((lgaName) => ({ stateId: state.id, name: lgaName })),
+      skipDuplicates: true,
+    });
   }
 }
 
