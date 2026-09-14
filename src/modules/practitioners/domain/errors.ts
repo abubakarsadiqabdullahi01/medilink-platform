@@ -22,7 +22,11 @@ export const PractitionerErrors = {
     ),
 
   invalidCategory: () =>
-    new PractitionerError('invalid_professional_category', 'Choose a valid professional category.', 422),
+    new PractitionerError(
+      'invalid_professional_category',
+      'Choose a valid professional category.',
+      422,
+    ),
 
   invalidSpecialty: () =>
     new PractitionerError(

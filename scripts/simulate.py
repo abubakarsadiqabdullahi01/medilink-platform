@@ -156,6 +156,26 @@ def otp_from_logs(phone):
     return None
 
 
+PLACEHOLDER_PDF = (
+    b"%PDF-1.4\n"
+    b"1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+    b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
+    b"3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 595 842]>>endobj\n"
+    b"trailer<</Root 1 0 R>>\n%%EOF\n"
+)
+
+
+def put_bytes(url, payload, content_type):
+    """Straight to storage, the way the browser does it."""
+    request = urllib.request.Request(url, data=payload, method="PUT")
+    request.add_header("Content-Type", content_type)
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return 200 <= response.status < 300
+    except (urllib.error.HTTPError, urllib.error.URLError):
+        return False
+
+
 def iso(when):
     return when.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -343,52 +363,92 @@ def main():
     )
     check("and the practising registration", status in (200, 201), f"{status} {str(body)[:140]}")
 
-    reference_type = next(
-        (t for t in credential_types if t.get("key") == "mdcn_practising_licence"), None
-    )
-    if reference_type:
+    # Every type verified against an external register takes a reference
+    # number rather than a file — including nin_slip, which is mandatory for
+    # a doctor and needs no NIMC call to submit.
+    for reference_type in [
+        t for t in credential_types if t.get("verificationMethod") != "document_review"
+    ]:
         status, body = prac.call(
             "POST",
             "/api/v1/credentials",
-            {"credentialTypeId": reference_type["id"], "referenceNumber": f"MDCN/SIM/{int(time.time())}"},
+            {
+                "credentialTypeId": reference_type["id"],
+                "referenceNumber": f"{reference_type['key'][:6].upper()}/{int(time.time() * 1000) % 10000000}",
+            },
         )
-        submitted = check("they submit a credential", status in (200, 201), f"{status} {str(body)[:140]}")
+        submitted = check(
+            f"{reference_type['key']} submits with a reference number",
+            status in (200, 201),
+            f"{status} {str(body)[:140]}",
+        )
         submission_id = body.get("id")
 
         if submitted and submission_id:
             status, body = compliance.call(
                 "POST", f"/api/v1/credentials/{submission_id}/review", {"decision": "approve"}
             )
-            check("compliance verifies it", status == 200, f"{status} {str(body)[:140]}")
+            check(f"compliance verifies {reference_type['key']}", status == 200, f"{status} {str(body)[:140]}")
 
-    document_type = next((t for t in credential_types if t.get("key") == "good_standing"), None)
-    if document_type:
+    for document_type in [
+        t for t in credential_types if t.get("verificationMethod") == "document_review"
+    ]:
         status, body = prac.call(
             "POST",
             "/api/v1/credentials",
             {"credentialTypeId": document_type["id"], "referenceNumber": "GS/SIM/1"},
         )
         check(
-            "a document-verified credential is refused without a document",
+            f"{document_type['key']} is refused without a document",
             status == 422 and body.get("error", {}).get("code") == "document_required",
             f"{status} {str(body)[:140]}",
         )
-        gap(
-            "no way to upload a credential document from the interface",
-            "the signed-URL endpoints exist and no screen calls them, so these credentials cannot be submitted by a real user",
+
+        # The same three steps the upload control performs: ask for a signed
+        # URL, send the bytes straight to storage, submit the key.
+        status, signed = prac.call(
+            "POST",
+            "/api/v1/credentials/document-upload-url",
+            {
+                "filename": f"{document_type['key']}.pdf",
+                "contentType": "application/pdf",
+                "sizeBytes": len(PLACEHOLDER_PDF),
+            },
         )
+        got_url = check(
+            "a signed upload URL is issued", status in (200, 201), f"{status} {str(signed)[:140]}"
+        )
+
+        if got_url:
+            uploaded = put_bytes(signed["uploadUrl"], PLACEHOLDER_PDF, "application/pdf")
+            check("the file goes straight to storage", uploaded, "storage refused the PUT")
+
+            status, body = prac.call(
+                "POST",
+                "/api/v1/credentials",
+                {
+                    "credentialTypeId": document_type["id"],
+                    "documentObjectKey": signed["objectKey"],
+                },
+            )
+            submitted_doc = check(
+                f"and {document_type['key']} submits with it",
+                status in (200, 201),
+                f"{status} {str(body)[:140]}",
+            )
+            if submitted_doc and body.get("id"):
+                status, _ = compliance.call(
+                    "POST", f"/api/v1/credentials/{body['id']}/review", {"decision": "approve"}
+                )
+                check("compliance verifies the document", status == 200, f"got {status}")
 
     status, body = prac.call("GET", "/api/v1/practitioners/eligibility?scopeType=SELF")
     remaining = body.get("blockers", [])
-    if remaining:
-        note(f"still blocked by: {', '.join(remaining)}")
-        if "credential_missing" in remaining:
-            gap(
-                "a practitioner cannot become eligible through the product",
-                "the category requires a document-verified credential, and no screen can upload a document — so the last blocker cannot be cleared without a developer",
-            )
-    else:
-        check("and they become eligible for work", True)
+    check(
+        "and every blocker clears, through the product alone",
+        remaining == [],
+        f"still blocked by {remaining}",
+    )
 
     section("4.  Module 5 — when they can work")
     status, body = prac.call(
@@ -439,11 +499,75 @@ def main():
             "representativeUserId": prac_id,
         },
     )
-    check("a practitioner cannot onboard a hospital", status == 403, f"got {status}")
-    gap(
-        "a facility cannot sign itself up",
-        "createFacility is PLATFORM-scoped, so every hospital needs operations to onboard it by hand — deliberate for a pilot, a bottleneck beyond one",
+    check(
+        "a practitioner cannot onboard a hospital for somebody else",
+        status == 403,
+        f"got {status}",
     )
+
+    status, body = prac.call("GET", "/api/v1/reference")
+    self_type_id = (body.get("facilityTypes") or [{}])[0].get("id")
+    self_state_id = (body.get("states") or [{}])[0].get("id")
+    own_stamp = datetime.now(timezone.utc).strftime("%H%M%S%f")[:8]
+    status, body = prac.call(
+        "POST",
+        "/api/v1/facilities/register",
+        {
+            "name": f"Self Registered Clinic {own_stamp}",
+            "facilityTypeId": self_type_id,
+            "cacNumber": f"RC99{own_stamp}",
+            "stateId": self_state_id,
+            "addressLine": "9 Self Service Road, Lagos",
+            "contactPhone": "+2348030000009",
+        },
+    )
+    self_registered = check(
+        "but they can register one for themselves", status in (200, 201), f"{status} {str(body)[:140]}"
+    )
+    own_facility_id = body.get("id")
+
+    if self_registered:
+        check("and it lands pending rather than live", body.get("status") == "PENDING", str(body)[:140])
+
+        status, body = prac.call(
+            "POST",
+            "/api/v1/service-requests",
+            {
+                "facilityId": own_facility_id,
+                "professionalCategoryId": category_id,
+                "shiftType": "DAY",
+                "startsAt": iso(datetime.now(timezone.utc) + timedelta(hours=3)),
+                "endsAt": iso(datetime.now(timezone.utc) + timedelta(hours=11)),
+                "headcount": 1,
+                "hourlyRateKobo": 700000,
+                "cancellationTerms": "Either party may cancel up to 24 hours before the shift.",
+            },
+        )
+        if status in (200, 201) and body.get("id"):
+            status, body = prac.call(
+                "POST",
+                f"/api/v1/service-requests/{body['id']}/publish",
+                {"facilityId": own_facility_id},
+            )
+        check(
+            "an unverified facility still cannot publish a shift",
+            status in (403, 409, 422),
+            f"got {status} {str(body)[:140]}",
+        )
+
+        status, body = prac.call(
+            "POST",
+            "/api/v1/facilities/register",
+            {
+                "name": "A second one while the first is pending",
+                "facilityTypeId": self_type_id,
+                "cacNumber": f"RC98{own_stamp}",
+                "stateId": self_state_id,
+                "addressLine": "10 Self Service Road, Lagos",
+                "contactPhone": "+2348030000010",
+            },
+        )
+        check("and cannot register a second while one is pending", status == 409, f"got {status}")
 
     status, body = prac.call("GET", "/api/v1/reference")
     facility_type_id = (body.get("facilityTypes") or [{}])[0].get("id")

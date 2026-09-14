@@ -1,6 +1,10 @@
 'use client';
 
 import { CalendarPlus, LayoutDashboard, Percent, Receipt, Stethoscope, Users } from 'lucide-react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { cn } from '@/lib/utils';
+import { buttonVariants } from '@/components/ui/button';
 import { SessionProvider, useScopeIds } from '@/lib/ui/session';
 import { ConsoleShell, type NavSection } from '@/components/app/console-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -61,6 +65,7 @@ const SECTIONS: NavSection[] = [
 ];
 
 function Guard({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
   // Any facility-scoped grant will do to prove they belong here; each page
   // asks for the scope it actually needs.
   const anyFacility = [
@@ -71,12 +76,20 @@ function Guard({ children }: { children: React.ReactNode }) {
     ...useScopeIds('incident.report', 'FACILITY'),
   ];
 
-  if (anyFacility.length === 0) {
+  // Somebody with no facility is not lost — they are a hospital that has not
+  // registered yet. The register page is inside this console but outside the
+  // guard, or signing up would require the grant that signing up produces.
+  if (anyFacility.length === 0 && pathname !== '/facility/register') {
     return (
       <Alert variant="warning">
-        <AlertDescription>
-          This account holds no facility-scoped grants, so there is no facility for this console to
-          act for. Operations grants those when a facility is onboarded.
+        <AlertDescription className="space-y-3">
+          <p>
+            This account is not attached to a facility yet. Either register yours, or ask whoever
+            runs it to add you — they can grant access from their own console.
+          </p>
+          <Link href="/facility/register" className={cn(buttonVariants({ size: 'sm' }))}>
+            Register a facility
+          </Link>
         </AlertDescription>
       </Alert>
     );

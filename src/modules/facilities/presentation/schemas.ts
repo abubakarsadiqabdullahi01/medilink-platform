@@ -80,6 +80,25 @@ export type CreateFacilityInput = z.infer<typeof createFacilitySchema>;
  * is asking for, and the same value drives both the authorisation check and
  * the database filter.
  */
+/**
+ * Self-registration. The same details operations would type, minus the
+ * representative — that is whoever is signed in, and accepting it from the
+ * body would let somebody register a hospital in another person's name.
+ */
+export const registerFacilitySchema = z.object({
+  name: z.string().trim().min(3).max(200),
+  facilityTypeId: z.string().uuid(),
+  cacNumber: z.string().trim().min(3).max(40),
+  stateId: z.string().uuid(),
+  lgaId: z.string().uuid().optional(),
+  addressLine: z.string().trim().min(5).max(300),
+  contactPhone: z.string().trim().min(7).max(20),
+  contactEmail: z.string().trim().email().optional(),
+  licenceNumber: z.string().trim().max(80).optional(),
+  licenceExpiresAt: z.coerce.date().optional(),
+});
+export type RegisterFacilityInput = z.infer<typeof registerFacilitySchema>;
+
 export const listFacilitiesSchema = z.object({
   scopeType: z.enum(['PLATFORM', 'FACILITY']),
   scopeId: facilityId.optional(),

@@ -19,6 +19,64 @@ interface Eligibility {
   blockers: string[];
 }
 
+interface BlockerGuide {
+  says: string;
+  href?: string;
+  action?: string;
+}
+
+/**
+ * What each blocker actually means, and who can clear it.
+ *
+ * Half of these are not the practitioner's to fix: identity and professional
+ * registration are recorded by a compliance officer, on purpose — "a
+ * practitioner does not verify their own identity, which is the whole point".
+ * This card used to list every blocker and then offer one "Sort this out"
+ * button pointing at credentials, which could resolve neither. Somebody
+ * following it found a page with nothing on it for them and no way to tell
+ * whether they had missed a step or were simply waiting.
+ *
+ * So: what is yours to do carries a link, what is ours says so plainly.
+ */
+const BLOCKER_GUIDE: Record<string, BlockerGuide> = {
+  profile_incomplete: {
+    says: 'Your profile is missing something the matcher needs.',
+    href: '/practitioner/profile',
+    action: 'Finish your profile',
+  },
+  credential_missing: {
+    says: 'A credential your profession requires has not been submitted yet.',
+    href: '/practitioner/credentials',
+    action: 'Submit it',
+  },
+  credential_expired: {
+    says: 'One of your credentials has expired, so it no longer counts.',
+    href: '/practitioner/credentials',
+    action: 'Submit the current one',
+  },
+  identity_unverified: {
+    says: 'Your NIN has not been recorded yet. A compliance officer does that once they have seen your identity slip.',
+  },
+  identity_name_mismatch: {
+    says: 'The name on your NIN does not match the name on this account. Medilink has to settle which is right before you can be matched.',
+  },
+  registration_missing: {
+    says: 'Your professional registration is not on record. An officer records it against your licence.',
+  },
+  registration_not_active: {
+    says: 'The registration on record is not currently active. If you have renewed your licence, tell Medilink so it can be re-recorded.',
+  },
+  registration_evidence_stale: {
+    says: 'Your registration was last confirmed too long ago and is due a re-check by Medilink.',
+  },
+  screening_not_clear: {
+    says: 'A screening check is still open. Medilink resolves this one.',
+  },
+  account_not_usable: {
+    says: 'This account is not active, which stops everything else. Medilink has to lift that first.',
+  },
+};
+
 interface Assignment {
   id: string;
   status: string;
@@ -77,6 +135,13 @@ export default function PractitionerHome() {
     retry: false,
   });
 
+  const reasons = (eligibility.data?.blockers ?? []).map((blocker) => ({
+    blocker,
+    guide: BLOCKER_GUIDE[blocker] ?? { says: humanise(blocker) },
+  }));
+  const yours = reasons.filter((reason) => reason.guide.href);
+  const ours = reasons.filter((reason) => !reason.guide.href);
+
   const open = (invitations.data ?? []).filter((row) => row.status === 'INVITED');
   const next = [...(assignments.data ?? [])]
     .filter((row) => new Date(row.endsAt) > new Date())
@@ -119,19 +184,50 @@ export default function PractitionerHome() {
                   <p className="mt-1 text-sm text-muted-foreground">
                     These are the reasons, in full. Nothing is being withheld.
                   </p>
-                  <ul className="mt-2 space-y-1">
-                    {eligibility.data.blockers.map((blocker) => (
-                      <li key={blocker} className="text-sm">
-                        · {humanise(blocker)}
-                      </li>
-                    ))}
-                  </ul>
-                  <Link
-                    href="/practitioner/credentials"
-                    className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'mt-3')}
-                  >
-                    Sort this out
-                  </Link>
+
+                  {yours.length > 0 ? (
+                    <div className="mt-4">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Yours to do
+                      </p>
+                      <ul className="mt-2 space-y-2">
+                        {yours.map(({ blocker, guide }) => (
+                          <li key={blocker} className="text-sm leading-relaxed">
+                            {guide.says}{' '}
+                            {guide.href && guide.action ? (
+                              <Link
+                                href={guide.href}
+                                className="font-medium text-primary underline-offset-4 hover:underline"
+                              >
+                                {guide.action}
+                              </Link>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+
+                  {ours.length > 0 ? (
+                    <div className="mt-4">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Waiting on Medilink
+                      </p>
+                      <ul className="mt-2 space-y-2">
+                        {ours.map(({ blocker, guide }) => (
+                          <li
+                            key={blocker}
+                            className="text-sm leading-relaxed text-muted-foreground"
+                          >
+                            {guide.says}
+                          </li>
+                        ))}
+                      </ul>
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        Nothing in this second list is waiting on you.
+                      </p>
+                    </div>
+                  ) : null}
                 </>
               )}
             </div>

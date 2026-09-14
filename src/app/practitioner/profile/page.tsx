@@ -20,8 +20,10 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
 import { PageHeader } from '@/components/app/page-shell';
+import { PhotoField } from './photo-field';
 
 interface Profile {
   id: string;
@@ -29,6 +31,7 @@ interface Profile {
   specialtyId: string | null;
   yearsOfExperience: number;
   bio: string | null;
+  photoObjectKey: string | null;
   homeStateId: string | null;
   homeLgaId: string | null;
   travelPreference: string;
@@ -136,6 +139,9 @@ export default function ProfilePage() {
               </Alert>
             ) : null}
 
+            <PhotoField hasPhoto={Boolean(profile.data?.photoObjectKey)} profileExists={exists} />
+            <Separator />
+
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label>Profession</Label>
@@ -210,7 +216,9 @@ export default function ProfilePage() {
                 <Label>Local government area</Label>
                 <Select value={lgaId} onValueChange={setLgaId} disabled={lgas.length === 0}>
                   <SelectTrigger>
-                    <SelectValue placeholder={lgas.length === 0 ? 'Choose a state first' : 'Choose one'} />
+                    <SelectValue
+                      placeholder={lgas.length === 0 ? 'Choose a state first' : 'Choose one'}
+                    />
                   </SelectTrigger>
                   <SelectContent>
                     {lgas.map((row) => (
@@ -255,11 +263,7 @@ export default function ProfilePage() {
               />
             </div>
 
-            <Button
-              disabled={!categoryId}
-              loading={save.isPending}
-              onClick={() => save.mutate()}
-            >
+            <Button disabled={!categoryId} loading={save.isPending} onClick={() => save.mutate()}>
               {exists ? 'Save changes' : 'Create profile'}
             </Button>
           </CardContent>

@@ -18,6 +18,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { StatusBadge } from '@/components/app/status-badge';
+import { DocumentUpload, type UploadedDocument } from '@/components/app/document-upload';
 import { EmptyState, PageHeader, QueueSkeleton } from '@/components/app/page-shell';
 import { formatAgo, formatDate } from '@/components/app/format';
 
@@ -34,10 +35,16 @@ interface Submission {
 /**
  * Submitting a credential, and seeing what became of it.
  *
- * The reviewer's note is shown in full on a rejection or a request for more
- * information. It is the only thing that tells somebody what to fix, and
- * hiding it behind "contact support" is how a platform loses the practitioner
- * rather than the document.
+ * **What the form asks for depends on the credential.** Some types are
+ * verified by looking at a document and some by checking a reference against
+ * a register, and the API refuses the wrong one with a 422. The form now
+ * knows which is which — `verificationMethod` comes back with the vocabulary
+ * — so it asks for the right thing instead of letting somebody discover the
+ * rule by being refused.
+ *
+ * The reviewer's note is shown in full on a rejection or a request for more.
+ * It is the only thing that tells somebody what to fix, and hiding it behind
+ * "contact support" loses the practitioner rather than the document.
  */
 export default function CredentialsPage() {
   const reference = useReference();
@@ -50,6 +57,13 @@ export default function CredentialsPage() {
 
   const [credentialTypeId, setCredentialTypeId] = useState('');
   const [referenceNumber, setReferenceNumber] = useState('');
+  const [document, setDocument] = useState<UploadedDocument | null>(null);
+
+  const chosen = (reference.data?.credentialTypes ?? []).find(
+    (row) => row.id === credentialTypeId,
+  );
+  const needsDocument = chosen?.verificationMethod === 'document_review';
+  const needsReference = Boolean(chosen) && !needsDocument;
 
   const submit = useQueueAction<void>({
     queueKey,
@@ -57,9 +71,12 @@ export default function CredentialsPage() {
       api.post('/api/v1/credentials', {
         credentialTypeId,
         referenceNumber: referenceNumber.trim() || undefined,
+        documentObjectKey: document?.objectKey,
       }),
     success: 'Submitted for review',
   });
+
+  const ready = needsDocument ? Boolean(document) : Boolean(referenceNumber.trim());
 
   return (
     <>
@@ -73,23 +90,32 @@ export default function CredentialsPage() {
           <CardTitle className="text-sm">Submit a credential</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <Label>Type</Label>
-              <Select value={credentialTypeId} onValueChange={setCredentialTypeId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Choose one" />
-                </SelectTrigger>
-                <SelectContent>
-                  {(reference.data?.credentialTypes ?? []).map((row) => (
-                    <SelectItem key={row.id} value={row.id}>
-                      {row.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+          <div className="space-y-1.5">
+            <Label>Type</Label>
+            <Select
+              value={credentialTypeId}
+              onValueChange={(value) => {
+                setCredentialTypeId(value);
+                // What the form asks for changes with the type, so anything
+                // already entered no longer belongs to the question.
+                setReferenceNumber('');
+                setDocument(null);
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Choose one" />
+              </SelectTrigger>
+              <SelectContent>
+                {(reference.data?.credentialTypes ?? []).map((row) => (
+                  <SelectItem key={row.id} value={row.id}>
+                    {row.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
+          {needsReference ? (
             <div className="space-y-1.5">
               <Label htmlFor="reference">Reference or licence number</Label>
               <Input
@@ -98,24 +124,44 @@ export default function CredentialsPage() {
                 onChange={(event) => setReferenceNumber(event.target.value)}
                 placeholder="MDCN/12345"
               />
+              <p className="text-xs text-muted-foreground">
+                This one is checked against the regulator&apos;s register, so the number is enough.
+              </p>
             </div>
-          </div>
+          ) : null}
 
-          {/* Uploading is deliberately not offered yet: the signed-URL flow
-              exists on the API, and a file picker that silently did nothing
-              would be worse than none. */}
-          <Alert variant="info">
-            <AlertDescription>
-              A reference number is enough to submit. Uploading the document itself is not wired
-              into this screen yet — a reviewer may ask you for it.
-            </AlertDescription>
-          </Alert>
+          {needsDocument ? (
+            <div className="space-y-1.5">
+              <Label>Document</Label>
+              <DocumentUpload
+                endpoint="/api/v1/credentials/document-upload-url"
+                value={document}
+                onUploaded={setDocument}
+                label="Attach your certificate"
+                hint="A PDF or a clear photograph, up to 10 MB. It goes straight to storage."
+              />
+              <div className="space-y-1.5 pt-2">
+                <Label htmlFor="reference-optional">
+                  Reference number{' '}
+                  <span className="font-normal text-muted-foreground">— optional</span>
+                </Label>
+                <Input
+                  id="reference-optional"
+                  value={referenceNumber}
+                  onChange={(event) => setReferenceNumber(event.target.value)}
+                  placeholder="If the document has one"
+                />
+              </div>
+            </div>
+          ) : null}
 
-          <Button
-            disabled={!credentialTypeId || !referenceNumber.trim()}
-            loading={submit.isPending}
-            onClick={() => submit.mutate()}
-          >
+          {!chosen ? (
+            <p className="text-sm text-muted-foreground">
+              Choose a type and the form will ask for whatever that one needs.
+            </p>
+          ) : null}
+
+          <Button disabled={!chosen || !ready} loading={submit.isPending} onClick={() => submit.mutate()}>
             Submit
           </Button>
         </CardContent>
@@ -147,7 +193,7 @@ export default function CredentialsPage() {
                       {nameOf(reference.data?.credentialTypes, row.credentialTypeId)}
                     </p>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      {row.reference ?? 'No reference'} · submitted {formatAgo(row.createdAt)}
+                      {row.reference ?? 'Document attached'} · submitted {formatAgo(row.createdAt)}
                       {row.expiresAt ? ` · expires ${formatDate(row.expiresAt)}` : ''}
                     </p>
                   </div>

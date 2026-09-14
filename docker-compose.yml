@@ -68,6 +68,11 @@ services:
     environment:
       DATABASE_URL: postgresql://medilink:medilink@db:5432/medilink?schema=public
       STORAGE_ENDPOINT: http://storage:9000
+      # The address a *browser* can reach, which is not the one this process
+      # uses: a laptop cannot resolve `storage` on the compose network. Signed
+      # URLs are built against this, or every upload is correctly signed and
+      # impossible to open.
+      STORAGE_PUBLIC_ENDPOINT: http://localhost:9000
       SMTP_URL: smtp://mail:1025
     env_file:
       - .env
@@ -93,6 +98,11 @@ services:
     environment:
       DATABASE_URL: postgresql://medilink:medilink@db:5432/medilink?schema=public
       STORAGE_ENDPOINT: http://storage:9000
+      # The address a *browser* can reach, which is not the one this process
+      # uses: a laptop cannot resolve `storage` on the compose network. Signed
+      # URLs are built against this, or every upload is correctly signed and
+      # impossible to open.
+      STORAGE_PUBLIC_ENDPOINT: http://localhost:9000
       SMTP_URL: smtp://mail:1025
     env_file:
       - .env

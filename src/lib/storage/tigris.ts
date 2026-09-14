@@ -1,4 +1,9 @@
-import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  GetObjectCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { randomUUID } from 'node:crypto';
 import { env } from '../env';
@@ -12,6 +17,15 @@ import { env } from '../env';
  *     short-lived URL
  *   * PostgreSQL stores the key and metadata only, never the bytes
  *   * keys are opaque and unguessable, so a leaked key reveals nothing
+ *
+ * Two clients, one bucket. `s3` talks to storage from inside this process.
+ * `signer` exists only to build URLs a browser will follow, because the
+ * address this process uses is not always the address the browser can reach:
+ * under Docker the app resolves `storage:9000` on the compose network and a
+ * laptop cannot. Signing against the internal name produced URLs that were
+ * correctly signed and impossible to open, which is why no upload flow in
+ * this product had ever worked from a browser. With `STORAGE_PUBLIC_ENDPOINT`
+ * unset the two are the same client, which is the production case.
  */
 export const s3 = new S3Client({
   region: env.STORAGE_REGION,
@@ -23,6 +37,19 @@ export const s3 = new S3Client({
   },
 });
 
+/** Used for presigning only, never for a request this process makes itself. */
+const signer = env.STORAGE_PUBLIC_ENDPOINT
+  ? new S3Client({
+      region: env.STORAGE_REGION,
+      endpoint: env.STORAGE_PUBLIC_ENDPOINT,
+      forcePathStyle: env.STORAGE_FORCE_PATH_STYLE,
+      credentials: {
+        accessKeyId: env.STORAGE_ACCESS_KEY_ID,
+        secretAccessKey: env.STORAGE_SECRET_ACCESS_KEY,
+      },
+    })
+  : s3;
+
 export type ObjectPurpose =
   | 'credential_document'
   | 'facility_licence'
@@ -32,13 +59,19 @@ export type ObjectPurpose =
   | 'timesheet_attachment';
 
 export const ALLOWED_CONTENT_TYPES = new Set([
-  'application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/heic',
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/heic',
 ]);
 
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
 export function buildObjectKey(purpose: ObjectPurpose, ownerId: string, filename: string): string {
-  const extension = filename.includes('.') ? filename.split('.').pop()!.toLowerCase().slice(0, 8) : 'bin';
+  const extension = filename.includes('.')
+    ? filename.split('.').pop()!.toLowerCase().slice(0, 8)
+    : 'bin';
   const now = new Date();
   const yyyymm = `${now.getUTCFullYear()}${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
   return `${purpose}/${yyyymm}/${ownerId}/${randomUUID()}.${extension}`;
@@ -65,7 +98,7 @@ export async function createUploadUrl(input: {
   const objectKey = buildObjectKey(input.purpose, input.ownerId, input.filename);
 
   const url = await getSignedUrl(
-    s3,
+    signer,
     new PutObjectCommand({
       Bucket: env.STORAGE_BUCKET,
       Key: objectKey,
@@ -81,7 +114,7 @@ export async function createUploadUrl(input: {
 /** Signed GET URL. Callers must authorise the request before calling this. */
 export async function createDownloadUrl(objectKey: string): Promise<string> {
   return getSignedUrl(
-    s3,
+    signer,
     new GetObjectCommand({ Bucket: env.STORAGE_BUCKET, Key: objectKey }),
     { expiresIn: env.STORAGE_SIGNED_URL_TTL_SECONDS },
   );

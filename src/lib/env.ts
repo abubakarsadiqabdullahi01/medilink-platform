@@ -14,6 +14,14 @@ const schema = z.object({
   SESSION_SECRET: z.string().min(32),
 
   STORAGE_ENDPOINT: z.string().url(),
+  /**
+   * The endpoint a **browser** must use, when it differs from the one this
+   * process uses. In Docker the app reaches MinIO at `http://storage:9000`, a
+   * name that resolves only inside the compose network — a signed URL built
+   * against it is unreachable from the machine the person is sitting at.
+   * Unset in production, where Tigris has one address for everybody.
+   */
+  STORAGE_PUBLIC_ENDPOINT: z.string().url().optional(),
   STORAGE_REGION: z.string().default('auto'),
   STORAGE_BUCKET: z.string().min(1),
   STORAGE_ACCESS_KEY_ID: z.string().min(1),

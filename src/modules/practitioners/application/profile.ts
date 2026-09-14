@@ -109,7 +109,12 @@ async function assertState(homeStateId: string | null): Promise<void> {
  */
 async function confirmPhotoOwnership(userId: string, objectKey: string): Promise<void> {
   const stored = await prisma.storedObject.findUnique({ where: { objectKey } });
-  if (!stored || stored.ownerUserId !== userId || stored.purpose !== 'profile_photograph' || stored.deletedAt) {
+  if (
+    !stored ||
+    stored.ownerUserId !== userId ||
+    stored.purpose !== 'profile_photograph' ||
+    stored.deletedAt
+  ) {
     throw PractitionerErrors.invalidPhotoReference();
   }
   try {
@@ -233,7 +238,8 @@ export async function updateProfile(input: UpdateProfileParams): Promise<Practit
   // specialty, and vice versa.
   if (input.professionalCategoryId !== undefined || input.specialtyId !== undefined) {
     const nextCategoryId = input.professionalCategoryId ?? existing.professionalCategoryId;
-    const nextSpecialtyId = input.specialtyId === undefined ? existing.specialtyId : input.specialtyId;
+    const nextSpecialtyId =
+      input.specialtyId === undefined ? existing.specialtyId : input.specialtyId;
     await assertCategoryAndSpecialty(nextCategoryId, nextSpecialtyId);
   }
 
