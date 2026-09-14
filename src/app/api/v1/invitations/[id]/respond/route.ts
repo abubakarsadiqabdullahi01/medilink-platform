@@ -9,7 +9,8 @@ import { respondToInvitation } from '@/modules/matching/application/assignment';
  * says the practitioner is willing. Someone else's invitation is a 404 rather
  * than a 403, folding ownership into the lookup.
  */
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {

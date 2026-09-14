@@ -11,7 +11,8 @@ import { recordManualAttendance } from '@/modules/attendance/application/attenda
  * token-backed check-in, and the events keep `occurredAt` and `recordedAt`
  * separately — which is the whole difference here.
  */
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {

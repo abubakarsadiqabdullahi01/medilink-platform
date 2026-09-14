@@ -31,6 +31,7 @@
     "node_modules/",
     ".next/",
     "coverage/",
-    "playwright-report/"
+    "playwright-report/",
+    "next-env.d.ts"
   ]
 }

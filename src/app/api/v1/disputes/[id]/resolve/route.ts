@@ -11,7 +11,8 @@ import { resolveDispute } from '@/modules/disputes/application/dispute';
  * ordinary route, so the change lands in `timesheet_revisions` where somebody
  * can see it.
  */
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {

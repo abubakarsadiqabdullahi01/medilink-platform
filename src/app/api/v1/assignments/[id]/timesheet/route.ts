@@ -9,7 +9,8 @@ import { getTimesheet, timesheetRevisions } from '@/modules/timesheets/applicati
  * The revisions come back alongside because a timesheet read without its
  * history cannot answer the question a dispute asks.
  */
-export async function GET(request: Request, { params }: { params: { id: string } }) {
+export async function GET(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {

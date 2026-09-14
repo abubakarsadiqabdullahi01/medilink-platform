@@ -9,7 +9,8 @@ import { requestLicenceUploadUrl } from '@/modules/facilities/application/facili
  * The returned objectKey is attached to the facility with a subsequent PATCH,
  * which is where the reference is confirmed to belong to this facility.
  */
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {

@@ -9,7 +9,8 @@ import { confirmAssignment } from '@/modules/matching/application/assignment';
  * confirmations run at the same moment produce exactly one assignment — step
  * 6.7's requirement that overlaps are prevented rather than warned about.
  */
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {

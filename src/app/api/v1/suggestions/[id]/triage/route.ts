@@ -10,7 +10,8 @@ import { triageSuggestion } from '@/modules/suggestions/application/suggestion';
  * suggestion is finished with is an answer, and a declined suggestion with no
  * reason is how a pilot teaches people to stop bothering.
  */
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {

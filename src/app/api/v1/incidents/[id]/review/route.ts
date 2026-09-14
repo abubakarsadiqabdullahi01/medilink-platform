@@ -9,7 +9,8 @@ import { beginIncidentReview } from '@/modules/clinical-incidents/application/in
  * straight from REPORTED means nobody opened it, and the status is the only
  * evidence either way.
  */
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {

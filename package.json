@@ -55,9 +55,9 @@
     "clsx": "^2.1.1",
     "framer-motion": "^11.5.4",
     "lucide-react": "^0.445.0",
-    "next": "^14.2.13",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
+    "next": "^15.5.25",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
     "react-hook-form": "^7.53.0",
     "sonner": "^2.0.8",
     "tailwind-merge": "^2.5.2",
@@ -69,14 +69,14 @@
     "@testing-library/jest-dom": "6.9.1",
     "@testing-library/react": "^16.0.1",
     "@types/node": "^22.10.2",
-    "@types/react": "^18.3.8",
-    "@types/react-dom": "^18.3.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "@typescript-eslint/eslint-plugin": "^7.18.0",
     "@typescript-eslint/parser": "^7.18.0",
     "@vitejs/plugin-react": "^4.7.0",
     "autoprefixer": "^10.4.20",
     "eslint": "^8.57.1",
-    "eslint-config-next": "^14.2.13",
+    "eslint-config-next": "^15.5.25",
     "eslint-config-prettier": "^9.1.0",
     "jsdom": "^25.0.1",
     "postcss": "^8.4.47",
@@ -87,5 +87,11 @@
     "tsx": "^4.19.1",
     "typescript": "^5.6.2",
     "vitest": "^3.2.7"
+  },
+  "pnpm": {
+    "overrides": {
+      "postcss": "^8.5.18",
+      "vite": "^6.4.3"
+    }
   }
 }

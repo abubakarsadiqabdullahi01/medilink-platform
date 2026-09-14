@@ -9,7 +9,8 @@ import { requestDocumentDownloadUrl } from '@/modules/credentials/application/su
  * scope is 404 inside requestDocumentDownloadUrl, not 403 — see that
  * function's own comment.
  */
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {

@@ -13,7 +13,8 @@ import { attachEvidence, listEvidence } from '@/modules/disputes/application/evi
  * one side can withdraw an inconvenient photograph after the other has seen
  * it is not a record of anything.
  */
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {
@@ -34,7 +35,8 @@ export async function POST(request: Request, { params }: { params: { id: string 
 }
 
 /** GET — everything attached, for the officer working the case. */
-export async function GET(request: Request, { params }: { params: { id: string } }) {
+export async function GET(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {

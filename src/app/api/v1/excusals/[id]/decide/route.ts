@@ -10,7 +10,8 @@ import { decideExcusal } from '@/modules/cancellations-sanctions/application/exc
  * reaches NO_SHOW, so it never enters the no-show term of the reliability
  * ratio. Refusing decides nothing about fault; that finding is still to make.
  */
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {

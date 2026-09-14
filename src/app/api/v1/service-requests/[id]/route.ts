@@ -8,7 +8,8 @@ import { getServiceRequest } from '@/modules/service-requests/application/reques
  * `facilityId` is a required query parameter because it carries the
  * authorisation scope, which is checked before any database read.
  */
-export async function GET(request: Request, { params }: { params: { id: string } }) {
+export async function GET(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {

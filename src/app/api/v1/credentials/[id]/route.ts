@@ -10,7 +10,8 @@ import { resupplyCredential } from '@/modules/credentials/application/submission
  * general edit path for a pending submission: a reviewer must never be
  * looking at one version while the practitioner replaces it underneath them.
  */
-export async function PATCH(request: Request, { params }: { params: { id: string } }) {
+export async function PATCH(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {

@@ -14,7 +14,8 @@ import { runMatch } from '@/modules/matching/application/match';
  * puts names in front of a facility, which is closer to confirming somebody
  * than to reading a request.
  */
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {

@@ -9,7 +9,8 @@ import { presentCheckInToken } from '@/modules/attendance/application/attendance
  * SELF-scoped: this is the practitioner's own act. Both a six-digit code and
  * a whole QR payload arrive here, because they are the same secret.
  */
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {

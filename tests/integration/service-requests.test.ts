@@ -48,7 +48,7 @@ const NIGHT_FLOOR_KOBO = 650_000;
 let cacSequence = 0;
 
 async function post(
-  handler: (request: Request, context: { params: { id: string } }) => Promise<Response>,
+  handler: (request: Request, context: { params: Promise<{ id: string }> }) => Promise<Response>,
   path: string,
   body: unknown,
   id: string,
@@ -59,7 +59,7 @@ async function post(
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
     }),
-    { params: { id } },
+    { params: Promise.resolve({ id }) },
   );
   return { status: response.status, body: await response.json() };
 }
@@ -85,7 +85,7 @@ async function callList(query: Record<string, string>): Promise<ApiResult> {
 async function callGet(id: string, facilityId: string): Promise<ApiResult> {
   const response = await getRoute(
     new Request(`http://localhost/api/v1/service-requests/${id}?facilityId=${facilityId}`),
-    { params: { id } },
+    { params: Promise.resolve({ id }) },
   );
   return { status: response.status, body: await response.json() };
 }

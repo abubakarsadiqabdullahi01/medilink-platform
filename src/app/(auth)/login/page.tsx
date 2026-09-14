@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useMutation } from '@tanstack/react-query';
 import { ShieldCheck, TriangleAlert } from 'lucide-react';
 import { api, errorMessage } from '@/lib/ui/api';
+import type { SessionState } from '@/lib/ui/session';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -21,9 +22,18 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
 
   const signIn = useMutation({
-    mutationFn: () => api.post('/api/v1/auth/login', { phone, password }),
-    onSuccess: () => {
-      router.push('/admin');
+    mutationFn: async () => {
+      await api.post('/api/v1/auth/login', { phone, password });
+      return api.get<SessionState>('/api/v1/auth/session');
+    },
+    onSuccess: (session) => {
+      const scopes = new Set(session.grants.map((grant) => grant.scopeType));
+      const destination = scopes.has('PLATFORM')
+        ? '/admin'
+        : scopes.has('FACILITY')
+          ? '/facility'
+          : '/practitioner';
+      router.replace(destination);
       router.refresh();
     },
   });

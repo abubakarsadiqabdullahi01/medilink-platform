@@ -10,7 +10,8 @@ import { correctTimesheet } from '@/modules/timesheets/application/timesheet';
  * replaces" is a gate condition, and a diff would only be readable against a
  * history nobody kept.
  */
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return handleGuardedRequest(
     request,
     {
