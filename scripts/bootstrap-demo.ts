@@ -29,8 +29,39 @@ interface ActorSpec {
   fullName: string;
   phone: string;
   role: keyof typeof ROLE_PERMISSIONS;
-  scopeType: 'PLATFORM' | 'SELF';
+  scopeType: 'PLATFORM' | 'SELF' | 'FACILITY';
 }
+
+/**
+ * A demo facility, verified, with staff granted over it.
+ *
+ * Without this the facility console has nothing to act for: a FACILITY grant
+ * needs a facility to point at, and one cannot be created through the API by
+ * anybody who does not already hold a PLATFORM grant.
+ */
+const DEMO_FACILITY = {
+  name: 'Medilink Demo Hospital',
+  cacNumber: 'RC0000001',
+  addressLine: '1 Demo Road, Abuja',
+  contactPhone: '+2348031100010',
+};
+
+const FACILITY_STAFF: ActorSpec[] = [
+  {
+    key: 'scheduler',
+    fullName: 'Demo Facility Scheduler',
+    phone: '+2348031100004',
+    role: 'facility_scheduler',
+    scopeType: 'FACILITY',
+  },
+  {
+    key: 'wardManager',
+    fullName: 'Demo Ward Manager',
+    phone: '+2348031100005',
+    role: 'facility_owner',
+    scopeType: 'FACILITY',
+  },
+];
 
 /**
  * Phones are fixed rather than random so a second run is idempotent and the
@@ -84,7 +115,7 @@ async function ensureRole(key: string, permissions: Permission[]) {
   return role;
 }
 
-async function ensureActor(spec: ActorSpec) {
+async function ensureActor(spec: ActorSpec, facilityId?: string) {
   const passwordHash = await hashPassword(DEMO_PASSWORD);
 
   const user = await prisma.user.upsert({
@@ -101,7 +132,8 @@ async function ensureActor(spec: ActorSpec) {
 
   const role = await ensureRole(spec.role, ROLE_PERMISSIONS[spec.role] ?? []);
 
-  const scopeId = spec.scopeType === 'SELF' ? user.id : null;
+  const scopeId =
+    spec.scopeType === 'SELF' ? user.id : spec.scopeType === 'FACILITY' ? (facilityId ?? null) : null;
 
   // findFirst then create, rather than upsert: Prisma will not accept a null
   // inside a compound unique's `where`, and a PLATFORM grant's scopeId is
@@ -149,11 +181,36 @@ async function main() {
   const state = await prisma.state.findFirstOrThrow();
   const facilityType = await prisma.facilityType.findFirstOrThrow();
 
+  // The facility, already verified. Verifying it through the application
+  // layer would be more faithful, but this script exists to produce a
+  // starting position rather than to re-enact how one is reached — the
+  // end-to-end walk does that.
+  const operations = actors.find((actor) => actor.key === 'operations');
+  const facility = await prisma.facility.upsert({
+    where: { cacNumber: DEMO_FACILITY.cacNumber },
+    update: { status: 'VERIFIED' },
+    create: {
+      name: DEMO_FACILITY.name,
+      cacNumber: DEMO_FACILITY.cacNumber,
+      facilityTypeId: facilityType.id,
+      stateId: state.id,
+      addressLine: DEMO_FACILITY.addressLine,
+      contactPhone: DEMO_FACILITY.contactPhone,
+      representativeUserId: operations!.id,
+      status: 'VERIFIED',
+    },
+  });
+
+  for (const spec of FACILITY_STAFF) {
+    actors.push(await ensureActor(spec, facility.id));
+  }
+
   console.log(
     JSON.stringify(
       {
         password: DEMO_PASSWORD,
         actors,
+        facility: { id: facility.id, name: facility.name },
         reference: {
           professionalCategoryId: category.id,
           professionalCategoryName: category.name,
