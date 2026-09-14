@@ -51,6 +51,25 @@
     --ring: 184 82% 30%;
 
     --radius: 0.625rem;
+
+    /* Chart series. Slots 1 and 2 of the validated categorical palette, in
+       fixed order and never cycled. Both modes pass every check of
+       scripts/validate_palette.js against their own surface — the dark values
+       are the same hues re-stepped for a dark ground, not an automatic flip. */
+    --chart-1: 212 68% 50%;
+    --chart-2: 18 82% 56%;
+
+    /* Derived from the same warm neutrals as the rest, not the slate the
+       shadcn CLI ships by default: a cold sidebar beside a warm page reads
+       as two products bolted together. */
+    --sidebar-background: 40 16% 96%;
+    --sidebar-foreground: 40 14% 20%;
+    --sidebar-primary: 184 82% 22%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 184 30% 92%;
+    --sidebar-accent-foreground: 184 82% 18%;
+    --sidebar-border: 40 12% 88%;
+    --sidebar-ring: 184 82% 30%;
   }
 
   .dark {
@@ -88,6 +107,18 @@
     --border: 200 12% 20%;
     --input: 200 12% 22%;
     --ring: 184 62% 44%;
+
+    --chart-1: 212 76% 56%;
+    --chart-2: 16 71% 50%;
+
+    --sidebar-background: 200 18% 10%;
+    --sidebar-foreground: 40 12% 90%;
+    --sidebar-primary: 184 62% 48%;
+    --sidebar-primary-foreground: 200 20% 8%;
+    --sidebar-accent: 184 35% 18%;
+    --sidebar-accent-foreground: 184 60% 82%;
+    --sidebar-border: 200 12% 18%;
+    --sidebar-ring: 184 62% 44%;
   }
 }
 

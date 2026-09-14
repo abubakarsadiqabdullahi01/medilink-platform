@@ -107,13 +107,17 @@ export default function DashboardPage() {
   const firstName = session.user.fullName.split(' ')[0];
   const total = results.reduce((sum, result) => sum + (result.data ?? 0), 0);
   const settled = results.every((result) => !result.isPending);
+  // A queue that failed to load is not a queue that is empty, and "every
+  // queue you can work is clear" is exactly the sentence somebody acts on by
+  // closing the tab.
+  const failed = results.some((result) => result.isError);
 
   return (
     <>
       <PageHeader
         title={`Good day, ${firstName}`}
         description={
-          settled && total === 0
+          settled && !failed && total === 0
             ? 'Nothing is waiting on you. Every queue you can work is clear.'
             : 'Everything below is waiting on a person. Nothing in Medilink closes itself.'
         }

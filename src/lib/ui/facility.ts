@@ -14,8 +14,12 @@ export interface FacilitySummary {
  * The facility this console is acting for.
  *
  * Read off the caller's own grants rather than picked from a list: a
- * scheduler should never have to know their hospital's uuid, and one who
- * holds grants at two gets both back so a page can offer the choice.
+ * scheduler should never have to know their hospital's uuid.
+ *
+ * Somebody with grants at two facilities gets both ids back, but nothing
+ * offers the choice yet — `useFacilityId` takes the first, and the dashboard
+ * says so rather than letting the console look like the whole account. A
+ * switcher belongs here when a second site is real.
  *
  * The union across permissions matters — a ward manager may hold
  * `timesheet.approve` at a facility without holding `service_request.read`

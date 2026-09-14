@@ -2,10 +2,11 @@
 
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { CircleAlert, CircleCheck, Inbox } from 'lucide-react';
+import { CircleAlert, CircleCheck, Inbox, TriangleAlert } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { api } from '@/lib/ui/api';
 import { useSession } from '@/lib/ui/session';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -68,7 +69,10 @@ export default function PractitionerHome() {
 
   return (
     <>
-      <PageHeader title={`Hello, ${session.user.fullName.split(' ')[0]}`} />
+      <PageHeader
+        title={`Hello, ${session.user.fullName.split(' ')[0]}`}
+        description="Whether you can be offered work, what is waiting on an answer, and where you are next due."
+      />
 
       {eligibility.isPending ? (
         <Skeleton className="mb-6 h-24 w-full" />
@@ -118,7 +122,18 @@ export default function PractitionerHome() {
             </div>
           </CardContent>
         </Card>
-      ) : null}
+      ) : (
+        // Silence here used to be the failure mode: the card simply vanished,
+        // and an absent blocker list reads as "nothing is wrong with my
+        // account" — the opposite of what a failed fetch means.
+        <Alert variant="destructive" className="mb-6">
+          <TriangleAlert />
+          <AlertDescription>
+            Your eligibility could not be loaded, so this page cannot say whether you can be offered
+            shifts. Nothing about your account has changed — try again in a moment.
+          </AlertDescription>
+        </Alert>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-2">
         <Card>
@@ -128,6 +143,8 @@ export default function PractitionerHome() {
           <CardContent>
             {invitations.isPending ? (
               <Skeleton className="h-9 w-12" />
+            ) : invitations.isError ? (
+              <p className="text-sm text-destructive">Could not load</p>
             ) : (
               <>
                 <p className="tabular text-3xl font-semibold">{open.length}</p>
@@ -154,6 +171,8 @@ export default function PractitionerHome() {
           <CardContent>
             {assignments.isPending ? (
               <Skeleton className="h-9 w-40" />
+            ) : assignments.isError ? (
+              <p className="text-sm text-destructive">Could not load</p>
             ) : next ? (
               <>
                 <p className="font-medium">{formatWhen(next.startsAt)}</p>

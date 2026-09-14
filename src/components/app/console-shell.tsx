@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   Activity,
@@ -107,10 +107,48 @@ export function ConsoleShell({
     router.push('/login');
   }
 
+  /**
+   * The theme is remembered, and it belongs to the console rather than to the
+   * whole site.
+   *
+   * It used to be component state only, so every reload threw the choice away.
+   * Restoring it from storage is half the fix; removing the class on unmount
+   * is the other half — the public pages are light by design, and a `dark`
+   * left on `<html>` followed somebody out of the console and rendered the
+   * landing page as white on white.
+   */
+  useEffect(() => {
+    let stored = false;
+    try {
+      stored = window.localStorage.getItem('medilink:theme') === 'dark';
+    } catch {
+      // Storage can be blocked outright; the console still works without it.
+    }
+    setDark(stored);
+    document.documentElement.classList.toggle('dark', stored);
+    return () => document.documentElement.classList.remove('dark');
+  }, []);
+
+  // Escape closes the mobile drawer. The overlay is a click target and the X
+  // is a button, so this is the keyboard's way out of the same thing.
+  useEffect(() => {
+    if (!open) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') setOpen(false);
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [open]);
+
   function toggleTheme() {
     const next = !dark;
     setDark(next);
     document.documentElement.classList.toggle('dark', next);
+    try {
+      window.localStorage.setItem('medilink:theme', next ? 'dark' : 'light');
+    } catch {
+      // Private browsing: the toggle still works for this visit.
+    }
   }
 
   const initials = session.user.fullName
@@ -165,16 +203,26 @@ export function ConsoleShell({
           <p className="mt-0.5 font-semibold tracking-tight">{title}</p>
         </div>
         <Separator />
-        <div className="flex-1 overflow-y-auto scrollbar-thin p-3">{nav}</div>
+        <div className="scrollbar-thin flex-1 overflow-y-auto p-3">{nav}</div>
       </aside>
 
       {open ? (
         <div className="fixed inset-0 z-50 lg:hidden">
           <div className="absolute inset-0 bg-foreground/40" onClick={() => setOpen(false)} />
-          <aside className="absolute left-0 top-0 h-full w-72 overflow-y-auto bg-card p-5 shadow-xl">
+          <aside
+            role="dialog"
+            aria-modal="true"
+            aria-label={`${title} navigation`}
+            className="absolute left-0 top-0 h-full w-72 overflow-y-auto bg-card p-5 shadow-xl"
+          >
             <div className="mb-4 flex items-center justify-between">
               <p className="font-semibold tracking-tight">{title}</p>
-              <Button variant="ghost" size="icon" onClick={() => setOpen(false)}>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setOpen(false)}
+                aria-label="Close navigation"
+              >
                 <X />
               </Button>
             </div>
@@ -185,9 +233,18 @@ export function ConsoleShell({
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-40 flex h-14 items-center gap-3 border-b bg-background/85 px-4 backdrop-blur sm:px-6">
-          <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setOpen(true)}>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="lg:hidden"
+            onClick={() => setOpen(true)}
+            aria-label="Open navigation"
+          >
             <Menu />
           </Button>
+          {/* The sidebar carries this on a wide screen; without it here, a
+              phone gives no sign of which console you are actually in. */}
+          <p className="truncate font-semibold tracking-tight lg:hidden">{title}</p>
 
           <div className="ml-auto flex items-center gap-1">
             <Button variant="ghost" size="icon" onClick={toggleTheme} aria-label="Toggle theme">

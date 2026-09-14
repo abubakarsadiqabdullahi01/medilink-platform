@@ -2,7 +2,10 @@
 
 import {
   Building2,
+  ChartColumn,
   FileCheck2,
+  HandCoins,
+  Receipt,
   FileClock,
   Gavel,
   LayoutDashboard,
@@ -58,6 +61,14 @@ const SECTIONS: NavSection[] = [
         icon: FileClock,
         permission: 'sanction.apply',
       },
+    ],
+  },
+  {
+    heading: 'Money',
+    items: [
+      { href: '/admin/finance', label: 'Overview', icon: ChartColumn, permission: 'invoice.read' },
+      { href: '/admin/invoices', label: 'Invoices', icon: Receipt, permission: 'payout.manage' },
+      { href: '/admin/payouts', label: 'Payouts', icon: HandCoins, permission: 'payout.manage' },
     ],
   },
   {

@@ -67,6 +67,26 @@ reason the pages are not a generic CRUD skin:
 - **Correcting a timesheet says what it does before you do it** — the previous
   figures become a revision, nothing is overwritten.
 
+## Charts
+
+Two, on the finance overview, and no more. Most of what finance needs is a
+single number — what is outstanding — and a headline is the honest form for a
+headline; the charts answer what a number cannot, which is whether the balance
+is growing and where it is sitting.
+
+The series colours are slots 1 and 2 of a validated categorical palette, in
+fixed order and never cycled. Both modes pass every check — lightness band,
+chroma floor, colour-vision separation, normal-vision separation and contrast
+against their own surface — and the dark values are the same hues re-stepped
+for a dark ground rather than an automatic flip. The exact hexes that ship
+were re-validated after the HSL conversion, not assumed from the source
+palette.
+
+The "who owes what" chart is a single series, so it carries one hue and no
+legend: the facility names on the axis are the identity, not the colour. Every
+figure on both charts also appears in the table beneath them, so the page is
+readable without colour at all.
+
 ## The audit trail has no filter by actor
 
 It answers "what happened to this record". A console that made it easy to ask

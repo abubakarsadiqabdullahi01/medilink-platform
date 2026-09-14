@@ -1,6 +1,6 @@
 'use client';
 
-import { CalendarPlus, LayoutDashboard, Receipt, Stethoscope, Users } from 'lucide-react';
+import { CalendarPlus, LayoutDashboard, Percent, Receipt, Stethoscope, Users } from 'lucide-react';
 import { SessionProvider, useScopeIds } from '@/lib/ui/session';
 import { ConsoleShell, type NavSection } from '@/components/app/console-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -10,8 +10,8 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
  *
  * Everything here is scoped to one facility, and the id comes from the
  * caller's own grants rather than from a picker — a scheduler at one hospital
- * should never have to know their facility's uuid, and one who works at two
- * gets a choice rather than a guess.
+ * should never have to know their facility's uuid. Somebody who works at two
+ * is shown the first, and the dashboard says which one that is.
  */
 const SECTIONS: NavSection[] = [
   {
@@ -43,6 +43,12 @@ const SECTIONS: NavSection[] = [
         label: 'Timesheets',
         icon: Receipt,
         permission: 'timesheet.approve',
+      },
+      {
+        href: '/facility/rates',
+        label: 'Rates and allowances',
+        icon: Percent,
+        permission: 'facility.write',
       },
       {
         href: '/facility/incidents',
