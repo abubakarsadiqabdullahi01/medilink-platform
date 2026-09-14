@@ -15,8 +15,8 @@
     "format": "prettier --write .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:integration": "tsx scripts/prepare-test-db.ts && vitest run --config vitest.integration.config.ts",
-    "test:integration:watch": "vitest --config vitest.integration.config.ts",
+    "test:integration": "tsx scripts/prepare-test-db.ts && vitest run --config vitest.integration.config.mts",
+    "test:integration:watch": "vitest --config vitest.integration.config.mts",
     "test:e2e": "playwright test",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
@@ -73,7 +73,7 @@
     "@types/react-dom": "^18.3.0",
     "@typescript-eslint/eslint-plugin": "^7.18.0",
     "@typescript-eslint/parser": "^7.18.0",
-    "@vitejs/plugin-react": "^4.3.1",
+    "@vitejs/plugin-react": "^4.7.0",
     "autoprefixer": "^10.4.20",
     "eslint": "^8.57.1",
     "eslint-config-next": "^14.2.13",
@@ -86,6 +86,6 @@
     "tailwindcss": "^3.4.12",
     "tsx": "^4.19.1",
     "typescript": "^5.6.2",
-    "vitest": "^2.1.1"
+    "vitest": "^3.2.7"
   }
 }

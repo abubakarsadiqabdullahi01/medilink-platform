@@ -74,7 +74,7 @@ export default function LandingPage() {
           Sign in
         </Link>
         <Link
-          href="/api/health"
+          href="/api/v1/health"
           className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }))}
         >
           Health check
