@@ -34,3 +34,6 @@ patterns and rota templates — which nothing has asked for yet.
 
 Rules: a module never reads another module's tables; cross-module reactions go
 through domain events in `src/lib/events.ts` and the outbox.
+
+Every module now has an interface as well as an API. The three consoles and
+the decisions behind them are in [interfaces.md](interfaces.md).
