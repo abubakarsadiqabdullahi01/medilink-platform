@@ -17,7 +17,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-  schemas  = ["identity", "audit", "config", "storage", "practitioners", "credentials", "facilities", "availability", "service_requests", "matching", "notifications", "attendance", "timesheets", "cancellations_sanctions", "disputes", "clinical_incidents", "suggestions"]
+  schemas  = ["identity", "audit", "config", "storage", "practitioners", "credentials", "facilities", "availability", "service_requests", "matching", "notifications", "attendance", "timesheets", "cancellations_sanctions", "disputes", "clinical_incidents", "suggestions", "rates", "billing"]
 }
 
 // ---------------------------------------------------------------- identity
@@ -44,6 +44,7 @@ model User {
   practitionerProfile PractitionerProfile?
   credentialSubmissions CredentialSubmission[]
   representedFacilities Facility[]
+  payouts               Payout[]
   identityVerification IdentityVerification?
   suspensions   AccountSuspension[]
   screeningResult ScreeningResult?
@@ -580,6 +581,8 @@ model Facility {
 
   serviceRequests ServiceRequest[]
   incidents       ClinicalIncident[]
+  rateCards       RateCard[]
+  invoices        Invoice[]
 
   facilityType FacilityType @relation(fields: [facilityTypeId], references: [id])
   state        State        @relation(fields: [stateId], references: [id])
@@ -1749,4 +1752,194 @@ enum SuggestionStatus {
   DECLINED
 
   @@schema("suggestions")
+}
+
+// ------------------------------------------------------------------- rates
+
+// Module 11. What a facility pays on top of the agreed hourly rate for
+// unsociable hours. Multipliers are basis points — 15000 is 1.5x — because
+// money is integer kobo (rule 3) and a float multiplier reintroduces the
+// rounding argument one line later.
+//
+// Every multiplier defaults to par. The platform does not decide what a night
+// is worth to a hospital; until a facility sets one, the figures are exactly
+// what they were before this table existed.
+model RateCard {
+  id         String @id @default(uuid()) @db.Uuid
+  facilityId String @map("facility_id") @db.Uuid
+  name       String
+
+  nightMultiplierBp    Int @default(10000) @map("night_multiplier_bp")
+  holidayMultiplierBp  Int @default(10000) @map("holiday_multiplier_bp")
+  overtimeMultiplierBp Int @default(10000) @map("overtime_multiplier_bp")
+  onCallMultiplierBp   Int @default(10000) @map("on_call_multiplier_bp")
+
+  status        RateCardStatus @default(DRAFT)
+  effectiveFrom DateTime       @map("effective_from")
+  // Null while current. A superseded card keeps its dates so an invoice
+  // raised last month can still be read against the card that priced it.
+  effectiveUntil DateTime?     @map("effective_until")
+
+  createdBy String   @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  facility Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+
+  @@index([facilityId, status, effectiveFrom])
+  @@map("rate_cards")
+  @@schema("rates")
+}
+
+enum RateCardStatus {
+  DRAFT
+  ACTIVE
+  // Replaced by a later card. Never deleted: an invoice has to remain
+  // readable against the card that priced it.
+  SUPERSEDED
+
+  @@schema("rates")
+}
+
+// ----------------------------------------------------------------- billing
+
+// Module 12. What a facility owes for work already approved.
+model Invoice {
+  id         String @id @default(uuid()) @db.Uuid
+  facilityId String @map("facility_id") @db.Uuid
+  number     String @unique
+
+  periodStart DateTime @map("period_start")
+  periodEnd   DateTime @map("period_end")
+
+  // Integer kobo throughout. `grossKobo` is what the lines come to;
+  // `platformFeeKobo` is Medilink's share and is zero until step 3.1.
+  grossKobo       Int @map("gross_kobo")
+  platformFeeKobo Int @default(0) @map("platform_fee_kobo")
+  currency        String @default("NGN")
+
+  status   InvoiceStatus @default(DRAFT)
+  issuedAt DateTime?     @map("issued_at")
+  paidAt   DateTime?     @map("paid_at")
+
+  createdBy String   @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  facility Facility      @relation(fields: [facilityId], references: [id])
+  lines    InvoiceLine[]
+
+  @@index([facilityId, status])
+  @@map("invoices")
+  @@schema("billing")
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PAID
+  // Kept, never deleted, for the reason a credit note exists at all.
+  VOID
+
+  @@schema("billing")
+}
+
+// One approved shift on an invoice, with the bands it was priced from. The
+// breakdown is stored rather than recomputed: a rate card can be superseded,
+// and an invoice must still say what it said when it was issued.
+model InvoiceLine {
+  id           String @id @default(uuid()) @db.Uuid
+  invoiceId    String @map("invoice_id") @db.Uuid
+  assignmentId String @unique @map("assignment_id") @db.Uuid
+
+  /// The rate card that priced it, so the figures can be explained later.
+  rateCardId String? @map("rate_card_id") @db.Uuid
+
+  practitionerId String @map("practitioner_id") @db.Uuid
+  hourlyRateKobo Int    @map("hourly_rate_kobo")
+
+  ordinaryMinutes Int @map("ordinary_minutes")
+  nightMinutes    Int @map("night_minutes")
+  holidayMinutes  Int @map("holiday_minutes")
+  overtimeMinutes Int @map("overtime_minutes")
+  onCallMinutes   Int @map("on_call_minutes")
+
+  baseKobo    Int @map("base_kobo")
+  premiumKobo Int @map("premium_kobo")
+  amountKobo  Int @map("amount_kobo")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@map("invoice_lines")
+  @@schema("billing")
+}
+
+// Double-entry. Every movement is two rows or more, and a transaction that
+// does not sum to zero is refused before it is written — see
+// `assertBalanced` in the domain. Append-only: a mistake is corrected by a
+// reversing transaction, never by an update.
+model LedgerEntry {
+  id            String @id @default(uuid()) @db.Uuid
+  transactionId String @map("transaction_id") @db.Uuid
+
+  account String
+  /// Signed. Positive increases what the account holds.
+  amountKobo Int    @map("amount_kobo")
+  currency   String @default("NGN")
+
+  /// The facility or practitioner this side belongs to; null for the
+  /// platform's own accounts.
+  subjectId String? @map("subject_id") @db.Uuid
+  memo      String
+
+  invoiceId String? @map("invoice_id") @db.Uuid
+  payoutId  String? @map("payout_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([transactionId])
+  @@index([account, subjectId])
+  @@map("ledger_entries")
+  @@schema("billing")
+}
+
+// What a practitioner is paid. Nothing here moves money on its own: a payout
+// is prepared, a person releases it, and only then does the adapter run.
+model Payout {
+  id             String @id @default(uuid()) @db.Uuid
+  practitionerId String @map("practitioner_id") @db.Uuid
+
+  amountKobo Int    @map("amount_kobo")
+  currency   String @default("NGN")
+
+  status PayoutStatus @default(PREPARED)
+
+  /// The gateway's own identifier, once it has one. Null while stubbed.
+  providerReference String? @map("provider_reference")
+  failureReason     String? @map("failure_reason")
+
+  releasedBy String?   @map("released_by") @db.Uuid
+  releasedAt DateTime? @map("released_at")
+  settledAt  DateTime? @map("settled_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  practitioner User @relation(fields: [practitionerId], references: [id])
+
+  @@index([practitionerId, status])
+  @@map("payouts")
+  @@schema("billing")
+}
+
+enum PayoutStatus {
+  PREPARED
+  RELEASED
+  SETTLED
+  FAILED
+
+  @@schema("billing")
 }

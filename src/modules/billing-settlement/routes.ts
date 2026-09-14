@@ -1,5 +1,4 @@
-// Route table for billing settlement. Each entry names the permission and the scope
-// type it is checked against, so authorisation is reviewable in one place.
+// Route table for billing and settlement.
 import type { Permission } from '@/lib/authz/permissions';
 import type { ScopeType } from '@/lib/authz/guard';
 
@@ -10,4 +9,17 @@ export interface RouteDefinition {
   scopeType: ScopeType;
 }
 
-export const ROUTES: RouteDefinition[] = [];
+/**
+ * Raising and issuing an invoice is `payout.manage` at PLATFORM, not the
+ * facility's own act: a facility that could issue its own invoices could
+ * decide what it owes. It reads them at FACILITY scope and pays them there.
+ */
+export const ROUTES: RouteDefinition[] = [
+  { method: 'POST', path: '/api/v1/invoices', permission: 'payout.manage', scopeType: 'PLATFORM' },
+  { method: 'GET', path: '/api/v1/invoices', permission: 'invoice.read', scopeType: 'FACILITY' },
+  { method: 'POST', path: '/api/v1/invoices/:id/issue', permission: 'payout.manage', scopeType: 'PLATFORM' },
+  { method: 'POST', path: '/api/v1/invoices/:id/pay', permission: 'payout.manage', scopeType: 'PLATFORM' },
+  { method: 'POST', path: '/api/v1/payouts', permission: 'payout.manage', scopeType: 'PLATFORM' },
+  { method: 'POST', path: '/api/v1/payouts/:id/release', permission: 'payout.manage', scopeType: 'PLATFORM' },
+  { method: 'GET', path: '/api/v1/payouts', permission: 'invoice.read', scopeType: 'SELF' },
+];

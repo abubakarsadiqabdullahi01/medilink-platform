@@ -1,5 +1,4 @@
-// Route table for rates contracts. Each entry names the permission and the scope
-// type it is checked against, so authorisation is reviewable in one place.
+// Route table for rates and contracts.
 import type { Permission } from '@/lib/authz/permissions';
 import type { ScopeType } from '@/lib/authz/guard';
 
@@ -10,4 +9,7 @@ export interface RouteDefinition {
   scopeType: ScopeType;
 }
 
-export const ROUTES: RouteDefinition[] = [];
+export const ROUTES: RouteDefinition[] = [
+  { method: 'POST', path: '/api/v1/rate-cards', permission: 'facility.write', scopeType: 'FACILITY' },
+  { method: 'GET', path: '/api/v1/rate-cards', permission: 'facility.read', scopeType: 'FACILITY' },
+];

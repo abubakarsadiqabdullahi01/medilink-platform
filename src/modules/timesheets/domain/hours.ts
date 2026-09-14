@@ -9,10 +9,15 @@ import { WAT_OFFSET_MINUTES } from '@/modules/availability/domain/availability';
  * per rule 3.
  *
  * What this deliberately does **not** do is apply an allowance multiplier.
- * Night, weekend and overtime rates are module 10, which is Stage 8, and the
- * revenue decision behind them (step 3.1) has not been taken. The bands are
- * recorded so that when the rate card exists it is a lookup, not a
- * recalculation of history.
+ * That is module 11's job, against a facility's rate card, and it reads the
+ * bands recorded here rather than recalculating history.
+ *
+ * The bands come in two forms. `nightMinutes` and `holidayMinutes` overlap —
+ * a night shift on Christmas is in both — which is what a reader wants to
+ * see. `exclusive` splits the same minutes into buckets that sum to
+ * `billableMinutes` exactly once each, which is what pricing needs: without
+ * it a holiday night would be paid a night premium *and* a holiday premium,
+ * compounding two rates nobody agreed to.
  */
 
 const MINUTE = 60 * 1000;
@@ -38,6 +43,21 @@ export interface WorkedShift {
   onCallMinutes?: number;
 }
 
+/**
+ * The same billable minutes, split so each falls in exactly one bucket.
+ *
+ * Precedence is holiday, then night, then ordinary — the scarcer the labour,
+ * the higher the band, and a minute that is both is the scarcer one. They sum
+ * to `billableMinutes`, which is asserted in the unit tests because a pricing
+ * function that silently lost or duplicated a minute would be very hard to
+ * spot in a total.
+ */
+export interface ExclusiveBands {
+  ordinaryMinutes: number;
+  nightMinutes: number;
+  holidayMinutes: number;
+}
+
 export interface TimesheetTotals {
   workedMinutes: number;
   breakMinutes: number;
@@ -47,6 +67,7 @@ export interface TimesheetTotals {
   holidayMinutes: number;
   onCallMinutes: number;
   amountKobo: number;
+  exclusive: ExclusiveBands;
 }
 
 export class TimesheetError extends Error {
@@ -83,19 +104,26 @@ function classifyMinutes(
   from: Date,
   to: Date,
   holidayDates: ReadonlySet<string>,
-): { total: number; night: number; holiday: number } {
+): { total: number; night: number; holiday: number; nightNotHoliday: number } {
   let total = 0;
   let night = 0;
   let holiday = 0;
+  // Counted in the same pass: a second walk to work out the overlap would be
+  // a second thing that could disagree with the first.
+  let nightNotHoliday = 0;
 
   for (let at = from.getTime(); at < to.getTime(); at += MINUTE) {
     const { minuteOfDay, date } = watParts(new Date(at));
+    const isNight = isNightMinute(minuteOfDay);
+    const isHoliday = holidayDates.has(date);
+
     total += 1;
-    if (isNightMinute(minuteOfDay)) night += 1;
-    if (holidayDates.has(date)) holiday += 1;
+    if (isNight) night += 1;
+    if (isHoliday) holiday += 1;
+    if (isNight && !isHoliday) nightNotHoliday += 1;
   }
 
-  return { total, night, holiday };
+  return { total, night, holiday, nightNotHoliday };
 }
 
 export function computeTimesheet(shift: WorkedShift): TimesheetTotals {
@@ -145,6 +173,21 @@ export function computeTimesheet(shift: WorkedShift): TimesheetTotals {
 
   const onCallMinutes = Math.max(0, shift.onCallMinutes ?? 0);
 
+  /**
+   * The exclusive split, scaled by the same break deduction and then made to
+   * add up exactly. Rounding three numbers independently can lose or gain a
+   * minute; ordinary absorbs the remainder because it is the largest bucket
+   * in every realistic shift and the cheapest, so any drift favours neither
+   * party by more than a minute's ordinary rate.
+   */
+  const exclusiveHoliday = Math.round(classified.holiday * scale);
+  const exclusiveNight = Math.round(classified.nightNotHoliday * scale);
+  const exclusive: ExclusiveBands = {
+    holidayMinutes: exclusiveHoliday,
+    nightMinutes: exclusiveNight,
+    ordinaryMinutes: Math.max(0, billableMinutes - exclusiveHoliday - exclusiveNight),
+  };
+
   // Integer kobo. Rounded once, at the end, so the stored amount is exactly
   // what a ledger entry will carry.
   const amountKobo = Math.round((billableMinutes * shift.hourlyRateKobo) / 60);
@@ -158,6 +201,7 @@ export function computeTimesheet(shift: WorkedShift): TimesheetTotals {
     holidayMinutes,
     onCallMinutes,
     amountKobo,
+    exclusive,
   };
 }
 

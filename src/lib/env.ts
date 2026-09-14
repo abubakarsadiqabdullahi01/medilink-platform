@@ -25,7 +25,10 @@ const schema = z.object({
   SMS_API_KEY: z.string().optional(),
   SMTP_URL: z.string().optional(),
 
-  PAYMENT_PROVIDER: z.enum(['paystack', 'remita', 'none']).default('none'),
+  // 'console' is the local stub, the same shape SMS_PROVIDER uses. It
+  // refuses to run outside local, because a stub that reports money as paid
+  // in staging is worse than no gateway at all.
+  PAYMENT_PROVIDER: z.enum(['console', 'paystack', 'remita', 'none']).default('none'),
   PAYSTACK_SECRET_KEY: z.string().optional(),
   PAYSTACK_WEBHOOK_SECRET: z.string().optional(),
 

@@ -1,0 +1,468 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('next/headers', async () => {
+  const { cookieJar } = await import('./support/cookie-jar');
+  return { cookies: () => cookieJar };
+});
+
+import { prisma } from '@/lib/db';
+import { EVENTS } from '@/lib/events';
+import { ROLE_PERMISSIONS } from '@/lib/authz/permissions';
+import { createFacility, verifyFacility } from '@/modules/facilities/application/facility';
+import {
+  createServiceRequest,
+  publishServiceRequest,
+} from '@/modules/service-requests/application/request';
+import {
+  confirmAssignment,
+  invitePractitioners,
+  respondToInvitation,
+} from '@/modules/matching/application/assignment';
+import { recordManualAttendance } from '@/modules/attendance/application/attendance';
+import { reviewTimesheet, submitTimesheet } from '@/modules/timesheets/application/timesheet';
+import { createRateCard } from '@/modules/rates-contracts/application/rate-card';
+import {
+  accountBalance,
+  generateInvoice,
+  issueInvoice,
+  recordPayment,
+} from '@/modules/billing-settlement/application/invoice';
+import {
+  amountOwed,
+  preparePayout,
+  releasePayout,
+} from '@/modules/billing-settlement/application/payout';
+import { clearCookies } from './support/cookie-jar';
+import {
+  createFacilityType,
+  createProfessionalCategory,
+  createState,
+  createUser,
+  ensureRole,
+  grant,
+} from './support/fixtures';
+
+/**
+ * Modules 11 and 12 against a real database.
+ *
+ * What the pure tests cannot cover: that an approved shift becomes an invoice
+ * line at the facility's own rates, that the ledger balances after every
+ * step, and that nothing can be billed or paid twice.
+ */
+
+const HOURLY_RATE_KOBO = 500_000;
+
+/** A fixed past Wednesday, 08:00–16:00 WAT: all ordinary, no night, no holiday. */
+const WORKED_FROM = new Date('2026-09-09T07:00:00.000Z');
+const WORKED_TO = new Date('2026-09-09T15:00:00.000Z');
+
+/**
+ * The shift as scheduled is in the future, because publishing refuses one
+ * that has already started. The hours *recorded* against it are in the past,
+ * which is the ordinary shape of a manual attendance record.
+ */
+const SHIFT_START = new Date(Date.now() + 2 * 60 * 60 * 1000);
+const SHIFT_END = new Date(SHIFT_START.getTime() + 8 * 60 * 60 * 1000);
+
+/** Wide enough to contain the scheduled shift wherever "now" falls. */
+const PERIOD_START = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+const PERIOD_END = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+
+let sequence = 0;
+
+interface World {
+  facilityId: string;
+  schedulerId: string;
+  reviewerId: string;
+  financeId: string;
+  practitionerId: string;
+  assignmentId: string;
+}
+
+/** A shift worked and approved — the state billing starts from. */
+async function buildWorld(): Promise<World> {
+  await ensureRole('facility_owner', ROLE_PERMISSIONS.facility_owner ?? []);
+
+  const state = await createState();
+  const facilityType = await createFacilityType();
+  const representative = await createUser({ fullName: 'Facility Representative' });
+  const ops = await createUser({ fullName: 'Operations Officer' });
+  const verifier = await createUser({ fullName: 'Verifying Officer' });
+
+  sequence += 1;
+  const facility = await createFacility({
+    name: 'Kano Teaching Hospital',
+    facilityTypeId: facilityType.id,
+    cacNumber: `RC${900_000 + sequence}`,
+    stateId: state.id,
+    addressLine: '5 Zaria Road, Kano',
+    contactPhone: '+2348031234567',
+    representativeUserId: representative.id,
+    actorId: ops.id,
+  });
+  await verifyFacility({ facilityId: facility.id, verifierId: verifier.id, decision: 'approve' });
+
+  const category = await createProfessionalCategory();
+  const scheduler = await createUser({ fullName: 'Facility Scheduler' });
+  await grant({
+    userId: scheduler.id,
+    roleKey: 'facility_scheduler',
+    permissions: ['service_request.publish', 'assignment.confirm', 'attendance.record'],
+    scopeType: 'FACILITY',
+    scopeId: facility.id,
+  });
+
+  const reviewer = await createUser({ fullName: 'Ward Manager' });
+  await grant({
+    userId: reviewer.id,
+    roleKey: 'facility_approver',
+    permissions: ['timesheet.approve', 'service_request.read', 'facility.write'],
+    scopeType: 'FACILITY',
+    scopeId: facility.id,
+  });
+
+  const finance = await createUser({ fullName: 'Finance Officer' });
+  await grant({
+    userId: finance.id,
+    roleKey: 'finance_officer',
+    permissions: ['payout.manage', 'invoice.read'],
+    scopeType: 'PLATFORM',
+  });
+
+  const request = await createServiceRequest({
+    facilityId: facility.id,
+    professionalCategoryId: category.id,
+    shiftType: 'DAY',
+    startsAt: SHIFT_START,
+    endsAt: SHIFT_END,
+    headcount: 1,
+    hourlyRateKobo: HOURLY_RATE_KOBO,
+    urgency: 'ROUTINE',
+    cancellationTerms: 'Either party may cancel up to 24 hours before the shift.',
+    actorId: scheduler.id,
+  });
+  await publishServiceRequest({
+    requestId: request.id,
+    facilityId: facility.id,
+    actorId: scheduler.id,
+  });
+
+  const practitioner = await createUser({ fullName: 'Aisha Bello' });
+  const [invitation] = await invitePractitioners({
+    requestId: request.id,
+    facilityId: facility.id,
+    userIds: [practitioner.id],
+    actorId: scheduler.id,
+  });
+  await respondToInvitation({
+    invitationId: invitation!.id,
+    userId: practitioner.id,
+    decision: 'accept',
+  });
+  const assignment = await confirmAssignment({
+    requestId: request.id,
+    facilityId: facility.id,
+    userId: practitioner.id,
+    actorId: scheduler.id,
+  });
+
+  await recordManualAttendance({
+    assignmentId: assignment.id,
+    actorId: scheduler.id,
+    checkedInAt: WORKED_FROM,
+    checkedOutAt: WORKED_TO,
+    breakMinutes: 0,
+    reason: 'Ward network was down for the whole shift; taken from the paper log.',
+  });
+  await submitTimesheet({ assignmentId: assignment.id, userId: practitioner.id });
+  await reviewTimesheet({
+    assignmentId: assignment.id,
+    facilityId: facility.id,
+    actorId: reviewer.id,
+    decision: 'approve',
+  });
+
+  return {
+    facilityId: facility.id,
+    schedulerId: scheduler.id,
+    reviewerId: reviewer.id,
+    financeId: finance.id,
+    practitionerId: practitioner.id,
+    assignmentId: assignment.id,
+  };
+}
+
+const period = (world: World) => ({
+  facilityId: world.facilityId,
+  periodStart: PERIOD_START,
+  periodEnd: PERIOD_END,
+  actorId: world.financeId,
+});
+
+beforeEach(() => {
+  clearCookies();
+});
+
+describe('invoicing approved work', () => {
+  it('bills eight hours at the agreed rate when no rate card is set', async () => {
+    const world = await buildWorld();
+    const invoice = await generateInvoice(period(world));
+
+    // No card means par on every band: exactly what the timesheet said.
+    expect(invoice.lines).toHaveLength(1);
+    expect(invoice.grossKobo).toBe(4_000_000);
+    expect(invoice.lines[0]!.baseKobo).toBe(4_000_000);
+    expect(invoice.lines[0]!.premiumKobo).toBe(0);
+    expect(invoice.status).toBe('DRAFT');
+  });
+
+  it('takes no platform fee while step 3.1 is unsettled', async () => {
+    const world = await buildWorld();
+    const invoice = await generateInvoice(period(world));
+
+    expect(invoice.platformFeeKobo).toBe(0);
+    const platform = await accountBalance('PLATFORM_REVENUE');
+    expect(platform).toBe(0);
+  });
+
+  it('refuses to bill the same shift twice', async () => {
+    const world = await buildWorld();
+    await generateInvoice(period(world));
+
+    // Nothing left to bill, rather than a second invoice for the same work.
+    await expect(generateInvoice(period(world))).rejects.toThrow(/No approved shifts/);
+  });
+
+  it('will not bill a shift that has not been approved', async () => {
+    const world = await buildWorld();
+    await prisma.attendanceRecord.update({
+      where: { assignmentId: world.assignmentId },
+      data: { status: 'SUBMITTED' },
+    });
+
+    await expect(generateInvoice(period(world))).rejects.toThrow(/No approved shifts/);
+  });
+
+  it('publishes InvoiceCreated and writes an audit row', async () => {
+    const world = await buildWorld();
+    const invoice = await generateInvoice(period(world));
+
+    const event = await prisma.outboxEvent.findFirst({
+      where: { eventType: EVENTS.InvoiceCreated, aggregateId: invoice.id },
+    });
+    expect(event).not.toBeNull();
+
+    const audit = await prisma.auditLog.findFirst({
+      where: { action: 'invoice.created', entityId: invoice.id },
+    });
+    expect(audit?.actorId).toBe(world.financeId);
+  });
+});
+
+describe('a rate card changes the figures', () => {
+  it('pays a night premium on night minutes', async () => {
+    const world = await buildWorld();
+
+    // 20:00–04:00 WAT: entirely inside the night window.
+    await prisma.attendanceRecord.update({
+      where: { assignmentId: world.assignmentId },
+      data: {
+        checkedInAt: new Date('2026-09-09T19:00:00.000Z'),
+        checkedOutAt: new Date('2026-09-10T03:00:00.000Z'),
+      },
+    });
+    await prisma.timesheet.updateMany({
+      where: { attendanceRecord: { assignmentId: world.assignmentId } },
+      data: { nightMinutes: 480, billableMinutes: 480 },
+    });
+
+    await createRateCard({
+      facilityId: world.facilityId,
+      actorId: world.reviewerId,
+      name: 'Night premium',
+      nightMultiplierBp: 15_000,
+    });
+
+    const invoice = await generateInvoice(period(world));
+    // Eight night hours at 1.5x ₦5,000.
+    expect(invoice.grossKobo).toBe(6_000_000);
+    expect(invoice.lines[0]!.premiumKobo).toBe(2_000_000);
+  });
+
+  it('leaves the figures alone at par', async () => {
+    const world = await buildWorld();
+    await createRateCard({
+      facilityId: world.facilityId,
+      actorId: world.reviewerId,
+      name: 'No allowances',
+    });
+
+    const invoice = await generateInvoice(period(world));
+    expect(invoice.grossKobo).toBe(4_000_000);
+    expect(invoice.lines[0]!.premiumKobo).toBe(0);
+  });
+
+  it('supersedes the previous card rather than deleting it', async () => {
+    const world = await buildWorld();
+    const first = await createRateCard({
+      facilityId: world.facilityId,
+      actorId: world.reviewerId,
+      name: 'First',
+      nightMultiplierBp: 12_000,
+    });
+    await createRateCard({
+      facilityId: world.facilityId,
+      actorId: world.reviewerId,
+      name: 'Second',
+      nightMultiplierBp: 15_000,
+    });
+
+    // An invoice raised last month must stay readable against the card that
+    // priced it, so the old one is kept with its dates.
+    const old = await prisma.rateCard.findUniqueOrThrow({ where: { id: first.id } });
+    expect(old.status).toBe('SUPERSEDED');
+    expect(old.effectiveUntil).not.toBeNull();
+
+    const active = await prisma.rateCard.findMany({
+      where: { facilityId: world.facilityId, status: 'ACTIVE' },
+    });
+    expect(active).toHaveLength(1);
+    expect(active[0]!.name).toBe('Second');
+  });
+
+  it('refuses a multiplier below par', async () => {
+    const world = await buildWorld();
+    await expect(
+      createRateCard({
+        facilityId: world.facilityId,
+        actorId: world.reviewerId,
+        name: 'A rate cut in disguise',
+        nightMultiplierBp: 9_000,
+      }),
+    ).rejects.toThrow(/below_par/);
+  });
+});
+
+describe('the ledger', () => {
+  it('balances to zero after every step of the cycle', async () => {
+    const world = await buildWorld();
+    const invoice = await generateInvoice(period(world));
+
+    // Work approved: the facility owes, the practitioner is owed.
+    expect(await accountBalance('FACILITY_PAYABLE', world.facilityId)).toBe(4_000_000);
+    expect(await amountOwed(world.practitionerId)).toBe(4_000_000);
+
+    await issueInvoice({ invoiceId: invoice.id, actorId: world.financeId });
+    await recordPayment({ invoiceId: invoice.id, actorId: world.financeId });
+
+    expect(await accountBalance('FACILITY_PAYABLE', world.facilityId)).toBe(0);
+    expect(await accountBalance('CASH')).toBe(4_000_000);
+
+    const payout = await preparePayout({
+      practitionerId: world.practitionerId,
+      actorId: world.financeId,
+    });
+    await releasePayout({ payoutId: payout.id, actorId: world.financeId });
+
+    // Everything settled: nothing left anywhere.
+    expect(await amountOwed(world.practitionerId)).toBe(0);
+    expect(await accountBalance('CASH')).toBe(0);
+
+    const all = await prisma.ledgerEntry.aggregate({ _sum: { amountKobo: true } });
+    expect(all._sum.amountKobo).toBe(0);
+  });
+
+  it('sums every transaction to zero', async () => {
+    const world = await buildWorld();
+    const invoice = await generateInvoice(period(world));
+    await issueInvoice({ invoiceId: invoice.id, actorId: world.financeId });
+    await recordPayment({ invoiceId: invoice.id, actorId: world.financeId });
+
+    const rows = await prisma.ledgerEntry.groupBy({
+      by: ['transactionId'],
+      _sum: { amountKobo: true },
+    });
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row._sum.amountKobo, row.transactionId).toBe(0);
+    }
+  });
+});
+
+describe('paying a practitioner', () => {
+  it('settles through the stub and clears what was owed', async () => {
+    const world = await buildWorld();
+    const invoice = await generateInvoice(period(world));
+    await issueInvoice({ invoiceId: invoice.id, actorId: world.financeId });
+    await recordPayment({ invoiceId: invoice.id, actorId: world.financeId });
+
+    const prepared = await preparePayout({
+      practitionerId: world.practitionerId,
+      actorId: world.financeId,
+    });
+    expect(prepared.status).toBe('PREPARED');
+    expect(prepared.amountKobo).toBe(4_000_000);
+
+    const released = await releasePayout({ payoutId: prepared.id, actorId: world.financeId });
+    expect(released.status).toBe('SETTLED');
+    // The stub says so in the reference, so nobody mistakes it for a bank one.
+    expect(released.providerReference).toMatch(/^stub-/);
+
+    const event = await prisma.outboxEvent.findFirst({
+      where: { eventType: EVENTS.PayoutSettled, aggregateId: prepared.id },
+    });
+    expect(event).not.toBeNull();
+  });
+
+  it('will not prepare a second payout for money already in flight', async () => {
+    const world = await buildWorld();
+    await generateInvoice(period(world));
+
+    await preparePayout({ practitionerId: world.practitionerId, actorId: world.financeId });
+    await expect(
+      preparePayout({ practitionerId: world.practitionerId, actorId: world.financeId }),
+    ).rejects.toThrow(/not owed anything/);
+  });
+
+  it('will not pay somebody who is owed nothing', async () => {
+    const world = await buildWorld();
+    await expect(
+      preparePayout({ practitionerId: world.practitionerId, actorId: world.financeId }),
+    ).rejects.toThrow(/not owed anything/);
+  });
+
+  it('will not release the same payout twice', async () => {
+    const world = await buildWorld();
+    await generateInvoice(period(world));
+    const payout = await preparePayout({
+      practitionerId: world.practitionerId,
+      actorId: world.financeId,
+    });
+    await releasePayout({ payoutId: payout.id, actorId: world.financeId });
+
+    await expect(
+      releasePayout({ payoutId: payout.id, actorId: world.financeId }),
+    ).rejects.toThrow(/cannot become RELEASED/);
+  });
+});
+
+describe('invoice status', () => {
+  it('will not pay a draft that was never issued', async () => {
+    const world = await buildWorld();
+    const invoice = await generateInvoice(period(world));
+
+    await expect(
+      recordPayment({ invoiceId: invoice.id, actorId: world.financeId }),
+    ).rejects.toThrow(/cannot become PAID/);
+  });
+
+  it('will not issue the same invoice twice', async () => {
+    const world = await buildWorld();
+    const invoice = await generateInvoice(period(world));
+    await issueInvoice({ invoiceId: invoice.id, actorId: world.financeId });
+
+    await expect(
+      issueInvoice({ invoiceId: invoice.id, actorId: world.financeId }),
+    ).rejects.toThrow(/cannot become ISSUED/);
+  });
+});
