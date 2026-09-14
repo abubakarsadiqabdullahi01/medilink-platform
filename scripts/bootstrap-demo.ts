@@ -46,6 +46,21 @@ const DEMO_FACILITY = {
   contactPhone: '+2348031100010',
 };
 
+/**
+ * A practitioner, so the practitioner console has a door.
+ *
+ * They could register through the API and the end-to-end walk does exactly
+ * that — this is only a known phone number to sign in with, not a claim that
+ * registration needs seeding.
+ */
+const DEMO_PRACTITIONER: ActorSpec = {
+  key: 'practitioner',
+  fullName: 'Demo Practitioner',
+  phone: '+2348031100006',
+  role: 'practitioner',
+  scopeType: 'SELF',
+};
+
 const FACILITY_STAFF: ActorSpec[] = [
   {
     key: 'scheduler',
@@ -204,6 +219,23 @@ async function main() {
   for (const spec of FACILITY_STAFF) {
     actors.push(await ensureActor(spec, facility.id));
   }
+
+  const practitioner = await ensureActor(DEMO_PRACTITIONER);
+  actors.push(practitioner);
+
+  // A profile too, because without one there is nothing for the matcher to
+  // read and the console's first screen is a form rather than the product.
+  await prisma.practitionerProfile.upsert({
+    where: { userId: practitioner.id },
+    update: {},
+    create: {
+      userId: practitioner.id,
+      professionalCategoryId: category.id,
+      yearsOfExperience: 5,
+      homeStateId: state.id,
+      travelPreference: 'ANYWHERE',
+    },
+  });
 
   console.log(
     JSON.stringify(
