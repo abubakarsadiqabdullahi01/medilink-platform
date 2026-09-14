@@ -28,7 +28,13 @@ import {
 import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
 import { StatusBadge } from '@/components/app/status-badge';
-import { Detail, DetailGrid, EmptyState, PageHeader, QueueSkeleton } from '@/components/app/page-shell';
+import {
+  Detail,
+  DetailGrid,
+  EmptyState,
+  PageHeader,
+  QueueSkeleton,
+} from '@/components/app/page-shell';
 import { formatMinutes, formatNaira, formatWhen } from '@/components/app/format';
 
 interface Assignment {
@@ -198,7 +204,10 @@ export default function MyTimesheetsPage() {
                     <Detail label="Worked">{formatMinutes(sheet.workedMinutes)}</Detail>
                     <Detail label="Break">{formatMinutes(sheet.breakMinutes)}</Detail>
                     <Detail label="Billable">{formatMinutes(sheet.billableMinutes)}</Detail>
-                    <Detail label="You are owed">
+                    {/* Not "you are owed": this is the timesheet at the base
+                        rate, and what is actually credited is priced against
+                        the facility's rate card when the shift is invoiced. */}
+                    <Detail label="At the agreed rate">
                       <strong>{formatNaira(sheet.amountKobo)}</strong>
                     </Detail>
                   </DetailGrid>
@@ -214,8 +223,9 @@ export default function MyTimesheetsPage() {
                       figure will reasonably expect it to be worth more. */}
                   {sheet.nightMinutes > 0 || sheet.holidayMinutes > 0 ? (
                     <p className="text-xs text-muted-foreground">
-                      Night and holiday hours are recorded but carry no extra rate yet — allowances
-                      are not live on the platform.
+                      Night and holiday hours are priced against the facility&rsquo;s rate card when
+                      the shift is invoiced. A facility that has not set one pays them at the
+                      ordinary rate.
                     </p>
                   ) : null}
 
@@ -271,7 +281,10 @@ export default function MyTimesheetsPage() {
         </div>
       )}
 
-      <Dialog open={disputing !== null} onOpenChange={(next: boolean) => !next && setDisputing(null)}>
+      <Dialog
+        open={disputing !== null}
+        onOpenChange={(next: boolean) => !next && setDisputing(null)}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Dispute this shift</DialogTitle>

@@ -7,6 +7,7 @@ import {
   Inbox,
   LayoutDashboard,
   Receipt,
+  ShieldCheck,
   UserRound,
 } from 'lucide-react';
 import { SessionProvider } from '@/lib/ui/session';
@@ -72,6 +73,12 @@ const SECTIONS: NavSection[] = [
         href: '/practitioner/profile',
         label: 'Profile',
         icon: UserRound,
+        permission: 'practitioner.profile.read',
+      },
+      {
+        href: '/practitioner/privacy',
+        label: 'Your data',
+        icon: ShieldCheck,
         permission: 'practitioner.profile.read',
       },
     ],

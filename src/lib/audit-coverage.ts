@@ -60,6 +60,9 @@ export const AUDITED_MODELS: Readonly<Record<string, string>> = {
   RateCard: 'rates.rate_cards',
   Invoice: 'billing.invoices',
   Payout: 'billing.payouts',
+  AgreementVersion: 'consent.agreement_versions',
+  ConsentRecord: 'consent.consent_records',
+  DataSubjectRequest: 'consent.data_subject_requests',
   Dispute: 'disputes.disputes',
   DisputeEvidence: 'disputes.dispute_evidence',
   ClinicalIncident: 'clinical_incidents.clinical_incidents',
@@ -99,10 +102,10 @@ export const EXEMPT_MODELS: Readonly<Record<string, string>> = {
     'The assignment audit trail in its own right, with actor and reason as required columns. Auditing the history of an audited change is circular.',
   InvoiceLine:
     'Written with the invoice it belongs to and never altered afterwards — the invoice itself is audited. A line is the detail of one decision, not a decision of its own.',
+  AgreementAcceptance:
+    'Append-only evidence that somebody agreed to a named version at a named moment — the record in its own right, and what an "I never agreed to that" dispute is settled with. It has no update or delete path.',
   LedgerEntry:
     'Append-only double-entry bookkeeping, and the financial record in its own right. It has no update or delete path at all: a mistake is corrected by a reversing transaction, which is itself two more entries. Auditing it would duplicate the ledger in a weaker form.',
-  DisputeEvidence:
-    'Append-only evidence attached to a case, written by a party rather than decided by anyone. Attaching it is audited on the dispute; the file cannot be altered or removed.',
 };
 
 const MUTATIONS = new Set([

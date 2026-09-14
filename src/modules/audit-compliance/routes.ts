@@ -15,6 +15,23 @@ export interface RouteDefinition {
 }
 
 export const ROUTES: RouteDefinition[] = [
+  // Consent and agreements are the subject's own, so SELF throughout. An
+  // officer wanting to know whether somebody consented reads the audit trail,
+  // which says who changed it and when.
+  { method: 'GET', path: '/api/v1/consent', permission: 'practitioner.profile.read', scopeType: 'SELF' },
+  { method: 'POST', path: '/api/v1/consent', permission: 'practitioner.profile.write', scopeType: 'SELF' },
+  { method: 'GET', path: '/api/v1/agreements', permission: 'practitioner.profile.read', scopeType: 'SELF' },
+  { method: 'POST', path: '/api/v1/agreements', permission: 'practitioner.profile.write', scopeType: 'SELF' },
+  { method: 'PATCH', path: '/api/v1/agreements', permission: 'config.manage', scopeType: 'PLATFORM' },
+  // SELF only, deliberately: an officer who could export anybody would have a
+  // one-request dossier on every practitioner on the platform.
+  { method: 'GET', path: '/api/v1/me/export', permission: 'practitioner.profile.read', scopeType: 'SELF' },
+  { method: 'GET', path: '/api/v1/me/erasure', permission: 'practitioner.profile.read', scopeType: 'SELF' },
+  { method: 'GET', path: '/api/v1/me/data-requests', permission: 'practitioner.profile.read', scopeType: 'SELF' },
+  { method: 'POST', path: '/api/v1/data-requests', permission: 'practitioner.profile.write', scopeType: 'SELF' },
+  { method: 'GET', path: '/api/v1/data-requests', permission: 'audit.read', scopeType: 'PLATFORM' },
+  { method: 'POST', path: '/api/v1/data-requests/:id/close', permission: 'audit.read', scopeType: 'PLATFORM' },
+
   { method: 'GET', path: '/api/v1/audit', permission: 'audit.read', scopeType: 'PLATFORM' },
   { method: 'GET', path: '/api/v1/audit', permission: 'audit.read', scopeType: 'FACILITY_GROUP' },
   { method: 'GET', path: '/api/v1/audit', permission: 'audit.read', scopeType: 'FACILITY' },

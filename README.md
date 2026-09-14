@@ -3,24 +3,29 @@
 Verified healthcare workforce and locum management for the Nigerian market.
 Companion documents: **System Documentation v2.9** and **Implementation Plan v1.2**.
 
-This repository is the Stage 4 (Foundations) scaffold. It contains the
-cross-cutting machinery every later module depends on and no business
-journeys yet — deliberately, because authorisation, audit and the outbox
-cannot be retrofitted.
+Every module in the specification now has an implementation and an interface:
+eighteen modules under `src/modules/`, three consoles under `src/app/`, and
+the cross-cutting machinery they all sit on — authorisation, audit, the
+outbox — in `src/lib/`. That machinery was built first and before any business
+journey, in Stage 4, because none of it can be retrofitted.
+
+What is deferred rather than built — the payment gateway, offline capture —
+is listed in [docs/interfaces.md](docs/interfaces.md). The module-by-module
+state is in [docs/module-map.md](docs/module-map.md).
 
 ## Stack
 
-| Layer | Choice |
-| --- | --- |
-| Application | Next.js (App Router), React, TypeScript |
-| Database | PostgreSQL — the single primary datastore |
-| Data access | Prisma (typed migrations and queries) |
-| Object storage | Tigris (S3-compatible); MinIO locally |
-| Background work | PostgreSQL transactional outbox plus a worker process |
-| UI | Tailwind CSS, shadcn/ui conventions, Radix primitives, lucide-react, Framer Motion |
-| Validation | Zod at every input boundary |
-| Testing | Vitest, Testing Library, Playwright |
-| Mobile | PWA first; Flutter client (Android first) after the API stabilises |
+| Layer           | Choice                                                                             |
+| --------------- | ---------------------------------------------------------------------------------- |
+| Application     | Next.js (App Router), React, TypeScript                                            |
+| Database        | PostgreSQL — the single primary datastore                                          |
+| Data access     | Prisma (typed migrations and queries)                                              |
+| Object storage  | Tigris (S3-compatible); MinIO locally                                              |
+| Background work | PostgreSQL transactional outbox plus a worker process                              |
+| UI              | Tailwind CSS, shadcn/ui conventions, Radix primitives, lucide-react, Framer Motion |
+| Validation      | Zod at every input boundary                                                        |
+| Testing         | Vitest, Testing Library, Playwright                                                |
+| Mobile          | PWA first; Flutter client (Android first) after the API stabilises                 |
 
 MongoDB is not part of the design. It would only be revisited as a secondary
 store for a genuinely document-shaped, non-transactional feature, and never
@@ -35,13 +40,13 @@ docker compose exec web pnpm prisma migrate dev --name init
 docker compose exec web pnpm db:seed
 ```
 
-| Service | URL |
-| --- | --- |
-| Application | http://localhost:3000 |
-| Health check | http://localhost:3000/api/v1/health |
+| Service                              | URL                                                |
+| ------------------------------------ | -------------------------------------------------- |
+| Application                          | http://localhost:3000                              |
+| Health check                         | http://localhost:3000/api/v1/health                |
 | MinIO console (stands in for Tigris) | http://localhost:9001 — medilink / medilink-secret |
-| Mailpit (captured email) | http://localhost:8025 |
-| PostgreSQL | localhost:5432 — medilink / medilink |
+| Mailpit (captured email)             | http://localhost:8025                              |
+| PostgreSQL                           | localhost:5432 — medilink / medilink               |
 
 ## Quick start (host Node)
 
@@ -58,7 +63,7 @@ pnpm dev
 
 ```bash
 pnpm verify            # lint, typecheck, unit tests — run before every push
-pnpm test:integration  # audit coverage and outbox recovery, against a real database
+pnpm test:integration  # one suite per module, against a real database
 pnpm test:e2e          # Playwright, needs the app running
 pnpm db:updown         # migrate down and up again on an empty database
 ```
@@ -71,8 +76,8 @@ can reach PostgreSQL directly.
 ## Layout
 
 ```
-prisma/schema.prisma      identity, audit, config, storage, practitioners,
-                          credentials and facilities schemas
+prisma/schema.prisma      nineteen namespaced schemas, identity and audit
+                          through to timesheets, rates and billing
 prisma/seed.ts            controlled vocabularies, each with a named owner
 src/app/                  routes; API under src/app/api/v1
 src/modules/<module>/      one folder per specification module (Section 8.1)
@@ -85,7 +90,7 @@ src/lib/storage/tigris.ts signed upload and download URLs
 src/worker/processor.ts   claim, dispatch, retry, dead-letter
 src/worker/               outbox worker loop and event handlers
 docs/adr/                 the decisions and why they were made
-tests/integration/        audit coverage and outbox recovery, real database
+tests/integration/        one suite per module, against a real database
 tests/                    unit setup, e2e specs
 ```
 

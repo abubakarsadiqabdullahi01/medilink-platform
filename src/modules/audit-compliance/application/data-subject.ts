@@ -1,0 +1,299 @@
+import { prisma, type Tx } from '@/lib/db';
+import { recordAudit } from '@/lib/audit';
+import { HttpError } from '@/lib/http/errors';
+import { amountOwed } from '@/modules/billing-settlement/application/payout';
+import {
+  BLOCKER_EXPLANATIONS,
+  ERASURE_EXEMPT_REASON,
+  dueDateFor,
+  erasureBlockers,
+  isOverdue,
+  type RequestKind,
+  type RequestStatusValue,
+} from '../domain/consent';
+
+/**
+ * Data-subject rights, and the export that satisfies most of them.
+ *
+ * A right that exists only in a privacy notice is not a right. Access and
+ * portability are answered by one function here rather than by somebody
+ * assembling a spreadsheet from six tables, because the version assembled by
+ * hand is the one that quietly omits something.
+ */
+
+export const DataSubjectErrors = {
+  notFound: () => new HttpError('request_not_found', 'That request does not exist.', 404),
+  outcomeRequired: () =>
+    new HttpError(
+      'outcome_required',
+      'Say what was done. A request closed with no outcome answers nobody.',
+      422,
+    ),
+  alreadyClosed: () =>
+    new HttpError('request_already_closed', 'That request has already been answered.', 409),
+};
+
+export interface RequestView {
+  id: string;
+  userId: string;
+  kind: RequestKind;
+  status: RequestStatusValue;
+  detail: string | null;
+  outcome: string | null;
+  receivedAt: Date;
+  dueBy: Date;
+  completedAt: Date | null;
+  overdue: boolean;
+}
+
+function toView(row: {
+  id: string;
+  userId: string;
+  kind: string;
+  status: string;
+  detail: string | null;
+  outcome: string | null;
+  receivedAt: Date;
+  dueBy: Date;
+  completedAt: Date | null;
+}): RequestView {
+  const status = row.status as RequestStatusValue;
+  return {
+    id: row.id,
+    userId: row.userId,
+    kind: row.kind as RequestKind,
+    status,
+    detail: row.detail,
+    outcome: row.outcome,
+    receivedAt: row.receivedAt,
+    dueBy: row.dueBy,
+    completedAt: row.completedAt,
+    overdue: isOverdue({ dueBy: row.dueBy, status }),
+  };
+}
+
+export async function raiseRequest(input: {
+  userId: string;
+  kind: RequestKind;
+  detail?: string;
+}): Promise<RequestView> {
+  const receivedAt = new Date();
+
+  const created = await prisma.$transaction(async (tx: Tx) => {
+    const row = await tx.dataSubjectRequest.create({
+      data: {
+        userId: input.userId,
+        kind: input.kind,
+        detail: input.detail,
+        receivedAt,
+        // Recorded at creation rather than computed on read, so shortening
+        // the window later cannot retroactively make an old request late.
+        dueBy: dueDateFor(receivedAt),
+      },
+    });
+
+    await recordAudit(tx, {
+      action: 'data_subject.request_raised',
+      entityType: 'consent.data_subject_requests',
+      entityId: row.id,
+      actorId: input.userId,
+      scopeType: 'SELF',
+      scopeId: input.userId,
+      reason: input.detail,
+      after: { kind: input.kind, dueBy: row.dueBy },
+    });
+
+    return row;
+  });
+
+  return toView(created);
+}
+
+export async function closeRequest(input: {
+  requestId: string;
+  actorId: string;
+  status: 'COMPLETED' | 'REFUSED';
+  outcome: string;
+}): Promise<RequestView> {
+  const existing = await prisma.dataSubjectRequest.findUnique({ where: { id: input.requestId } });
+  if (!existing) throw DataSubjectErrors.notFound();
+  if (existing.status === 'COMPLETED' || existing.status === 'REFUSED') {
+    throw DataSubjectErrors.alreadyClosed();
+  }
+  // A refusal is a lawful outcome and has to be recorded as carefully as a
+  // grant — more so, because it is the one somebody appeals.
+  if (!input.outcome?.trim()) throw DataSubjectErrors.outcomeRequired();
+
+  const updated = await prisma.$transaction(async (tx: Tx) => {
+    const row = await tx.dataSubjectRequest.update({
+      where: { id: input.requestId },
+      data: {
+        status: input.status,
+        outcome: input.outcome,
+        completedAt: new Date(),
+        handledBy: input.actorId,
+      },
+    });
+
+    await recordAudit(tx, {
+      action: input.status === 'COMPLETED' ? 'data_subject.completed' : 'data_subject.refused',
+      entityType: 'consent.data_subject_requests',
+      entityId: row.id,
+      actorId: input.actorId,
+      scopeType: 'SELF',
+      scopeId: row.userId,
+      reason: input.outcome,
+      before: { status: existing.status },
+      after: { status: row.status },
+    });
+
+    return row;
+  });
+
+  return toView(updated);
+}
+
+export async function listRequests(status?: RequestStatusValue): Promise<RequestView[]> {
+  const rows = await prisma.dataSubjectRequest.findMany({
+    where: status ? { status } : {},
+    // Oldest first: the one closest to its deadline is the one to work.
+    orderBy: { dueBy: 'asc' },
+  });
+  return rows.map(toView);
+}
+
+export async function listOwnRequests(userId: string): Promise<RequestView[]> {
+  const rows = await prisma.dataSubjectRequest.findMany({
+    where: { userId },
+    orderBy: { receivedAt: 'desc' },
+  });
+  return rows.map(toView);
+}
+
+/**
+ * Everything the platform holds about one person, in one response.
+ *
+ * Assembled here rather than by hand, so it cannot quietly omit a table
+ * somebody forgot. When a module gains a table holding personal data, it
+ * belongs in this function — and the test asserts the shape so a silent
+ * omission shows up.
+ *
+ * Deliberately absent: the audit trail and the ledger. Both mention this
+ * person and neither is *about* them — an audit row is the platform's record
+ * of its own conduct, and a ledger entry has another party on the other side.
+ * Returning them would disclose somebody else's data in answer to a subject
+ * access request, which is the commonest way such a request goes wrong.
+ */
+export async function exportSubjectData(userId: string) {
+  const [
+    user,
+    profile,
+    identity,
+    registrations,
+    credentials,
+    availability,
+    blocks,
+    invitations,
+    assignments,
+    consents,
+    acceptances,
+    requests,
+    payouts,
+  ] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        phone: true,
+        status: true,
+        createdAt: true,
+        emailVerifiedAt: true,
+        phoneVerifiedAt: true,
+        lastLoginAt: true,
+      },
+    }),
+    prisma.practitionerProfile.findUnique({ where: { userId } }),
+    // The NIN itself is never returned: only a keyed digest and the last four
+    // are stored, and the digest is not the subject's to receive.
+    prisma.identityVerification.findUnique({
+      where: { userId },
+      select: { ninLast4: true, nameMatch: true, method: true, verifiedAt: true },
+    }),
+    prisma.professionalRegistration.findMany({ where: { userId } }),
+    prisma.credentialSubmission.findMany({ where: { userId } }),
+    prisma.availabilitySlot.findMany({ where: { userId } }),
+    prisma.blockedPeriod.findMany({ where: { userId } }),
+    prisma.invitation.findMany({ where: { userId } }),
+    prisma.assignment.findMany({ where: { userId } }),
+    prisma.consentRecord.findMany({ where: { userId } }),
+    prisma.agreementAcceptance.findMany({
+      where: { userId },
+      include: { version: { select: { identifier: true, title: true } } },
+    }),
+    prisma.dataSubjectRequest.findMany({ where: { userId } }),
+    prisma.payout.findMany({ where: { practitionerId: userId } }),
+  ]);
+
+  if (!user) throw DataSubjectErrors.notFound();
+
+  return {
+    generatedAt: new Date(),
+    // Said in the export itself, because somebody reading it will wonder
+    // where the rest is.
+    notIncluded: {
+      auditTrail:
+        'The audit trail records what the platform did, not what it holds about you, and it names other people. It is retained under a legal obligation.',
+      ledger:
+        'Financial entries have another party on the other side of them. Your own payments appear under "payouts".',
+      nin: 'Your NIN is not stored — only a keyed digest of it and the last four digits, which are shown.',
+    },
+    account: user,
+    profile,
+    identityVerification: identity,
+    professionalRegistrations: registrations,
+    credentials,
+    availability: { slots: availability, blocks },
+    invitations,
+    assignments,
+    consent: consents,
+    agreementsAccepted: acceptances.map((row: (typeof acceptances)[number]) => ({
+      identifier: row.version.identifier,
+      title: row.version.title,
+      acceptedAt: row.acceptedAt,
+    })),
+    dataSubjectRequests: requests,
+    payouts,
+  };
+}
+
+/**
+ * Whether an erasure can be actioned, and what it would actually do.
+ *
+ * Returns rather than throws: the answer to "can I be erased" is information
+ * the subject is entitled to before they ask, and an exception is a poor way
+ * to carry three reasons and an explanation.
+ */
+export async function assessErasure(userId: string) {
+  const [confirmedAssignments, owedKobo, openDisputes] = await Promise.all([
+    prisma.assignment.count({ where: { userId, status: 'CONFIRMED' } }),
+    amountOwed(userId),
+    prisma.dispute.count({
+      where: { assignment: { userId }, status: { in: ['OPEN', 'UNDER_REVIEW'] } },
+    }),
+  ]);
+
+  const blockers = erasureBlockers({ confirmedAssignments, owedKobo, openDisputes });
+
+  return {
+    canProceed: blockers.length === 0,
+    blockers: blockers.map((blocker) => ({
+      code: blocker,
+      explanation: BLOCKER_EXPLANATIONS[blocker],
+    })),
+    // Stated whether or not it can proceed, because it is the part people are
+    // surprised by and being surprised later is worse.
+    whatErasureDoes: ERASURE_EXEMPT_REASON,
+  };
+}

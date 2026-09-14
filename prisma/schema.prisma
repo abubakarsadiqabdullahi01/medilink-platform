@@ -17,7 +17,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-  schemas  = ["identity", "audit", "config", "storage", "practitioners", "credentials", "facilities", "availability", "service_requests", "matching", "notifications", "attendance", "timesheets", "cancellations_sanctions", "disputes", "clinical_incidents", "suggestions", "rates", "billing"]
+  schemas  = ["identity", "audit", "config", "storage", "practitioners", "credentials", "facilities", "availability", "service_requests", "matching", "notifications", "attendance", "timesheets", "cancellations_sanctions", "disputes", "clinical_incidents", "suggestions", "rates", "billing", "consent"]
 }
 
 // ---------------------------------------------------------------- identity
@@ -45,6 +45,9 @@ model User {
   credentialSubmissions CredentialSubmission[]
   representedFacilities Facility[]
   payouts               Payout[]
+  agreementAcceptances  AgreementAcceptance[]
+  consentRecords        ConsentRecord[]
+  dataSubjectRequests   DataSubjectRequest[]
   identityVerification IdentityVerification?
   suspensions   AccountSuspension[]
   screeningResult ScreeningResult?
@@ -1942,4 +1945,177 @@ enum PayoutStatus {
   FAILED
 
   @@schema("billing")
+}
+
+// ---------------------------------------------------------------- consent
+
+// Module 17's other two thirds. The audit trail says what the platform did;
+// these say what it was permitted to do, and to whom it must answer.
+//
+// Nigeria's Data Protection Act 2023 gives a data subject rights that only
+// exist if there is a record to exercise them against: what they agreed to,
+// when, and under which version of the terms.
+
+// A version of a document somebody has to agree to. The specification is
+// explicit that **the version identifier is stored, not the file name** — a
+// file can be replaced in place and a version cannot.
+model AgreementVersion {
+  id        String        @id @default(uuid()) @db.Uuid
+  kind      AgreementKind
+  /// Human-readable and stable, e.g. "practitioner-engagement-v2".
+  identifier String       @unique
+  title      String
+  /// The text itself, so what somebody agreed to is readable years later
+  /// without depending on a file that may have moved.
+  body       String
+  effectiveFrom DateTime  @map("effective_from")
+  /// Null while current. Never deleted: an acceptance must stay readable.
+  retiredAt     DateTime? @map("retired_at")
+
+  publishedBy String   @map("published_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  acceptances AgreementAcceptance[]
+
+  @@index([kind, effectiveFrom])
+  @@map("agreement_versions")
+  @@schema("consent")
+}
+
+enum AgreementKind {
+  PRACTITIONER_ENGAGEMENT
+  FACILITY_TERMS
+  PRIVACY_NOTICE
+
+  @@schema("consent")
+}
+
+// Append-only. Somebody agreed to a specific version at a specific moment,
+// and superseding the agreement does not un-agree the old one.
+model AgreementAcceptance {
+  id        String @id @default(uuid()) @db.Uuid
+  userId    String @map("user_id") @db.Uuid
+  versionId String @map("version_id") @db.Uuid
+
+  acceptedAt DateTime @default(now()) @map("accepted_at")
+  /// Evidence of the act, not tracking: what a dispute about "I never agreed
+  /// to that" is actually settled with.
+  ipAddress  String?  @map("ip_address")
+  userAgent  String?  @map("user_agent")
+
+  user    User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  version AgreementVersion @relation(fields: [versionId], references: [id])
+
+  @@unique([userId, versionId])
+  @@index([userId, acceptedAt])
+  @@map("agreement_acceptances")
+  @@schema("consent")
+}
+
+// Consent to a specific processing purpose, separately from the terms.
+//
+// Kept apart from AgreementAcceptance on purpose: agreeing to engagement
+// terms is a contract, and consent to share a credential with a hospital is a
+// lawful basis that can be **withdrawn without ending the contract**. Rolling
+// them together would make withdrawal impossible to express.
+model ConsentRecord {
+  id      String         @id @default(uuid()) @db.Uuid
+  userId  String         @map("user_id") @db.Uuid
+  purpose ConsentPurpose
+
+  granted     Boolean
+  /// Why it is lawful to process this at all. Consent is only one of the
+  /// bases the Act allows, and recording which one applies is what makes a
+  /// withdrawal answerable.
+  lawfulBasis LawfulBasis @default(CONSENT) @map("lawful_basis")
+
+  grantedAt   DateTime  @default(now()) @map("granted_at")
+  withdrawnAt DateTime? @map("withdrawn_at")
+  /// Required on withdrawal, so the record says what changed and why.
+  note        String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose, grantedAt])
+  @@map("consent_records")
+  @@schema("consent")
+}
+
+enum ConsentPurpose {
+  /// Checking a NIN against NIMC.
+  IDENTITY_VERIFICATION
+  /// Showing a credential to a facility considering them for a shift.
+  CREDENTIAL_SHARING
+  /// Keeping a profile visible to facilities searching for cover.
+  PROFILE_VISIBILITY
+  /// Anything optional. Withdrawable with no effect on getting work.
+  MARKETING
+
+  @@schema("consent")
+}
+
+enum LawfulBasis {
+  CONSENT
+  /// Performing the engagement the practitioner signed.
+  CONTRACT
+  /// Verifying a licence, because a regulator requires it.
+  LEGAL_OBLIGATION
+  /// Patient safety.
+  VITAL_INTERESTS
+
+  @@schema("consent")
+}
+
+// A data subject exercising a right under the Act. Recorded rather than
+// handled ad hoc, because "we did answer that" is a claim needing evidence.
+model DataSubjectRequest {
+  id      String                 @id @default(uuid()) @db.Uuid
+  userId  String                 @map("user_id") @db.Uuid
+  kind    DataSubjectRequestKind
+  status  DataSubjectRequestStatus @default(RECEIVED)
+
+  /// What the subject asked for, in their words.
+  detail   String?
+  /// What was done, in the officer's. Required to close one.
+  outcome  String?
+
+  receivedAt  DateTime  @default(now()) @map("received_at")
+  /// The Act expects a response within a month; this is what makes a breach
+  /// of that visible rather than discovered.
+  dueBy       DateTime  @map("due_by")
+  completedAt DateTime? @map("completed_at")
+  handledBy   String?   @map("handled_by") @db.Uuid
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status, dueBy])
+  @@map("data_subject_requests")
+  @@schema("consent")
+}
+
+enum DataSubjectRequestKind {
+  /// "What do you hold about me?"
+  ACCESS
+  /// "This is wrong."
+  RECTIFICATION
+  /// "Delete me." See the module doc: an audit row and a ledger entry cannot
+  /// be deleted, so this is satisfied by pseudonymisation.
+  ERASURE
+  /// "Give me my data in a portable form."
+  PORTABILITY
+  /// "Stop processing this."
+  RESTRICTION
+
+  @@schema("consent")
+}
+
+enum DataSubjectRequestStatus {
+  RECEIVED
+  IN_PROGRESS
+  COMPLETED
+  /// Refused, with a reason. A refusal is a lawful outcome and has to be
+  /// recorded as carefully as a grant.
+  REFUSED
+
+  @@schema("consent")
 }

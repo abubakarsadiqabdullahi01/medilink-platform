@@ -7,6 +7,7 @@ vi.mock('next/headers', async () => {
 
 import { prisma } from '@/lib/db';
 import { GET } from '@/app/api/v1/audit/route';
+import type { ScopeType } from '@/lib/authz/guard';
 import { ROUTES } from '@/modules/audit-compliance/routes';
 import { issueSession } from '@/modules/auth/application/session-service';
 import { clearCookies } from './support/cookie-jar';
@@ -348,8 +349,44 @@ describe('the route table', () => {
     // The table is what a reviewer reads instead of every route file. If it
     // and the handler disagree, the table is the lie.
     expect(ROUTES.length).toBeGreaterThan(0);
-    expect(ROUTES.every((route) => route.permission === 'audit.read')).toBe(true);
-    expect(ROUTES.map((route) => route.scopeType)).toContain('FACILITY');
-    expect(ROUTES.map((route) => route.scopeType)).toContain('PLATFORM');
+    // Checked against the guard's own union rather than a list written out
+    // here: a new scope type should not need this test edited, and a typo in
+    // a route table should still fail.
+    const known: ScopeType[] = [
+      'PLATFORM',
+      'FACILITY_GROUP',
+      'FACILITY',
+      'BRANCH',
+      'DEPARTMENT',
+      'SELF',
+    ];
+    for (const route of ROUTES) {
+      expect(route.permission, route.path).toBeTruthy();
+      expect(known, route.path).toContain(route.scopeType);
+    }
+  });
+
+  it('reads the audit trail at every scope it is scoped by', () => {
+    const auditTrail = ROUTES.filter((route) => route.path === '/api/v1/audit');
+    expect(auditTrail.every((route) => route.permission === 'audit.read')).toBe(true);
+    expect(auditTrail.map((route) => route.scopeType)).toContain('FACILITY');
+    expect(auditTrail.map((route) => route.scopeType)).toContain('PLATFORM');
+  });
+
+  it('keeps a subject their own data and nobody else theirs', () => {
+    /**
+     * The export, the erasure check and consent are SELF and only SELF. An
+     * officer who could call them for anybody would hold a one-request
+     * dossier on every practitioner on the platform, which is precisely what
+     * a data-protection module must not build.
+     */
+    for (const path of ['/api/v1/me/export', '/api/v1/me/erasure', '/api/v1/consent']) {
+      const forPath = ROUTES.filter((route) => route.path === path);
+      expect(forPath.length, path).toBeGreaterThan(0);
+      expect(
+        forPath.every((route) => route.scopeType === 'SELF'),
+        path,
+      ).toBe(true);
+    }
   });
 });

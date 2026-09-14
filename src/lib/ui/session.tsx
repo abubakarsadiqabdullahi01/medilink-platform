@@ -34,6 +34,19 @@ export interface SessionState {
   grants: { permission: string; scopeType: string; scopeId: string | null }[];
 }
 
+/**
+ * Which console an account opens into.
+ *
+ * Decided by the grants rather than by a role name, and shared by signing in
+ * and signing up so the two cannot disagree about where somebody lands.
+ */
+export function consoleFor(session: SessionState): string {
+  const scopes = new Set(session.grants.map((grant) => grant.scopeType));
+  if (scopes.has('PLATFORM')) return '/admin';
+  if (scopes.has('FACILITY')) return '/facility';
+  return '/practitioner';
+}
+
 const SessionContext = createContext<SessionState | null>(null);
 
 export function useSession(): SessionState {

@@ -1,11 +1,12 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMutation } from '@tanstack/react-query';
 import { ShieldCheck, TriangleAlert } from 'lucide-react';
 import { api, errorMessage } from '@/lib/ui/api';
-import type { SessionState } from '@/lib/ui/session';
+import { consoleFor, type SessionState } from '@/lib/ui/session';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -27,13 +28,7 @@ export default function LoginPage() {
       return api.get<SessionState>('/api/v1/auth/session');
     },
     onSuccess: (session) => {
-      const scopes = new Set(session.grants.map((grant) => grant.scopeType));
-      const destination = scopes.has('PLATFORM')
-        ? '/admin'
-        : scopes.has('FACILITY')
-          ? '/facility'
-          : '/practitioner';
-      router.replace(destination);
+      router.replace(consoleFor(session));
       router.refresh();
     },
   });
@@ -101,7 +96,17 @@ export default function LoginPage() {
             </CardContent>
           </Card>
 
-          <p className="mt-6 text-xs leading-relaxed text-muted-foreground">
+          <p className="mt-6 text-sm text-muted-foreground">
+            New to Medilink?{' '}
+            <Link
+              href="/register"
+              className="font-medium text-primary underline-offset-4 hover:underline"
+            >
+              Create a practitioner account
+            </Link>
+          </p>
+
+          <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
             Locally, <code className="rounded bg-muted px-1 py-0.5">bootstrap-demo.ts</code> creates
             the operations, compliance and administrator accounts. See{' '}
             <code className="rounded bg-muted px-1 py-0.5">docs/end-to-end.md</code>.

@@ -385,6 +385,17 @@ describe('the audited-model registry', () => {
     expect(unclassified).toEqual([]);
   });
 
+  it('never classifies a model as both audited and exempt', () => {
+    /**
+     * `DisputeEvidence` was in both lists for two commits, and nothing said
+     * so: which one wins depends on the order the harness happens to check
+     * them, so a model could be silently excused from a rule it was listed
+     * under. The registry has to be a partition, not two overlapping sets.
+     */
+    const both = Object.keys(AUDITED_MODELS).filter((name) => name in EXEMPT_MODELS);
+    expect(both).toEqual([]);
+  });
+
   it('gives every exemption a reason', () => {
     for (const [model, reason] of Object.entries(EXEMPT_MODELS)) {
       expect(reason.length, `${model} needs a reason for its exemption`).toBeGreaterThan(20);

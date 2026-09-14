@@ -101,7 +101,12 @@ export function NewShiftDialog({ facilityId }: { facilityId: string }) {
   });
 
   const ready =
-    categoryId && startsAt && endsAt && hours > 0 && hourlyRateKobo > 0 && terms.trim().length >= 10;
+    categoryId &&
+    startsAt &&
+    endsAt &&
+    hours > 0 &&
+    hourlyRateKobo > 0 &&
+    terms.trim().length >= 10;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -116,8 +121,8 @@ export function NewShiftDialog({ facilityId }: { facilityId: string }) {
         <DialogHeader>
           <DialogTitle>Publish a shift</DialogTitle>
           <DialogDescription>
-            Created and published in one step. A published shift can be offered to practitioners
-            and cannot have its terms changed afterwards.
+            Created and published in one step. A published shift can be offered to practitioners and
+            cannot have its terms changed afterwards.
           </DialogDescription>
         </DialogHeader>
 
@@ -260,7 +265,8 @@ export function NewShiftDialog({ facilityId }: { facilityId: string }) {
             {hours} hours × {formatNaira(hourlyRateKobo)} × {headcount} ={' '}
             <strong>{formatNaira(estimate)}</strong>
             <span className="ml-1 text-muted-foreground">
-              before any allowance — those are Stage 8.
+              at the base rate. Night and public-holiday hours are multiplied by this
+              facility&rsquo;s rate card, so the invoice can come to more.
             </span>
           </div>
         ) : null}

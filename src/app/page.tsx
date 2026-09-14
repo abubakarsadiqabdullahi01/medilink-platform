@@ -30,8 +30,11 @@ import { cn } from '@/lib/utils';
  * people want to know what they are signing in to — but as explanation, not
  * as a choice to make before authenticating.
  *
- * Everything claimed below is something the system does today. Rates and
- * billing are Stage 8 and are deliberately absent.
+ * Signing up is a separate path and only a practitioner can take it: facility
+ * and operations accounts are granted, not claimed. That is said in the hero
+ * rather than left for a scheduler to discover at the end of a form.
+ *
+ * Everything claimed below is something the system does today.
  */
 
 export const metadata: Metadata = {
@@ -40,11 +43,7 @@ export const metadata: Metadata = {
     'Medilink connects verified healthcare practitioners with facilities that need dependable clinical cover — from the first request through attendance, hours and sign-off.',
 };
 
-const proofPoints = [
-  'Verified credentials',
-  'Attendance as it happens',
-  'Decisions on the record',
-];
+const proofPoints = ['Verified credentials', 'Attendance as it happens', 'Decisions on the record'];
 
 const workspaces = [
   {
@@ -173,9 +172,17 @@ export default function LandingPage() {
               For practitioners
             </a>
           </nav>
-          <Link href="/login" className={cn(buttonVariants({ size: 'lg' }), 'shrink-0')}>
-            Sign in <ArrowRight aria-hidden="true" />
-          </Link>
+          <div className="flex shrink-0 items-center gap-2 sm:gap-4">
+            <Link
+              href="/login"
+              className="hidden text-sm font-medium text-foreground/75 underline-offset-4 hover:text-primary hover:underline sm:inline"
+            >
+              Sign in
+            </Link>
+            <Link href="/register" className={cn(buttonVariants({ size: 'lg' }), 'shrink-0')}>
+              Create account <ArrowRight aria-hidden="true" />
+            </Link>
+          </div>
         </div>
       </header>
 
@@ -219,18 +226,26 @@ export default function LandingPage() {
               </p>
               <div className="mt-9 flex flex-wrap items-center gap-x-5 gap-y-3">
                 <Link
-                  href="/login"
+                  href="/register"
                   className={cn(buttonVariants({ size: 'lg' }), 'h-11 px-7 text-[15px]')}
                 >
-                  Sign in <ArrowRight aria-hidden="true" />
+                  Create an account <ArrowRight aria-hidden="true" />
                 </Link>
-                <a
-                  href="#how-it-works"
+                <Link
+                  href="/login"
                   className="inline-flex h-11 items-center gap-2 rounded-md text-sm font-semibold text-white underline-offset-4 hover:underline"
                 >
-                  See how Medilink works <ArrowRight className="size-4" aria-hidden="true" />
-                </a>
+                  Sign in <ArrowRight className="size-4" aria-hidden="true" />
+                </Link>
               </div>
+              {/* Said here rather than discovered on the sign-up form: a
+                  scheduler at a hospital cannot create their own account, and
+                  sending them to a form that will not serve them is worse than
+                  one honest line. */}
+              <p className="mt-4 text-xs leading-relaxed text-white/60">
+                Practitioner accounts are self-service. Facilities and operations are onboarded by
+                Medilink.
+              </p>
               <ul className="mt-12 flex flex-col gap-3 border-t border-white/15 pt-6 text-sm text-white/75 sm:flex-row sm:flex-wrap sm:gap-x-7">
                 {proofPoints.map((point) => (
                   <li key={point} className="flex items-center gap-2">
@@ -398,12 +413,23 @@ export default function LandingPage() {
                 One sign-in. Your workspace opens according to your account access.
               </p>
             </div>
-            <Link
-              href="/login"
-              className={cn(buttonVariants({ size: 'lg' }), 'h-11 w-fit shrink-0 px-7 text-[15px]')}
-            >
-              Sign in <ArrowRight aria-hidden="true" />
-            </Link>
+            <div className="flex shrink-0 flex-wrap items-center gap-x-5 gap-y-3">
+              <Link
+                href="/register"
+                className={cn(
+                  buttonVariants({ size: 'lg' }),
+                  'h-11 w-fit shrink-0 px-7 text-[15px]',
+                )}
+              >
+                Create an account <ArrowRight aria-hidden="true" />
+              </Link>
+              <Link
+                href="/login"
+                className="text-sm font-semibold underline-offset-4 hover:underline"
+              >
+                Sign in
+              </Link>
+            </div>
           </div>
         </section>
       </main>
@@ -431,6 +457,9 @@ export default function LandingPage() {
             </a>
             <Link href="/login" className="hover:text-white">
               Sign in
+            </Link>
+            <Link href="/register" className="hover:text-white">
+              Create an account
             </Link>
           </nav>
         </div>

@@ -11,6 +11,7 @@ import {
   LayoutDashboard,
   MessageSquareText,
   ScrollText,
+  ShieldCheck,
   Stethoscope,
 } from 'lucide-react';
 import { SessionProvider } from '@/lib/ui/session';
@@ -79,6 +80,12 @@ const SECTIONS: NavSection[] = [
         label: 'Suggestions',
         icon: MessageSquareText,
         permission: 'suggestion.triage',
+      },
+      {
+        href: '/admin/data-requests',
+        label: 'Data requests',
+        icon: ShieldCheck,
+        permission: 'audit.read',
       },
       { href: '/admin/audit', label: 'Audit trail', icon: ScrollText, permission: 'audit.read' },
     ],

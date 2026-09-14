@@ -22,7 +22,7 @@ internal shape: `domain/`, `application/`, `infrastructure/`, `presentation/`,
 | `disputes` | 14. Disputes | 8 | Cases, evidence, adjudication |
 | `clinical-incidents` | 15. Clinical incidents | 5 | Reports, review, suspension |
 | `notifications` | 16. Notifications | 4 | SMS adapter + recorded messages |
-| `audit-compliance` | 17. Audit, consent and compliance | 4 | Scoped audit-trail read |
+| `audit-compliance` | 17. Audit, consent and compliance | 4 | Audit trail, consent, agreements, data-subject rights |
 | `suggestions` | 18. Suggestion log | 9 | Log, triage, decline-fed |
 
 Step 6.7's schedule list and its conflict detection were built in `matching`

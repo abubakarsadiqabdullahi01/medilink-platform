@@ -27,6 +27,7 @@ export const APP_SCHEMAS = [
   'disputes',
   'rates',
   'billing',
+  'consent',
   'clinical_incidents',
   'suggestions',
 ] as const;

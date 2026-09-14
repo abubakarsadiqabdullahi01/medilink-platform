@@ -23,7 +23,13 @@ import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
 import { StatusBadge } from '@/components/app/status-badge';
-import { Detail, DetailGrid, EmptyState, PageHeader, QueueSkeleton } from '@/components/app/page-shell';
+import {
+  Detail,
+  DetailGrid,
+  EmptyState,
+  PageHeader,
+  QueueSkeleton,
+} from '@/components/app/page-shell';
 import { formatMinutes, formatNaira, formatWhen, shortId } from '@/components/app/format';
 
 interface Assignment {
@@ -197,8 +203,10 @@ export default function TimesheetsPage() {
                     </Detail>
                   </DetailGrid>
 
-                  {/* Bands are recorded and carry no premium yet: allowances
-                      are module 11, and the 3.1 revenue decision is unmade. */}
+                  {/* These figures are at the base rate. Module 11 applies this
+                      facility's rate card to the bands when the shift is
+                      invoiced, so the invoice can come to more than the amount
+                      shown here. */}
                   <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
                     <span>Night {formatMinutes(sheet.nightMinutes)}</span>
                     <span>Overtime {formatMinutes(sheet.overtimeMinutes)}</span>
@@ -295,7 +303,10 @@ export default function TimesheetsPage() {
         </div>
       )}
 
-      <Dialog open={correcting !== null} onOpenChange={(next: boolean) => !next && setCorrecting(null)}>
+      <Dialog
+        open={correcting !== null}
+        onOpenChange={(next: boolean) => !next && setCorrecting(null)}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Correct the hours</DialogTitle>
