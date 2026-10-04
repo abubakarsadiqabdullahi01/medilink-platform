@@ -246,7 +246,9 @@ export default function PractitionerHome() {
         </Alert>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      {/* Capped rather than stretched: two cards holding one figure each have
+          no use for 1600px, and the page now has that to give. */}
+      <div className="grid max-w-3xl gap-4 sm:grid-cols-2">
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-sm">Offers waiting</CardTitle>

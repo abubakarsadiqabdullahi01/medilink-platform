@@ -52,6 +52,11 @@ export const listServiceRequestsSchema = z.object({
   scopeId: facilityId.optional(),
   status: requestStatus.optional(),
   professionalCategoryId: z.string().uuid().optional(),
+  /** Matches free text against a shift's notes — the only text a scheduler
+   * actually writes on one (ward, contact, what to bring). */
+  search: z.string().trim().max(200).optional(),
+  from: z.coerce.date().optional(),
+  to: z.coerce.date().optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
   cursor: z.string().uuid().optional(),
 });

@@ -125,17 +125,38 @@ export interface AgreementView {
   acceptedAt: Date | null;
 }
 
+/** Who an agreement binds. A privacy notice binds everybody; the rest do not. */
+export type AgreementAudience = 'PRACTITIONER' | 'FACILITY';
+
+const KINDS_BINDING: Record<AgreementAudience, string[]> = {
+  PRACTITIONER: ['PRACTITIONER_ENGAGEMENT', 'PRIVACY_NOTICE'],
+  FACILITY: ['FACILITY_TERMS', 'PRIVACY_NOTICE'],
+};
+
 /**
- * The current version of each agreement, with whether this person has
- * accepted it.
+ * The current version of each agreement that binds this audience, with whether
+ * this person has accepted it.
  *
  * A retired version is excluded: somebody signing up today agrees to what is
  * in force today. What they agreed to *before* is in their acceptances and
  * stays readable there.
+ *
+ * `audience` is required rather than defaulted. Unfiltered, this returned
+ * every kind to everybody, so each practitioner's "Your data" page listed the
+ * hospital's terms of service as an outstanding obligation with a working
+ * "I agree" button — an obligation they could never discharge, because it was
+ * never theirs, sitting beside the one agreement they genuinely did owe.
  */
-export async function currentAgreements(userId: string): Promise<AgreementView[]> {
+export async function currentAgreements(
+  userId: string,
+  audience: AgreementAudience,
+): Promise<AgreementView[]> {
   const versions = await prisma.agreementVersion.findMany({
-    where: { retiredAt: null, effectiveFrom: { lte: new Date() } },
+    where: {
+      retiredAt: null,
+      effectiveFrom: { lte: new Date() },
+      kind: { in: KINDS_BINDING[audience] as never[] },
+    },
     orderBy: { effectiveFrom: 'desc' },
   });
 

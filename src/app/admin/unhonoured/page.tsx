@@ -1,81 +1,83 @@
 'use client';
 
 import { useState } from 'react';
-import { CircleCheck, FileClock, TriangleAlert } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { useQuery } from '@tanstack/react-query';
+import { ChevronLeft, ChevronRight, FileClock, Search, TriangleAlert } from 'lucide-react';
 import { api } from '@/lib/ui/api';
-import { useQueue, useQueueAction } from '@/lib/ui/queue';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Separator } from '@/components/ui/separator';
-import { Textarea } from '@/components/ui/textarea';
-import { StatusBadge } from '@/components/app/status-badge';
-import { Detail, DetailGrid, EmptyState, PageHeader, QueueSkeleton } from '@/components/app/page-shell';
-import { formatAgo, formatWhen, shortId } from '@/components/app/format';
-
-interface Unhonoured {
-  id: string;
-  assignmentId: string;
-  userId: string;
-  facilityId: string;
-  status: string;
-  fault: string | null;
-  shiftEndedAt: string;
-  detectedAt: string;
-}
+import { Skeleton } from '@/components/ui/skeleton';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { StatusBadge, humanise } from '@/components/app/status-badge';
+import { EmptyState, PageHeader } from '@/components/app/page-shell';
+import { ScreenTransition } from '@/components/app/motion';
+import { formatAgo } from '@/components/app/format';
+import { UnhonouredDetail, type Unhonoured } from './unhonoured-detail';
 
 /**
- * The three answers, each with what it costs.
+ * Shifts that ended with nothing to show for them.
  *
- * Only one of them marks somebody's record, and an officer clicking through a
- * queue should not have to hold that in their head. Writing the consequence
- * next to the option is the difference between a considered finding and a
- * fast one.
+ * A sweep flags; a person decides. Nothing ages out of here on its own,
+ * because an absence has a dozen innocent explanations and the platform cannot
+ * tell them apart from a database row.
+ *
+ * Decided flags are reachable now. The queue showed only what was awaiting a
+ * decision, so there was no way to see what had been decided about a shift
+ * last month — a poor property for the record of who was held answerable for
+ * somebody not turning up.
  */
-const FAULTS = [
-  {
-    value: 'PRACTITIONER',
-    label: 'The practitioner',
-    consequence:
-      'Records a no-show. This is the only option that touches their reliability score.',
-    tone: 'destructive' as const,
-  },
-  {
-    value: 'FACILITY',
-    label: 'The facility',
-    consequence:
-      'The ward was shut, nobody was told, the shift never really existed. Costs the practitioner nothing.',
-    tone: 'default' as const,
-  },
-  {
-    value: 'NEITHER',
-    label: 'Neither',
-    consequence:
-      'A flood, a bereavement, something nobody could have prevented. A real finding, not a way of avoiding the question.',
-    tone: 'default' as const,
-  },
-];
 
-const MIN_REASON = 10;
+const STATUSES = [
+  ['AWAITING_DECISION', 'Awaiting decision'],
+  ['CLOSED', 'Decided'],
+] as const;
+
+const PAGE_SIZE = 20;
 
 export default function UnhonouredPage() {
-  const queueKey = ['unhonoured'];
-  const queue = useQueue<Unhonoured>(queueKey, '/api/v1/unhonoured', (body) => (body as { unhonoured?: Unhonoured[] }).unhonoured ?? []);
+  const [status, setStatus] = useState<string>('AWAITING_DECISION');
+  const [search, setSearch] = useState('');
+  const [applied, setApplied] = useState('');
+  const [selected, setSelected] = useState<Unhonoured | null>(null);
 
-  const [fault, setFault] = useState<Record<string, string>>({});
-  const [reason, setReason] = useState<Record<string, string>>({});
+  const [cursors, setCursors] = useState<(string | null)[]>([null]);
+  const [pageIndex, setPageIndex] = useState(0);
+  const cursor = cursors[pageIndex] ?? null;
 
-  const decide = useQueueAction<{ assignmentId: string }>({
-    queueKey,
-    run: ({ assignmentId }) =>
-      api.post(`/api/v1/assignments/${assignmentId}/fault`, {
-        fault: fault[assignmentId],
-        reason: reason[assignmentId]?.trim(),
-      }),
-    success: 'Fault recorded',
+  function startOver() {
+    setCursors([null]);
+    setPageIndex(0);
+  }
+
+  const queue = useQuery({
+    queryKey: ['unhonoured-queue', status, applied, cursor],
+    queryFn: () => {
+      const parts = [
+        `status=${status}`,
+        `limit=${PAGE_SIZE}`,
+        applied ? `search=${encodeURIComponent(applied)}` : '',
+        cursor ? `cursor=${cursor}` : '',
+      ].filter(Boolean);
+      return api.get<{ unhonoured?: Unhonoured[]; nextCursor?: string | null }>(
+        `/api/v1/unhonoured?${parts.join('&')}`,
+      );
+    },
+    placeholderData: (previous) => previous,
   });
+
+  if (selected) {
+    return (
+      <ScreenTransition screenKey={selected.id}>
+        <UnhonouredDetail record={selected} onBack={() => setSelected(null)} />
+      </ScreenTransition>
+    );
+  }
+
+  const rows = queue.data?.unhonoured ?? [];
+  const nextCursor = queue.data?.nextCursor ?? null;
 
   return (
     <>
@@ -84,122 +86,173 @@ export default function UnhonouredPage() {
         description="A shift that ended with no sign of anybody attending. An absence has a dozen innocent explanations and the platform cannot tell them apart — so nothing here closes until a person says whose fault it was."
       />
 
+      <Tabs
+        value={status}
+        onValueChange={(value) => {
+          setStatus(value);
+          startOver();
+        }}
+        className="mb-5"
+      >
+        <TabsList>
+          {STATUSES.map(([value, label]) => (
+            <TabsTrigger key={value} value={value}>
+              {label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
+
+      <Card className="mb-6">
+        <CardContent className="pt-6">
+          <form
+            className="flex flex-wrap items-end gap-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              setApplied(search.trim());
+              startOver();
+            }}
+          >
+            <div className="min-w-[240px] flex-1 space-y-1.5">
+              <Label htmlFor="unhonoured-search">Search by practitioner or facility</Label>
+              <Input
+                id="unhonoured-search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Adaeze, or Owerri General"
+              />
+            </div>
+
+            <Button type="submit" loading={queue.isFetching}>
+              <Search />
+              Search
+            </Button>
+
+            {applied ? (
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => {
+                  setSearch('');
+                  setApplied('');
+                  startOver();
+                }}
+              >
+                Clear
+              </Button>
+            ) : null}
+          </form>
+
+          {!queue.isPending && rows.length > 0 ? (
+            <p className="mt-3 text-xs text-muted-foreground">{rows.length} on this page</p>
+          ) : null}
+        </CardContent>
+      </Card>
+
       {queue.isPending ? (
-        <QueueSkeleton />
+        <div className="space-y-3">
+          {Array.from({ length: 5 }).map((_, index) => (
+            <Skeleton key={index} className="h-20 w-full" />
+          ))}
+        </div>
       ) : queue.isError ? (
         <Alert variant="destructive">
           <TriangleAlert />
           <AlertDescription>This queue could not be loaded.</AlertDescription>
         </Alert>
-      ) : queue.data.length === 0 ? (
+      ) : rows.length === 0 ? (
         <EmptyState
           icon={<FileClock />}
-          title="Nothing awaiting a decision"
-          description="The hourly sweep flags any confirmed shift that ends with no attendance recorded."
+          title={
+            applied
+              ? 'Nothing matches that'
+              : status === 'AWAITING_DECISION'
+                ? 'Nothing awaiting a decision'
+                : 'Nothing decided yet'
+          }
+          description={
+            applied
+              ? 'Try part of a practitioner or facility name.'
+              : status === 'AWAITING_DECISION'
+                ? 'Every flagged shift has had somebody answer for it.'
+                : undefined
+          }
         />
       ) : (
-        <div className="space-y-4">
-          {queue.data.map((row) => {
-            const chosen = fault[row.assignmentId];
-            const note = reason[row.assignmentId]?.trim() ?? '';
-            const ready = Boolean(chosen) && note.length >= MIN_REASON;
+        <ul className="space-y-3">
+          {rows.map((row) => (
+            <li key={row.id}>
+              <button
+                type="button"
+                onClick={() => setSelected(row)}
+                className="w-full rounded-xl border bg-card p-4 text-left transition-all hover:border-primary/50 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              >
+                <div className="flex flex-wrap items-center gap-4">
+                  <span className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-accent text-accent-foreground">
+                    <FileClock className="size-5" aria-hidden="true" />
+                  </span>
 
-            return (
-              <Card key={row.id}>
-                <CardHeader className="flex-row items-start justify-between gap-4 space-y-0 pb-4">
-                  <div>
-                    <p className="font-medium">Shift {shortId(row.assignmentId)}</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      Flagged {formatAgo(row.detectedAt)}
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium">{row.practitionerName}</p>
+                    <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                      {row.facilityName}
+                    </p>
+                    <p className="mt-1 truncate text-xs text-muted-foreground">
+                      Shift ended {formatAgo(row.shiftEndedAt)} · flagged{' '}
+                      {formatAgo(row.detectedAt)}
                     </p>
                   </div>
+
+                  {row.fault ? (
+                    <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">
+                      {humanise(row.fault)} at fault
+                    </span>
+                  ) : null}
+
                   <StatusBadge status={row.status} />
-                </CardHeader>
-
-                <CardContent className="space-y-4">
-                  <DetailGrid>
-                    <Detail label="Practitioner">{shortId(row.userId)}</Detail>
-                    <Detail label="Facility">{shortId(row.facilityId)}</Detail>
-                    <Detail label="Shift ended" className="sm:col-span-2">
-                      {formatWhen(row.shiftEndedAt)}
-                    </Detail>
-                  </DetailGrid>
-
-                  <Separator />
-
-                  <fieldset className="space-y-2">
-                    <legend className="mb-2 text-sm font-medium">Whose fault was it?</legend>
-                    {FAULTS.map((option) => {
-                      const selected = chosen === option.value;
-                      return (
-                        <label
-                          key={option.value}
-                          className={cn(
-                            'flex cursor-pointer gap-3 rounded-md border p-3 transition-colors',
-                            selected
-                              ? option.tone === 'destructive'
-                                ? 'border-destructive/50 bg-destructive/5'
-                                : 'border-primary/50 bg-accent'
-                              : 'hover:bg-muted/50',
-                          )}
-                        >
-                          <input
-                            type="radio"
-                            name={`fault-${row.id}`}
-                            className="mt-1 accent-current"
-                            checked={selected}
-                            onChange={() =>
-                              setFault((current) => ({
-                                ...current,
-                                [row.assignmentId]: option.value,
-                              }))
-                            }
-                          />
-                          <span className="min-w-0">
-                            <span className="block text-sm font-medium">{option.label}</span>
-                            <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
-                              {option.consequence}
-                            </span>
-                          </span>
-                        </label>
-                      );
-                    })}
-                  </fieldset>
-
-                  <div className="space-y-2">
-                    <Label htmlFor={`reason-${row.id}`}>
-                      What you found{' '}
-                      <span className="font-normal text-muted-foreground">— required</span>
-                    </Label>
-                    <Textarea
-                      id={`reason-${row.id}`}
-                      rows={2}
-                      placeholder="Who you spoke to and what they said."
-                      value={reason[row.assignmentId] ?? ''}
-                      onChange={(event) =>
-                        setReason((current) => ({
-                          ...current,
-                          [row.assignmentId]: event.target.value,
-                        }))
-                      }
-                    />
-                  </div>
-
-                  <Button
-                    disabled={!ready || decide.isPending}
-                    loading={decide.isPending && decide.variables?.assignmentId === row.assignmentId}
-                    variant={chosen === 'PRACTITIONER' ? 'destructive' : 'default'}
-                    onClick={() => decide.mutate({ assignmentId: row.assignmentId })}
-                  >
-                    <CircleCheck />
-                    Record the decision
-                  </Button>
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
+                </div>
+              </button>
+            </li>
+          ))}
+        </ul>
       )}
+
+      {rows.length > 0 && (pageIndex > 0 || nextCursor) ? (
+        <div className="mt-5 flex items-center justify-between gap-3">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={pageIndex === 0 || queue.isFetching}
+            onClick={() => setPageIndex((index) => Math.max(0, index - 1))}
+          >
+            <ChevronLeft />
+            Previous
+          </Button>
+
+          <p className="tabular text-xs text-muted-foreground">
+            Page {pageIndex + 1}
+            {queue.isFetching ? ' · loading' : ''}
+          </p>
+
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!nextCursor || queue.isFetching}
+            onClick={() => {
+              if (!nextCursor) return;
+              setCursors((current) => {
+                const next = current.slice(0, pageIndex + 1);
+                next.push(nextCursor);
+                return next;
+              });
+              setPageIndex((index) => index + 1);
+            }}
+          >
+            Next
+            <ChevronRight />
+          </Button>
+        </div>
+      ) : null}
     </>
   );
 }

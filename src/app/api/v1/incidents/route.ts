@@ -4,7 +4,7 @@ import {
   reportIncidentSchema,
 } from '@/modules/clinical-incidents/presentation/schemas';
 import {
-  listIncidentsForFacility,
+  listIncidents,
   reportIncident,
 } from '@/modules/clinical-incidents/application/incident';
 
@@ -35,15 +35,13 @@ export async function POST(request: Request) {
   });
 }
 
-/** GET — the facility's own reports, newest first. */
+/** GET — the facility's own reports, filtered, searched and paged. */
 export async function GET(request: Request) {
   return handleGuardedRequest(request, {
     source: 'query',
     schema: listIncidentsSchema,
     permission: 'incident.report',
     scope: (input) => ({ type: 'FACILITY', id: input.facilityId }),
-    action: async ({ input }) => ({
-      incidents: await listIncidentsForFacility(input.facilityId),
-    }),
+    action: async ({ input }) => listIncidents(input),
   });
 }

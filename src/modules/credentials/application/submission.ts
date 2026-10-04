@@ -38,6 +38,27 @@ export interface CredentialSubmissionView {
   updatedAt: Date;
 }
 
+/**
+ * A queue row: the submission, plus who it belongs to and what it is.
+ *
+ * The list used to return ids and nothing else, so the review screen showed
+ * `67ddc9b6` where a name belongs and `efcd5329` where "MBBS" belongs. An
+ * officer could not tell two practitioners apart, or two credential types,
+ * without going to the database. For the one step in this product whose whole
+ * purpose is a person looking at evidence by hand, that is the wrong shape.
+ *
+ * The photograph is signed here rather than fetched per row: a review queue is
+ * short, signing is local, and one request that arrives complete beats a
+ * screen that fills in faces afterwards. Each practitioner is signed once even
+ * when they have several submissions in the same queue.
+ */
+export interface CredentialQueueRow extends CredentialSubmissionView {
+  practitionerName: string;
+  practitionerPhone: string;
+  practitionerPhotoUrl: string | null;
+  credentialTypeName: string;
+}
+
 function toView(submission: {
   id: string;
   userId: string;
@@ -202,12 +223,13 @@ export interface ListSubmissionsQuery {
   scopeId?: string;
   status?: CredentialSubmissionStatusValue;
   credentialTypeId?: string;
+  search?: string;
   limit: number;
   cursor?: string;
 }
 
 export interface SubmissionsPage {
-  submissions: CredentialSubmissionView[];
+  submissions: CredentialQueueRow[];
   nextCursor: string | null;
 }
 
@@ -225,14 +247,53 @@ export async function listSubmissions(query: ListSubmissionsQuery): Promise<Subm
   if (query.status) where.status = query.status;
   if (query.credentialTypeId) where.credentialTypeId = query.credentialTypeId;
 
+  if (query.search) {
+    const search = query.search.trim();
+    where.user = {
+      OR: [
+        { fullName: { contains: search, mode: 'insensitive' } },
+        { phone: { contains: search } },
+      ],
+    };
+  }
+
   const rows = await prisma.credentialSubmission.findMany({
     where,
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     take: query.limit + 1,
     ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
+    include: {
+      user: {
+        select: {
+          fullName: true,
+          phone: true,
+          practitionerProfile: { select: { photoObjectKey: true } },
+        },
+      },
+      credentialType: { select: { name: true } },
+    },
   });
 
-  const submissions = rows.slice(0, query.limit).map(toView);
+  const page = rows.slice(0, query.limit);
+
+  // One signature per practitioner, not per submission: somebody with three
+  // credentials in the queue is still one face.
+  const signed = new Map<string, string | null>();
+  for (const row of page) {
+    const key = row.user.practitionerProfile?.photoObjectKey ?? null;
+    if (!signed.has(row.userId)) {
+      signed.set(row.userId, key ? await createDownloadUrl(key) : null);
+    }
+  }
+
+  const submissions: CredentialQueueRow[] = page.map((row) => ({
+    ...toView(row),
+    practitionerName: row.user.fullName,
+    practitionerPhone: row.user.phone,
+    practitionerPhotoUrl: signed.get(row.userId) ?? null,
+    credentialTypeName: row.credentialType.name,
+  }));
+
   const hasMore = rows.length > query.limit;
 
   return {

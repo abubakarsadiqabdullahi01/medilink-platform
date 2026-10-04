@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { prisma, type Tx } from '@/lib/db';
 import { recordAudit } from '@/lib/audit';
 import { HttpError } from '@/lib/http/errors';
@@ -160,6 +161,74 @@ export async function listRequests(status?: RequestStatusValue): Promise<Request
     orderBy: { dueBy: 'asc' },
   });
   return rows.map(toView);
+}
+
+/**
+ * The compliance queue, with the subject named and paged.
+ *
+ * The screen showed `67ddc9b6` under "Subject". A data-subject request is a
+ * person exercising a right over their own record, and answering one without
+ * knowing whose record it is cannot be done — an officer would have to look
+ * the uuid up elsewhere to write the reply the Act requires.
+ *
+ * Ordering stays by deadline rather than arrival, which is the queue's whole
+ * argument: the Act gives a month, so the one closest to running out is the
+ * one to work, not the one that came in first.
+ */
+export interface RequestQueueRow extends RequestView {
+  subjectName: string;
+  subjectPhone: string;
+}
+
+export interface RequestQueuePage {
+  requests: RequestQueueRow[];
+  nextCursor: string | null;
+}
+
+export interface ListRequestsQuery {
+  status?: RequestStatusValue;
+  kind?: RequestKind;
+  /** Matches the subject's name or phone number. */
+  search?: string;
+  limit: number;
+  cursor?: string;
+}
+
+export async function listRequestQueue(query: ListRequestsQuery): Promise<RequestQueuePage> {
+  const where: Prisma.DataSubjectRequestWhereInput = {};
+  if (query.status) where.status = query.status;
+  if (query.kind) where.kind = query.kind;
+
+  if (query.search) {
+    const search = query.search.trim();
+    where.user = {
+      OR: [
+        { fullName: { contains: search, mode: 'insensitive' } },
+        { phone: { contains: search } },
+      ],
+    };
+  }
+
+  const rows = await prisma.dataSubjectRequest.findMany({
+    where,
+    orderBy: [{ dueBy: 'asc' }, { id: 'asc' }],
+    take: query.limit + 1,
+    ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
+    include: { user: { select: { fullName: true, phone: true } } },
+  });
+
+  const page = rows.slice(0, query.limit);
+
+  const requests = page.map((row) => ({
+    ...toView(row),
+    subjectName: row.user.fullName,
+    subjectPhone: row.user.phone,
+  }));
+
+  return {
+    requests,
+    nextCursor: rows.length > query.limit ? (page[page.length - 1]?.id ?? null) : null,
+  };
 }
 
 export async function listOwnRequests(userId: string): Promise<RequestView[]> {

@@ -188,9 +188,14 @@ def unique_phone():
     digits. The platform keeps an allow-list of prefixes rather than accepting
     any ten digits, so an invented number is refused — which is the rule
     working, and cost this script a run to learn.
+
+    `805` rather than `803`, because `scripts/seed-demo.ts` puts its accounts on
+    `0803 120 0xxx` and `%H%M%S%f` lands inside that block for a few seconds
+    after noon UTC every day. The collision would surface as a registration
+    refused for a reason that has nothing to do with the step being tested.
     """
     tail = datetime.now(timezone.utc).strftime("%H%M%S%f")[:7]
-    return f"+234803{tail}"
+    return f"+234805{tail}"
 
 
 def main():
@@ -671,7 +676,7 @@ def main():
     status, body = ward.call(
         "POST",
         "/api/v1/grants",
-        {"userId": prac_id, "roleKey": "finance_officer", "scopeType": "PLATFORM"},
+        {"userId": prac_id, "roleKey": "administrator", "scopeType": "PLATFORM"},
     )
     check(
         "and nobody can grant a permission they do not hold themselves",

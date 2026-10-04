@@ -26,15 +26,13 @@ export async function POST(request: Request) {
   });
 }
 
-/** GET — the log, newest first, narrowable by status or area. */
+/** GET — the log, newest first, narrowable by status or area, and paged. */
 export async function GET(request: Request) {
   return handleGuardedRequest(request, {
     source: 'query',
     schema: listSuggestionsSchema,
     permission: 'suggestion.triage',
     scope: () => ({ type: 'PLATFORM' }),
-    action: async ({ input }) => ({
-      suggestions: await listSuggestions({ status: input.status, area: input.area }),
-    }),
+    action: async ({ input }) => listSuggestions(input),
   });
 }

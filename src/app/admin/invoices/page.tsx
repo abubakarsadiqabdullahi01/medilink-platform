@@ -22,7 +22,7 @@ import {
 import { Combobox } from '@/components/app/combobox';
 import { StatusBadge } from '@/components/app/status-badge';
 import { EmptyState, PageHeader, QueueSkeleton } from '@/components/app/page-shell';
-import { formatDate, formatMinutes, formatNaira, shortId } from '@/components/app/format';
+import { formatDate, formatMinutes, formatNaira } from '@/components/app/format';
 
 interface FacilitySummary {
   id: string;
@@ -32,6 +32,7 @@ interface FacilitySummary {
 interface InvoiceLine {
   assignmentId: string;
   practitionerId: string;
+  practitionerName: string;
   hourlyRateKobo: number;
   ordinaryMinutes: number;
   nightMinutes: number;
@@ -242,9 +243,7 @@ export default function InvoicesPage() {
                   <TableBody>
                     {invoice.lines.map((line) => (
                       <TableRow key={line.assignmentId}>
-                        <TableCell className="font-mono text-xs">
-                          {shortId(line.practitionerId)}
-                        </TableCell>
+                        <TableCell className="text-xs">{line.practitionerName}</TableCell>
                         <TableCell className="text-xs">
                           {formatMinutes(line.ordinaryMinutes)}
                         </TableCell>

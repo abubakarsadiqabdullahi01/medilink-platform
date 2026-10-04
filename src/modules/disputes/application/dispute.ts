@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { prisma, type Tx } from '@/lib/db';
 import { recordAudit } from '@/lib/audit';
 import { publishEvent } from '@/lib/outbox';
@@ -417,17 +418,89 @@ export async function listDisputesFor(assignmentId: string): Promise<DisputeView
 }
 
 /** The adjudicator's queue: everything live, oldest first. */
-export async function listLiveDisputes(): Promise<DisputeView[]> {
+export interface DisputeQueueRow extends DisputeView {
+  practitionerName: string;
+  facilityName: string;
+  shiftStartsAt: Date;
+}
+
+/**
+ * The adjudicator's queue, with the shift and the people on it named.
+ *
+ * The screen was showing a fragment of a uuid where a practitioner's name and
+ * a shift's date belong — the same gap `listUnhonoured` closed for step 7.7,
+ * for the same reason: deciding who was right about a shift is not a decision
+ * anybody should be asked to make against `76a16e95`. One joined query rather
+ * than `getAssignment` per row, which was fine at six live disputes and would
+ * not have stayed fine at sixty.
+ */
+export interface DisputeQueuePage {
+  disputes: DisputeQueueRow[];
+  nextCursor: string | null;
+}
+
+/**
+ * The adjudicator's queue, named, searchable and paged — and reaching every
+ * status, not only the live ones.
+ *
+ * It used to be `listLiveDisputes`, hard-wired to `status: {in: LIVE}` with
+ * no limit and no way to look a case up by name. That meant a dispute
+ * resolved last month was unreachable from this screen the moment it left
+ * the live set — the same gap step 7.7's queue had before `listUnhonoured`
+ * closed it, for the same reason: "what did we decide about that one" needs
+ * an answer that survives the case leaving the open queue.
+ */
+export async function listDisputes(
+  filter: {
+    status?: DisputeStatusValue;
+    search?: string;
+    limit?: number;
+    cursor?: string;
+  } = {},
+): Promise<DisputeQueuePage> {
+  const limit = filter.limit ?? 50;
+  const where: Prisma.DisputeWhereInput = {
+    status: filter.status ?? { in: LIVE },
+  };
+
+  if (filter.search) {
+    const search = filter.search.trim();
+    where.assignment = {
+      OR: [
+        { user: { fullName: { contains: search, mode: 'insensitive' } } },
+        { serviceRequest: { facility: { name: { contains: search, mode: 'insensitive' } } } },
+      ],
+    };
+  }
+
   const rows = await prisma.dispute.findMany({
-    where: { status: { in: LIVE } },
-    orderBy: { createdAt: 'asc' },
+    where,
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    take: limit + 1,
+    ...(filter.cursor ? { cursor: { id: filter.cursor }, skip: 1 } : {}),
+    include: {
+      assignment: {
+        select: {
+          userId: true,
+          facilityId: true,
+          startsAt: true,
+          user: { select: { fullName: true } },
+          serviceRequest: { select: { facility: { select: { name: true } } } },
+        },
+      },
+    },
   });
 
-  const views: DisputeView[] = [];
-  for (const row of rows) {
-    const assignment = await getAssignment(row.assignmentId);
-    if (!assignment) continue;
-    views.push(toView(row, assignment.userId, assignment.facilityId));
-  }
-  return views;
+  const page = rows.slice(0, limit);
+  const disputes = page.map((row) => ({
+    ...toView(row, row.assignment.userId, row.assignment.facilityId),
+    practitionerName: row.assignment.user.fullName,
+    facilityName: row.assignment.serviceRequest.facility.name,
+    shiftStartsAt: row.assignment.startsAt,
+  }));
+
+  return {
+    disputes,
+    nextCursor: rows.length > limit ? (page[page.length - 1]?.id ?? null) : null,
+  };
 }

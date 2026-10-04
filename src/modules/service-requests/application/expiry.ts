@@ -1,6 +1,7 @@
 import { prisma, type Tx } from '@/lib/db';
 import { recordAudit } from '@/lib/audit';
 import { logger } from '@/lib/logger';
+import { withdrawOutstandingInvitations } from '@/modules/matching/application/assignment';
 
 /**
  * Requests whose shift has started without being filled.
@@ -8,8 +9,10 @@ import { logger } from '@/lib/logger';
  * A published request that is now in the past is not an opportunity, and
  * leaving it open means it keeps appearing in lists, keeps accepting
  * invitations, and quietly distorts the fill-rate metric the pilot is judged
- * on. Any invitation still awaiting an answer is withdrawn with it — a
- * practitioner should not accept a shift that has already begun.
+ * on. Every offer on it that did not become an assignment is withdrawn with
+ * it — one still awaiting an answer, and one accepted but never confirmed.
+ * A practitioner should not accept a shift that has already begun, nor be
+ * left believing they might still be confirmed onto one.
  */
 export interface RequestExpiryResult {
   expired: number;
@@ -36,11 +39,14 @@ export async function expireStartedRequests(
       });
       if (applied.count !== 1) return;
 
-      const withdrawn = await tx.invitation.updateMany({
-        where: { serviceRequestId: request.id, status: 'INVITED' },
-        data: { status: 'WITHDRAWN', respondedAt: now },
+      const withdrawn = await withdrawOutstandingInvitations(tx, {
+        requestId: request.id,
+        actorId: request.facilityId,
+        actorType: 'system',
+        reason: 'The shift started before this offer became an assignment',
+        now,
       });
-      invitationsWithdrawn += withdrawn.count;
+      invitationsWithdrawn += withdrawn;
 
       await recordAudit(tx, {
         action: 'service_request.expired',
@@ -51,7 +57,7 @@ export async function expireStartedRequests(
         scopeType: 'FACILITY',
         scopeId: request.facilityId,
         reason: 'The shift started without the request being filled',
-        after: { status: 'EXPIRED', invitationsWithdrawn: withdrawn.count },
+        after: { status: 'EXPIRED', invitationsWithdrawn: withdrawn },
       });
     });
   }

@@ -1,76 +1,100 @@
 'use client';
 
 import { useState } from 'react';
-import { ShieldCheck, TriangleAlert } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { ChevronLeft, ChevronRight, Search, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { api } from '@/lib/ui/api';
-import { useQueue, useQueueAction } from '@/lib/ui/queue';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Separator } from '@/components/ui/separator';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Textarea } from '@/components/ui/textarea';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
-import { Detail, DetailGrid, EmptyState, PageHeader, QueueSkeleton } from '@/components/app/page-shell';
-import { formatAgo, formatWhen, shortId } from '@/components/app/format';
-
-interface SubjectRequest {
-  id: string;
-  userId: string;
-  kind: string;
-  status: string;
-  detail: string | null;
-  outcome: string | null;
-  receivedAt: string;
-  dueBy: string;
-  overdue: boolean;
-}
-
-const STATUSES = ['RECEIVED', 'IN_PROGRESS', 'COMPLETED', 'REFUSED'] as const;
-const MIN_OUTCOME = 10;
-
-/** What each right actually obliges the platform to do. */
-const KIND_DUTY: Record<string, string> = {
-  ACCESS: 'They are entitled to a copy of what is held about them.',
-  PORTABILITY: 'A copy in a form they can take elsewhere. The export endpoint produces it.',
-  RECTIFICATION: 'Something held about them is wrong and has to be corrected.',
-  ERASURE:
-    'Identifying details are replaced. Audit rows and ledger entries are retained under a legal obligation — tell them that, rather than letting them assume otherwise.',
-  RESTRICTION: 'They want processing stopped while something is resolved.',
-};
+import { EmptyState, PageHeader } from '@/components/app/page-shell';
+import { ScreenTransition } from '@/components/app/motion';
+import { formatAgo, formatWhen } from '@/components/app/format';
+import { RequestDetail, type SubjectRequest } from './request-detail';
 
 /**
- * Requests from data subjects, closest to their deadline first.
+ * Data-subject requests: somebody exercising a right over their own record.
  *
- * The Act expects an answer within a month. Sorting by deadline rather than
- * by arrival is what makes that a queue somebody can work rather than a list
- * that quietly goes stale at the bottom.
+ * Ordered by deadline rather than arrival, because the Act gives a month and
+ * the one closest to running out is the one to work. The list says how long is
+ * left rather than only when it is due — "four days left" is the number an
+ * officer acts on; a date is one they have to subtract from.
  */
+
+const STATUSES = [
+  ['RECEIVED', 'Received'],
+  ['IN_PROGRESS', 'In progress'],
+  ['COMPLETED', 'Completed'],
+  ['REFUSED', 'Refused'],
+] as const;
+
+const KINDS = ['ACCESS', 'RECTIFICATION', 'ERASURE', 'PORTABILITY', 'RESTRICTION'] as const;
+
+const PAGE_SIZE = 20;
+
+/** Whole days remaining, negative once the deadline has passed. */
+function daysLeft(dueBy: string): number {
+  return Math.ceil((new Date(dueBy).getTime() - Date.now()) / 86_400_000);
+}
+
 export default function DataRequestsPage() {
   const [status, setStatus] = useState<string>('RECEIVED');
-  const queueKey = ['data-requests', status];
-  const queue = useQueue<SubjectRequest>(
-    queueKey,
-    `/api/v1/data-requests?status=${status}`,
-    (body) => (body as { requests?: SubjectRequest[] }).requests ?? [],
-  );
+  const [kind, setKind] = useState('all');
+  const [search, setSearch] = useState('');
+  const [applied, setApplied] = useState('');
+  const [selected, setSelected] = useState<SubjectRequest | null>(null);
 
-  const [outcomes, setOutcomes] = useState<Record<string, string>>({});
+  const [cursors, setCursors] = useState<(string | null)[]>([null]);
+  const [pageIndex, setPageIndex] = useState(0);
+  const cursor = cursors[pageIndex] ?? null;
 
-  const close = useQueueAction<{ id: string; status: 'COMPLETED' | 'REFUSED' }>({
-    queueKey,
-    run: ({ id, status: next }) =>
-      api.post(`/api/v1/data-requests/${id}/close`, {
-        status: next,
-        outcome: outcomes[id]?.trim(),
-      }),
-    success: ({ status: next }) =>
-      next === 'COMPLETED' ? 'Answered' : 'Refused, with the reason on the record',
+  function startOver() {
+    setCursors([null]);
+    setPageIndex(0);
+  }
+
+  const queue = useQuery({
+    queryKey: ['request-queue', status, kind, applied, cursor],
+    queryFn: () => {
+      const parts = [
+        `status=${status}`,
+        `limit=${PAGE_SIZE}`,
+        kind !== 'all' ? `kind=${kind}` : '',
+        applied ? `search=${encodeURIComponent(applied)}` : '',
+        cursor ? `cursor=${cursor}` : '',
+      ].filter(Boolean);
+      return api.get<{ requests?: SubjectRequest[]; nextCursor?: string | null }>(
+        `/api/v1/data-requests?${parts.join('&')}`,
+      );
+    },
+    placeholderData: (previous) => previous,
   });
 
-  const overdue = (queue.data ?? []).filter((row) => row.overdue).length;
+  if (selected) {
+    return (
+      <ScreenTransition screenKey={selected.id}>
+        <RequestDetail request={selected} onBack={() => setSelected(null)} />
+      </ScreenTransition>
+    );
+  }
+
+  const rows = queue.data?.requests ?? [];
+  const nextCursor = queue.data?.nextCursor ?? null;
+  const overdue = rows.filter((row) => row.overdue).length;
+  const filtered = kind !== 'all' || Boolean(applied);
 
   return (
     <>
@@ -79,142 +103,216 @@ export default function DataRequestsPage() {
         description="Somebody exercising a right over their own data. The Act expects an answer within a month, so this queue is ordered by deadline rather than by arrival."
       />
 
-      {overdue > 0 ? (
-        <Alert variant="destructive" className="mb-6">
-          <TriangleAlert />
-          <AlertDescription>
-            <strong>
-              {overdue} request{overdue === 1 ? ' is' : 's are'} past the statutory deadline.
-            </strong>{' '}
-            Answering late is a breach in its own right, separately from whatever the answer is.
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
-      <Tabs value={status} onValueChange={setStatus} className="mb-5">
+      <Tabs
+        value={status}
+        onValueChange={(value) => {
+          setStatus(value);
+          startOver();
+        }}
+        className="mb-5"
+      >
         <TabsList>
-          {STATUSES.map((value) => (
+          {STATUSES.map(([value, label]) => (
             <TabsTrigger key={value} value={value}>
-              {humanise(value)}
+              {label}
             </TabsTrigger>
           ))}
         </TabsList>
       </Tabs>
 
+      <Card className="mb-6">
+        <CardContent className="pt-6">
+          <form
+            className="flex flex-wrap items-end gap-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              setApplied(search.trim());
+              startOver();
+            }}
+          >
+            <div className="min-w-[240px] flex-1 space-y-1.5">
+              <Label htmlFor="request-search">Search by subject</Label>
+              <Input
+                id="request-search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Their name, or the number they registered with"
+              />
+            </div>
+
+            <div className="min-w-[170px] space-y-1.5">
+              <Label>Right</Label>
+              <Select
+                value={kind}
+                onValueChange={(value) => {
+                  setKind(value);
+                  startOver();
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Any right</SelectItem>
+                  {KINDS.map((value) => (
+                    <SelectItem key={value} value={value}>
+                      {humanise(value)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <Button type="submit" loading={queue.isFetching}>
+              <Search />
+              Search
+            </Button>
+
+            {filtered ? (
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => {
+                  setSearch('');
+                  setApplied('');
+                  setKind('all');
+                  startOver();
+                }}
+              >
+                Clear
+              </Button>
+            ) : null}
+          </form>
+
+          {!queue.isPending && rows.length > 0 ? (
+            <p className="mt-3 text-xs text-muted-foreground">
+              {rows.length} on this page
+              {overdue > 0 ? (
+                <span className="font-medium text-destructive"> · {overdue} past the deadline</span>
+              ) : null}
+            </p>
+          ) : null}
+        </CardContent>
+      </Card>
+
       {queue.isPending ? (
-        <QueueSkeleton />
+        <div className="space-y-3">
+          {Array.from({ length: 5 }).map((_, index) => (
+            <Skeleton key={index} className="h-20 w-full" />
+          ))}
+        </div>
       ) : queue.isError ? (
         <Alert variant="destructive">
           <TriangleAlert />
           <AlertDescription>This queue could not be loaded.</AlertDescription>
         </Alert>
-      ) : queue.data.length === 0 ? (
+      ) : rows.length === 0 ? (
         <EmptyState
           icon={<ShieldCheck />}
-          title={`Nothing ${humanise(status).toLowerCase()}`}
+          title={filtered ? 'Nothing matches that' : 'Nothing waiting'}
           description={
-            status === 'RECEIVED'
-              ? 'A request appears here the moment somebody exercises a right from their privacy page.'
-              : undefined
+            filtered
+              ? 'Try a different right, or clear the filters.'
+              : 'Every request has been answered within its month.'
           }
         />
       ) : (
-        <div className="space-y-4">
-          {queue.data.map((row) => {
-            const outcome = outcomes[row.id]?.trim() ?? '';
+        <ul className="space-y-3">
+          {rows.map((row) => {
+            const left = daysLeft(row.dueBy);
             const open = row.status === 'RECEIVED' || row.status === 'IN_PROGRESS';
 
             return (
-              <Card key={row.id} className={row.overdue ? 'border-destructive/40' : undefined}>
-                <CardHeader className="flex-row items-start justify-between gap-4 space-y-0 pb-4">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="secondary">{humanise(row.kind)}</Badge>
-                      <StatusBadge status={row.status} />
-                      {row.overdue ? <Badge variant="destructive">Overdue</Badge> : null}
-                    </div>
-                    <p className="mt-1.5 text-xs text-muted-foreground">
-                      received {formatAgo(row.receivedAt)}
-                    </p>
-                  </div>
-                </CardHeader>
+              <li key={row.id}>
+                <button
+                  type="button"
+                  onClick={() => setSelected(row)}
+                  className={cn(
+                    'w-full rounded-xl border bg-card p-4 text-left transition-all hover:border-primary/50 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+                    row.overdue && 'border-destructive/40',
+                  )}
+                >
+                  <div className="flex flex-wrap items-center gap-4">
+                    <span className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-accent text-accent-foreground">
+                      <ShieldCheck className="size-5" aria-hidden="true" />
+                    </span>
 
-                <CardContent className="space-y-4">
-                  <DetailGrid>
-                    <Detail label="Subject">{shortId(row.userId)}</Detail>
-                    <Detail label="Received">{formatWhen(row.receivedAt)}</Detail>
-                    <Detail label="Due by" className="sm:col-span-2">
-                      <span className={row.overdue ? 'text-destructive' : undefined}>
-                        {formatWhen(row.dueBy)}
-                      </span>
-                    </Detail>
-                  </DetailGrid>
-
-                  {row.detail ? (
-                    <p className="rounded-md bg-muted px-3 py-2 text-sm">
-                      They said: {row.detail}
-                    </p>
-                  ) : null}
-
-                  <Alert variant="info">
-                    <ShieldCheck />
-                    <AlertDescription>{KIND_DUTY[row.kind]}</AlertDescription>
-                  </Alert>
-
-                  {row.outcome ? (
-                    <div className="rounded-md bg-muted px-3 py-2 text-sm">
-                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                        Answered
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-medium">{row.subjectName}</p>
+                      <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                        {humanise(row.kind)} · received {formatAgo(row.receivedAt)}
                       </p>
-                      <p className="mt-1">{row.outcome}</p>
+                      <p className="mt-1 truncate text-xs text-muted-foreground">
+                        Due {formatWhen(row.dueBy)}
+                      </p>
                     </div>
-                  ) : null}
 
-                  {open ? (
-                    <>
-                      <Separator />
-                      <div className="space-y-2">
-                        <Label htmlFor={`outcome-${row.id}`}>
-                          What was done{' '}
-                          <span className="font-normal text-muted-foreground">
-                            — required either way, and the subject reads it
-                          </span>
-                        </Label>
-                        <Textarea
-                          id={`outcome-${row.id}`}
-                          rows={3}
-                          placeholder="What you did, or why you are refusing."
-                          value={outcomes[row.id] ?? ''}
-                          onChange={(event) =>
-                            setOutcomes((current) => ({ ...current, [row.id]: event.target.value }))
-                          }
-                        />
-                      </div>
+                    {/* The clock is the point of this queue, so it reads as a
+                        countdown rather than a date somebody has to subtract. */}
+                    {open ? (
+                      <span
+                        className={cn(
+                          'shrink-0 rounded-full px-2.5 py-1 text-xs font-medium',
+                          row.overdue
+                            ? 'bg-destructive/10 text-destructive'
+                            : left <= 7
+                              ? 'bg-warning/10 text-warning'
+                              : 'bg-muted text-muted-foreground',
+                        )}
+                      >
+                        {row.overdue
+                          ? `${Math.abs(left)} days over`
+                          : left === 0
+                            ? 'Due today'
+                            : `${left} days left`}
+                      </span>
+                    ) : null}
 
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          variant="success"
-                          disabled={outcome.length < MIN_OUTCOME || close.isPending}
-                          onClick={() => close.mutate({ id: row.id, status: 'COMPLETED' })}
-                        >
-                          Answered
-                        </Button>
-                        <Button
-                          variant="destructive"
-                          disabled={outcome.length < MIN_OUTCOME || close.isPending}
-                          onClick={() => close.mutate({ id: row.id, status: 'REFUSED' })}
-                        >
-                          Refuse
-                        </Button>
-                      </div>
-                    </>
-                  ) : null}
-                </CardContent>
-              </Card>
+                    <StatusBadge status={row.status} />
+                  </div>
+                </button>
+              </li>
             );
           })}
-        </div>
+        </ul>
       )}
+
+      {rows.length > 0 && (pageIndex > 0 || nextCursor) ? (
+        <div className="mt-5 flex items-center justify-between gap-3">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={pageIndex === 0 || queue.isFetching}
+            onClick={() => setPageIndex((index) => Math.max(0, index - 1))}
+          >
+            <ChevronLeft />
+            Previous
+          </Button>
+
+          <p className="tabular text-xs text-muted-foreground">
+            Page {pageIndex + 1}
+            {queue.isFetching ? ' · loading' : ''}
+          </p>
+
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!nextCursor || queue.isFetching}
+            onClick={() => {
+              if (!nextCursor) return;
+              setCursors((current) => {
+                const next = current.slice(0, pageIndex + 1);
+                next.push(nextCursor);
+                return next;
+              });
+              setPageIndex((index) => index + 1);
+            }}
+          >
+            Next
+            <ChevronRight />
+          </Button>
+        </div>
+      ) : null}
     </>
   );
 }

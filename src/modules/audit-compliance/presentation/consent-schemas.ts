@@ -42,4 +42,8 @@ export const closeRequestSchema = z.object({
 
 export const listRequestsSchema = z.object({
   status: z.enum(['RECEIVED', 'IN_PROGRESS', 'COMPLETED', 'REFUSED']).optional(),
+  kind: z.enum(['ACCESS', 'RECTIFICATION', 'ERASURE', 'PORTABILITY', 'RESTRICTION']).optional(),
+  search: z.string().trim().max(120).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  cursor: uuid.optional(),
 });

@@ -31,6 +31,10 @@ const schema = z.object({
 
   SMS_PROVIDER: z.enum(['console', 'termii', 'africastalking']).default('console'),
   SMS_API_KEY: z.string().optional(),
+  // A file the console adapter also appends each message to, one JSON object
+  // per line. The browser journeys read one-time codes from it; it means
+  // nothing to any other adapter and is ignored by them.
+  SMS_CONSOLE_OUTBOX: z.string().optional(),
   SMTP_URL: z.string().optional(),
 
   // 'console' is the local stub, the same shape SMS_PROVIDER uses. It

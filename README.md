@@ -38,7 +38,22 @@ cp .env.example .env          # PowerShell: Copy-Item .env.example .env
 docker compose up -d
 docker compose exec web pnpm prisma migrate dev --name init
 docker compose exec web pnpm db:seed
+docker compose exec web pnpm tsx scripts/seed-demo.ts
 ```
+
+`pnpm db:seed` loads the controlled vocabularies and no people, which is right
+for a production database and leaves a local one with nothing to sign in as.
+`scripts/seed-demo.ts` fills that in: a simulated pilot — five facilities,
+thirty-nine practitioners, sixteen weeks of shifts, invoices and payouts —
+built through the application layer rather than by inserting rows, with the
+login sheet printed at the end. It refuses to run unless `APP_ENV=local`,
+because it creates accounts with a known password.
+
+`docs/demo-walkthrough.md` is the guided tour of what it builds: which account
+to sign in as to see each part of the product, and what each part is there to
+demonstrate. `docs/testing-by-role.md` is the checklist version — what to do as
+each role and what you should see — including where to read the one-time codes
+during registration, since local development has no SMS gateway.
 
 | Service                              | URL                                                |
 | ------------------------------------ | -------------------------------------------------- |

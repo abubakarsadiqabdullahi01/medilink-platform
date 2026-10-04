@@ -26,6 +26,8 @@ export type SubmitSuggestionInput = z.infer<typeof submitSuggestionSchema>;
 export const listSuggestionsSchema = z.object({
   status: z.enum(['NEW', 'TRIAGED', 'PLANNED', 'DONE', 'DECLINED']).optional(),
   area: area.optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(25),
+  cursor: uuid.optional(),
 });
 
 export const triageSuggestionSchema = z.object({

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Building2, ShieldCheck } from 'lucide-react';
 import { api, errorMessage } from '@/lib/ui/api';
@@ -31,6 +31,7 @@ import { PageHeader } from '@/components/app/page-shell';
  */
 export default function RegisterFacilityPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const reference = useReference();
 
   const [name, setName] = useState('');
@@ -62,6 +63,13 @@ export default function RegisterFacilityPage() {
       toast.success('Registered', {
         description: 'Compliance will verify it before you can publish shifts.',
       });
+      // The session's grants have just changed — this account went from
+      // holding none to holding facility_owner. The session query has a
+      // minute of staleTime for the ordinary case of nothing having changed
+      // under it; this is the one moment on this page where something just
+      // did, and the dashboard would otherwise still say "not attached" for
+      // however much of that minute was left.
+      void queryClient.invalidateQueries({ queryKey: ['session'] });
       router.push('/facility');
       router.refresh();
     },

@@ -45,6 +45,8 @@ export const listSubmissionsSchema = z.object({
   scopeId: z.string().uuid().optional(),
   status: submissionStatus.optional(),
   credentialTypeId: credentialTypeId.optional(),
+  /** Matches the practitioner's name or phone number. PLATFORM only, in practice. */
+  search: z.string().trim().max(120).optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
   cursor: z.string().uuid().optional(),
 });

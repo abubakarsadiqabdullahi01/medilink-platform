@@ -1,6 +1,7 @@
 import { handleGuardedRequest } from '@/lib/http/guarded-handler';
 import { readAttendanceSchema } from '@/modules/attendance/presentation/schemas';
 import { getAttendance, listCheckInEvents } from '@/modules/attendance/application/attendance';
+import { getAssignmentInScope } from '@/modules/matching/application/assignment';
 
 /**
  * GET /api/v1/assignments/:id/attendance — the record and how it got there.
@@ -21,10 +22,21 @@ export async function GET(request: Request, props: { params: Promise<{ id: strin
         type: input.scopeType,
         id: input.scopeType === 'SELF' ? (input.scopeId ?? session.userId) : input.scopeId,
       }),
-      action: async ({ input }) => ({
-        attendance: await getAttendance(input.id),
-        events: await listCheckInEvents(input.id),
-      }),
+      // As on the timesheet beside it: the guard proves the scope, this proves
+      // the shift is in it. Check-in times, the device somebody used and where
+      // they were are not less private than the pay they earned.
+      action: async ({ input, session }) => {
+        await getAssignmentInScope({
+          assignmentId: input.id,
+          scopeType: input.scopeType,
+          scopeId: input.scopeType === 'SELF' ? (input.scopeId ?? session.userId) : input.scopeId,
+        });
+
+        return {
+          attendance: await getAttendance(input.id),
+          events: await listCheckInEvents(input.id),
+        };
+      },
     },
     params,
   );

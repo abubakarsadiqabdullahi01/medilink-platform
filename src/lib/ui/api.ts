@@ -71,8 +71,55 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return parsed as T;
 }
 
+/**
+ * Requests started before they were asked for.
+ *
+ * Hovering a sidebar link is a reliable signal that somebody is about to
+ * click it, and the click costs a round trip the console then shows a
+ * skeleton for. Starting the GET on hover usually finishes it before the page
+ * has mounted, so the queue is already there.
+ *
+ * **Keyed by URL, not by query key.** Seeding React Query's cache directly
+ * would mean the sidebar having to reproduce each page's exact key, including
+ * its default filters, and a page that changed a default would silently stop
+ * matching — a prefetch that fetched, threw the answer away and told nobody.
+ * Warming the URL couples the two on the one string they already share, and a
+ * miss costs a normal fetch rather than a wrong one.
+ *
+ * An entry is **consumed once and discarded**. It is "the request you were
+ * about to make, started early", never a cache: a refetch after a mutation
+ * must go to the server, and one that quietly got a three-second-old body
+ * would be a queue that does not update after you work a row.
+ */
+const PREFETCH_TTL_MS = 30_000;
+
+const warmed = new Map<string, { at: number; promise: Promise<unknown> }>();
+
+export function prefetch(path: string): void {
+  const existing = warmed.get(path);
+  if (existing && Date.now() - existing.at < PREFETCH_TTL_MS) return;
+
+  // The rejection is attached here so an unawaited prefetch of something the
+  // caller is not allowed to see cannot surface as an unhandled rejection.
+  // The promise handed to a real caller still rejects normally.
+  const promise = request<unknown>('GET', path);
+  promise.catch(() => warmed.delete(path));
+
+  warmed.set(path, { at: Date.now(), promise });
+}
+
+function takeWarmed<T>(path: string): Promise<T> | null {
+  const entry = warmed.get(path);
+  if (!entry) return null;
+
+  warmed.delete(path);
+  if (Date.now() - entry.at > PREFETCH_TTL_MS) return null;
+
+  return entry.promise as Promise<T>;
+}
+
 export const api = {
-  get: <T>(path: string) => request<T>('GET', path),
+  get: <T>(path: string) => takeWarmed<T>(path) ?? request<T>('GET', path),
   post: <T>(path: string, body?: unknown) => request<T>('POST', path, body ?? {}),
   patch: <T>(path: string, body?: unknown) => request<T>('PATCH', path, body ?? {}),
   del: <T>(path: string) => request<T>('DELETE', path),

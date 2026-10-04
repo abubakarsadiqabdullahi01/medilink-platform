@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { prisma, type Tx } from '@/lib/db';
 import { recordAudit } from '@/lib/audit';
 import { publishEvent } from '@/lib/outbox';
@@ -35,10 +36,18 @@ export const IncidentErrors = {
     new HttpError('incident_wrong_facility', 'That shift does not belong to this facility.', 403),
 
   cannotReport: (blockers: string[]) =>
-    new HttpError('incident_cannot_report', `This report cannot be filed: ${blockers.join(', ')}.`, 422),
+    new HttpError(
+      'incident_cannot_report',
+      `This report cannot be filed: ${blockers.join(', ')}.`,
+      422,
+    ),
 
   cannotClose: (blockers: string[]) =>
-    new HttpError('incident_cannot_close', `This incident cannot be closed: ${blockers.join(', ')}.`, 409),
+    new HttpError(
+      'incident_cannot_close',
+      `This incident cannot be closed: ${blockers.join(', ')}.`,
+      409,
+    ),
 
   notOpen: () => new HttpError('incident_not_open', 'That incident is already closed.', 409),
 
@@ -68,8 +77,7 @@ export interface IncidentView {
   closureNotes: string | null;
 }
 
-interface IncidentRow
-  extends Omit<IncidentView, 'severity' | 'status' | 'outcome' | 'category'> {
+interface IncidentRow extends Omit<IncidentView, 'severity' | 'status' | 'outcome' | 'category'> {
   severity: string;
   status: string;
   outcome: string | null;
@@ -295,17 +303,13 @@ export async function closeIncident(input: CloseIncidentParams): Promise<Inciden
   });
 }
 
-export async function getIncident(incidentId: string): Promise<IncidentView> {
-  return toView(await loadIncident(incidentId));
-}
-
-/** A facility's own reports, newest first. */
-export async function listIncidentsForFacility(facilityId: string): Promise<IncidentView[]> {
-  const rows = await prisma.clinicalIncident.findMany({
-    where: { facilityId },
-    orderBy: { reportedAt: 'desc' },
+export async function getIncident(incidentId: string): Promise<IncidentQueueRow> {
+  const row = await prisma.clinicalIncident.findUnique({
+    where: { id: incidentId },
+    include: { facility: { select: { name: true } } },
   });
-  return rows.map(toView);
+  if (!row) throw IncidentErrors.notFound();
+  return { ...toView(row), facilityName: row.facility.name };
 }
 
 /**
@@ -319,16 +323,96 @@ export async function listOpenIncidents(): Promise<IncidentView[]> {
   });
 
   const { severityRank } = await import('../domain/incident');
-  return rows
-    .map(toView)
+  return rows.map(toView).sort((a, b) => severityRank(b.severity) - severityRank(a.severity));
+}
+
+/**
+ * The compliance queue, filtered and paged.
+ *
+ * `listOpenIncidents` takes no arguments and returns every open report, which
+ * was right while there were six and wrong at sixty: no way to find one, no
+ * way past the first screen, and no way to look at a closed case at all — so
+ * an officer could not answer "what did we decide about that one in August?"
+ * without going to the database.
+ *
+ * The facility **name** is joined here because the screen was showing
+ * `a2ee9a0e`. An incident belongs to a hospital, and a queue that identifies
+ * the hospital by a fragment of a uuid cannot be triaged by a human.
+ *
+ * Ordering keeps the rule that matters: most serious first, oldest within
+ * that. A death reported this morning outranks a near miss from March.
+ */
+export interface IncidentQueueRow extends IncidentView {
+  facilityName: string;
+}
+
+export interface IncidentQueuePage {
+  incidents: IncidentQueueRow[];
+  nextCursor: string | null;
+}
+
+export interface ListIncidentsQuery {
+  /** Narrows to one facility's own reports; omitted at the compliance queue,
+   * which reads across all of them. */
+  facilityId?: string;
+  status?: IncidentStatusValue | 'OPEN';
+  severity?: IncidentSeverityValue;
+  category?: IncidentCategoryValue;
+  /** Matches the summary text. */
+  search?: string;
+  limit: number;
+  cursor?: string;
+}
+
+export async function listIncidents(query: ListIncidentsQuery): Promise<IncidentQueuePage> {
+  const where: Prisma.ClinicalIncidentWhereInput = {};
+
+  if (query.facilityId) where.facilityId = query.facilityId;
+
+  // "OPEN" is not a stored status — it is the compliance queue's own idea of
+  // everything still needing a person. Left unstated, no status filter
+  // applies at all, same as every other optional filter here — a facility
+  // reading its own history wants everything it has ever filed, not just
+  // what is still open.
+  if (query.status === 'OPEN') {
+    where.status = { not: 'CLOSED' };
+  } else if (query.status) {
+    where.status = query.status;
+  }
+
+  if (query.severity) where.severity = query.severity;
+  if (query.category) where.category = query.category;
+  if (query.search) where.summary = { contains: query.search.trim(), mode: 'insensitive' };
+
+  const rows = await prisma.clinicalIncident.findMany({
+    where,
+    orderBy: [{ reportedAt: 'desc' }, { id: 'desc' }],
+    take: query.limit + 1,
+    ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
+    include: { facility: { select: { name: true } } },
+  });
+
+  const page = rows.slice(0, query.limit);
+  const { severityRank } = await import('../domain/incident');
+
+  const incidents = page
+    .map((row) => ({ ...toView(row), facilityName: row.facility.name }))
     .sort((a, b) => severityRank(b.severity) - severityRank(a.severity));
+
+  return {
+    incidents,
+    // Taken from the page as fetched, not as sorted: the cursor has to follow
+    // the database's order or the next page skips rows.
+    nextCursor: rows.length > query.limit ? (page[page.length - 1]?.id ?? null) : null,
+  };
 }
 
 /** Every report naming this practitioner. Compliance reads this before deciding. */
-export async function listIncidentsForSubject(subjectUserId: string): Promise<IncidentView[]> {
+export async function listIncidentsForSubject(subjectUserId: string): Promise<IncidentQueueRow[]> {
   const rows = await prisma.clinicalIncident.findMany({
     where: { subjectUserId },
     orderBy: { reportedAt: 'desc' },
+    include: { facility: { select: { name: true } } },
   });
-  return rows.map(toView);
+  return rows.map((row) => ({ ...toView(row), facilityName: row.facility.name }));
 }

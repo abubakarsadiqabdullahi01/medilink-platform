@@ -3,7 +3,7 @@ import { prisma, type Tx } from '@/lib/db';
 import { recordAudit } from '@/lib/audit';
 import { getServiceRequest } from '@/modules/service-requests/application/request';
 import { listMatchCandidates } from '@/modules/practitioners/application/candidates';
-import { availabilityForWindow } from '@/modules/availability/application/availability';
+import { availabilityForWindowBatch } from '@/modules/availability/application/availability';
 import {
   match,
   proximityTier,
@@ -13,27 +13,44 @@ import {
   type RankedCandidate,
 } from '../domain/engine';
 import { reliabilityFrom } from '../domain/reliability';
-import { assignmentOutcomes } from './assignment';
+import { assignmentOutcomesFor } from './assignment';
 
 /**
  * Running a match: gather the inputs, hand them to the pure engine, and write
  * down what it decided.
  *
  * Every cross-module read goes through that module's application layer —
- * `getServiceRequest`, `listMatchCandidates`, `availabilityForWindow` — so
- * this module joins nothing it does not own.
+ * `getServiceRequest`, `listMatchCandidates`, `availabilityForWindowBatch`
+ * — so this module joins nothing it does not own.
+ *
+ * Everything is gathered for the whole shortlist before the engine sees
+ * any of it. It used to be gathered per candidate, inside the loop: six
+ * queries each here and eight more inside `listMatchCandidates`, so
+ * ranking two hundred practitioners for one shift issued roughly two
+ * thousand eight hundred queries. The engine is unchanged — it was never
+ * the slow part.
  */
 
 /** Hours before a shift that count toward the fatigue factor. */
 const FATIGUE_WINDOW_HOURS = 7 * 24;
+
+export interface RankedCandidateView extends RankedCandidate {
+  practitionerName: string;
+  practitionerPhone: string;
+}
+
+export interface ExcludedCandidateView extends ExcludedCandidate {
+  practitionerName: string;
+  practitionerPhone: string;
+}
 
 export interface MatchRunView {
   id: string;
   serviceRequestId: string;
   consideredCount: number;
   rankedCount: number;
-  ranked: RankedCandidate[];
-  excluded: ExcludedCandidate[];
+  ranked: RankedCandidateView[];
+  excluded: ExcludedCandidateView[];
   createdAt: Date;
 }
 
@@ -61,43 +78,50 @@ export async function runMatch(input: RunMatchParams): Promise<MatchRunView> {
   const window = { startsAt: request.startsAt, endsAt: request.endsAt };
   const fatigueFrom = new Date(request.startsAt.getTime() - FATIGUE_WINDOW_HOURS * 60 * 60 * 1000);
 
-  const candidates: CandidateInput[] = [];
+  const userIds = profiles.map((profile) => profile.userId);
 
-  for (const profile of profiles) {
-    const availability = await availabilityForWindow(profile.userId, window);
-
-    // Anything this practitioner is already committed to that overlaps the
-    // shift. The engine only needs to know whether there is one; the
-    // confirmation path is what prevents a second being created.
-    const conflicting = await prisma.assignment.count({
+  // Assignments are read here rather than in `listMatchCandidates`, because
+  // they are matching's own table: having practitioners count them would have
+  // that module reach into this one, and the two already point the other way.
+  const [availability, outcomes, conflicting, committed] = await Promise.all([
+    availabilityForWindowBatch(userIds, window),
+    assignmentOutcomesFor(userIds),
+    // Anything a practitioner is already committed to that overlaps the shift.
+    // The engine only needs to know whether there is one; the confirmation
+    // path is what prevents a second being created — so this collects the ids
+    // that have one rather than counting per person.
+    prisma.assignment.findMany({
       where: {
-        userId: profile.userId,
+        userId: { in: userIds },
         status: 'CONFIRMED',
         startsAt: { lt: request.endsAt },
         endsAt: { gt: request.startsAt },
       },
-    });
-
-    const committed = await prisma.assignment.findMany({
+      select: { userId: true },
+      distinct: ['userId'],
+    }),
+    prisma.assignment.findMany({
       where: {
-        userId: profile.userId,
+        userId: { in: userIds },
         status: 'CONFIRMED',
         startsAt: { gte: fatigueFrom, lt: request.startsAt },
       },
-      select: { startsAt: true, endsAt: true },
-    });
-    // Read here rather than in `listMatchCandidates`, because assignments are
-    // matching's own table: having practitioners count them would have that
-    // module reach into this one, and the two already point the other way.
-    const outcomes = await assignmentOutcomes(profile.userId);
+      select: { userId: true, startsAt: true, endsAt: true },
+    }),
+  ]);
 
-    const hoursAssignedInWindow = committed.reduce(
-      (sum, assignment) =>
-        sum + (assignment.endsAt.getTime() - assignment.startsAt.getTime()) / (60 * 60 * 1000),
-      0,
-    );
+  const hasConflict = new Set(conflicting.map((row) => row.userId));
 
-    candidates.push({
+  const hoursOf = new Map<string, number>();
+  for (const assignment of committed) {
+    const hours = (assignment.endsAt.getTime() - assignment.startsAt.getTime()) / (60 * 60 * 1000);
+    hoursOf.set(assignment.userId, (hoursOf.get(assignment.userId) ?? 0) + hours);
+  }
+
+  const candidates: CandidateInput[] = profiles.map((profile) => {
+    const theirOutcomes = outcomes.get(profile.userId) ?? { completed: 0, noShow: 0 };
+
+    return {
       userId: profile.userId,
       professionalCategoryId: profile.professionalCategoryId,
       specialtyId: profile.specialtyId,
@@ -110,13 +134,13 @@ export async function runMatch(input: RunMatchParams): Promise<MatchRunView> {
       }),
       travelPreference: profile.travelPreference,
       eligible: profile.eligible,
-      availability: availability.reason,
-      hasConflictingAssignment: conflicting > 0,
-      hoursAssignedInWindow,
-      completedAssignments: outcomes.completed,
-      reliabilityScore: reliabilityFrom(outcomes),
-    });
-  }
+      availability: availability.get(profile.userId)!.reason,
+      hasConflictingAssignment: hasConflict.has(profile.userId),
+      hoursAssignedInWindow: hoursOf.get(profile.userId) ?? 0,
+      completedAssignments: theirOutcomes.completed,
+      reliabilityScore: reliabilityFrom(theirOutcomes),
+    };
+  });
 
   const result = match(
     {
@@ -125,6 +149,34 @@ export async function runMatch(input: RunMatchParams): Promise<MatchRunView> {
     },
     candidates,
   );
+
+  // The engine works in ids, by design — see `engine.ts`, pure and
+  // database-free. A reviewer deciding who to offer a shift to needs a name
+  // against every one of them, ranked and excluded alike, so that is added
+  // here, at the boundary, rather than inside the scoring itself.
+  const involvedIds = [
+    ...new Set([...result.ranked.map((c) => c.userId), ...result.excluded.map((c) => c.userId)]),
+  ];
+  const people = involvedIds.length
+    ? await prisma.user.findMany({
+        where: { id: { in: involvedIds } },
+        select: { id: true, fullName: true, phone: true },
+      })
+    : [];
+  const byId = new Map(people.map((person) => [person.id, person]));
+  const nameFor = (userId: string) => byId.get(userId)?.fullName ?? 'Unknown practitioner';
+  const phoneFor = (userId: string) => byId.get(userId)?.phone ?? '';
+
+  const ranked: RankedCandidateView[] = result.ranked.map((candidate) => ({
+    ...candidate,
+    practitionerName: nameFor(candidate.userId),
+    practitionerPhone: phoneFor(candidate.userId),
+  }));
+  const excluded: ExcludedCandidateView[] = result.excluded.map((candidate) => ({
+    ...candidate,
+    practitionerName: nameFor(candidate.userId),
+    practitionerPhone: phoneFor(candidate.userId),
+  }));
 
   return prisma.$transaction(async (tx: Tx) => {
     const run = await tx.matchRun.create({
@@ -184,8 +236,8 @@ export async function runMatch(input: RunMatchParams): Promise<MatchRunView> {
       serviceRequestId: request.id,
       consideredCount: candidates.length,
       rankedCount: result.ranked.length,
-      ranked: result.ranked,
-      excluded: result.excluded,
+      ranked,
+      excluded,
       createdAt: run.createdAt,
     };
   });

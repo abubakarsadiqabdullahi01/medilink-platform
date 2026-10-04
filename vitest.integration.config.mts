@@ -13,6 +13,19 @@ export default defineConfig({
     environment: 'node',
     include: ['tests/integration/**/*.test.ts'],
     setupFiles: ['tests/integration/support/env.ts', 'tests/integration/setup.ts'],
+    /**
+     * Files run one at a time — but each still gets its own fork, with its own
+     * Prisma pool, and vitest tears one down while starting the next. An
+     * outgoing process with a query still in flight therefore overlaps the
+     * incoming process's `TRUNCATE`, which is where the intermittent
+     * `deadlock detected` in this suite came from. `resetDatabase` retries it;
+     * see tests/integration/support/db.ts for why that is the right place.
+     *
+     * `poolOptions.forks.singleFork` would remove the race outright by putting
+     * every file in one process. It was tried and the run died with an
+     * out-of-memory kill: twenty-six files' worth of modules and Prisma
+     * clients in one heap is more than the container has.
+     */
     fileParallelism: false,
     // Argon2id is deliberately slow, and these cases hash several passwords.
     testTimeout: 30_000,

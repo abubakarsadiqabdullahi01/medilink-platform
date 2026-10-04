@@ -1,12 +1,14 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
+import { z } from 'zod';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useMutation } from '@tanstack/react-query';
-import { BadgeCheck, Check, TriangleAlert } from 'lucide-react';
+import { BadgeCheck, Building2, Check, TriangleAlert } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { api, errorMessage } from '@/lib/ui/api';
+import { useZodForm } from '@/lib/ui/form';
 import { consoleFor, type SessionState } from '@/lib/ui/session';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -32,34 +34,103 @@ const CODE_LENGTH = 6;
 
 const STEPS = ['Your details', 'Confirm your number', 'Set a password'];
 
-export default function RegisterPage() {
-  const router = useRouter();
-  const [step, setStep] = useState(0);
+/**
+ * Each step's rules, stated once.
+ *
+ * These mirror what the route already enforces, and that is the point: the
+ * old form restated them as a `disabled` expression on the button, so a rule
+ * tightened on the server became a form that let you submit and then refused
+ * you. A schema here is still a second copy — the honest fix is to export the
+ * route's own schema — but it is a copy in the same language and shape as the
+ * original, which drifts visibly rather than silently.
+ */
+const detailsSchema = z.object({
+  fullName: z.string().trim().min(2, 'Your full name, as it appears on your registration.'),
+  phone: z
+    .string()
+    .trim()
+    .min(1, 'A phone number is needed — it is how you sign in.')
+    // Deliberately loose: 0803…, +234803…, 234803… are all things people
+    // type, and normalisation belongs in one place (lib/phone.ts) rather
+    // than being half-done by a regex here. This only catches the obviously
+    // wrong before a round trip.
+    .regex(/^[\d\s+()-]{10,}$/, "That does not look like a Nigerian mobile number."),
+  email: z.union([z.literal(''), z.string().email('That email address is not valid.')]),
+});
 
-  const [fullName, setFullName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [email, setEmail] = useState('');
-  const [code, setCode] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirm, setConfirm] = useState('');
+const codeSchema = z.object({
+  code: z
+    .string()
+    .trim()
+    .length(CODE_LENGTH, `The code is ${CODE_LENGTH} digits.`)
+    .regex(/^\d+$/, 'Digits only.'),
+});
+
+const passwordSchema = z
+  .object({
+    password: z.string().min(MIN_PASSWORD, `At least ${MIN_PASSWORD} characters.`),
+    confirm: z.string(),
+  })
+  .refine((values) => values.password === values.confirm, {
+    message: 'These two do not match.',
+    path: ['confirm'],
+  });
+
+/**
+ * One field's problem, under that field.
+ *
+ * `role="alert"` so a screen reader hears it when it appears rather than only
+ * if the person happens to navigate back over the input.
+ */
+function FieldError({ message }: { message?: string }) {
+  if (!message) return null;
+  return (
+    <p role="alert" className="text-xs text-destructive">
+      {message}
+    </p>
+  );
+}
+
+function RegisterForm() {
+  const router = useRouter();
+  // Facility signup has nowhere else to start from: `/facility/register`
+  // sits behind a signed-in shell (it has to — a facility needs a
+  // representative user, and the session guard needs a session to check),
+  // so a hospital's first step is this same phone-and-password flow, and the
+  // query param is what tells this page — and the redirect at the end —
+  // that is what is happening.
+  const forFacility = useSearchParams().get('as') === 'facility';
+  const [step, setStep] = useState(0);
   const [resent, setResent] = useState(false);
 
-  // Only once they have typed something to compare — flagging a mismatch
-  // against an empty box is telling somebody off for not having finished.
-  const mismatch = confirm.length > 0 && confirm !== password;
+  const details = useZodForm(detailsSchema, {
+    defaultValues: { fullName: '', phone: '', email: '' },
+  });
+  const codeForm = useZodForm(codeSchema, { defaultValues: { code: '' } });
+  const passwordForm = useZodForm(passwordSchema, {
+    defaultValues: { password: '', confirm: '' },
+  });
+
+  /**
+   * The number is carried between steps rather than re-read from the field,
+   * because step two is a different form and the API needs the number it
+   * actually sent the code to — not whatever is in a box by then.
+   */
+  const phone = details.getValues('phone');
 
   const start = useMutation({
-    mutationFn: () =>
+    mutationFn: (values: z.infer<typeof detailsSchema>) =>
       api.post('/api/v1/auth/register', {
-        phone,
-        fullName,
-        email: email.trim() || undefined,
+        phone: values.phone,
+        fullName: values.fullName,
+        email: values.email.trim() || undefined,
       }),
     onSuccess: () => setStep(1),
   });
 
   const verify = useMutation({
-    mutationFn: () => api.post('/api/v1/auth/verify-phone', { phone, code }),
+    mutationFn: (values: z.infer<typeof codeSchema>) =>
+      api.post('/api/v1/auth/verify-phone', { phone, code: values.code }),
     onSuccess: () => setStep(2),
   });
 
@@ -70,7 +141,8 @@ export default function RegisterPage() {
   });
 
   const finish = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (values: z.infer<typeof passwordSchema>) => {
+      const password = values.password;
       await api.post('/api/v1/auth/set-password', { phone, password });
       await api.post('/api/v1/auth/login', { phone, password });
 
@@ -90,7 +162,7 @@ export default function RegisterPage() {
       return session;
     },
     onSuccess: (session) => {
-      router.replace(consoleFor(session));
+      router.replace(forFacility ? '/facility/register' : consoleFor(session));
       router.refresh();
     },
   });
@@ -104,10 +176,13 @@ export default function RegisterPage() {
           <p className="text-[0.7rem] font-semibold uppercase tracking-widest text-muted-foreground">
             Medilink
           </p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight">Create an account</h1>
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight">
+            {forFacility ? "Register your facility's account" : 'Create an account'}
+          </h1>
           <p className="mt-1.5 text-sm text-muted-foreground">
-            For practitioners. Facility and operations access is granted by Medilink once your
-            organisation is onboarded.
+            {forFacility
+              ? "This is you, not the facility — the person who will manage it. Your hospital's own details come next, once this is done."
+              : 'For practitioners. Facility and operations access is granted by Medilink once your organisation is onboarded.'}
           </p>
 
           <ol className="mt-6 flex items-center gap-2" aria-label="Progress">
@@ -147,32 +222,32 @@ export default function RegisterPage() {
               {step === 0 ? (
                 <form
                   className="space-y-4"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    start.mutate();
-                  }}
+                  onSubmit={details.handleSubmit((values) => start.mutate(values))}
+                  noValidate
                 >
                   <div className="space-y-1.5">
                     <Label htmlFor="fullName">Full name</Label>
                     <Input
                       id="fullName"
-                      value={fullName}
-                      onChange={(event) => setFullName(event.target.value)}
+                      {...details.register('fullName')}
                       autoComplete="name"
                       placeholder="As it appears on your registration"
+                      aria-invalid={Boolean(details.formState.errors.fullName) || undefined}
                     />
+                    <FieldError message={details.formState.errors.fullName?.message} />
                   </div>
 
                   <div className="space-y-1.5">
                     <Label htmlFor="phone">Phone number</Label>
                     <Input
                       id="phone"
-                      value={phone}
-                      onChange={(event) => setPhone(event.target.value)}
+                      {...details.register('phone')}
                       placeholder="0803 123 4567"
                       autoComplete="tel"
                       inputMode="tel"
+                      aria-invalid={Boolean(details.formState.errors.phone) || undefined}
                     />
+                    <FieldError message={details.formState.errors.phone?.message} />
                     <p className="text-xs text-muted-foreground">
                       A Nigerian mobile number. The code comes here, and it is how you sign in.
                     </p>
@@ -185,10 +260,11 @@ export default function RegisterPage() {
                     <Input
                       id="email"
                       type="email"
-                      value={email}
-                      onChange={(event) => setEmail(event.target.value)}
+                      {...details.register('email')}
                       autoComplete="email"
+                      aria-invalid={Boolean(details.formState.errors.email) || undefined}
                     />
+                    <FieldError message={details.formState.errors.email?.message} />
                     {/* Optional because recovery.ts makes the phone the only
                         recovery channel, and because nothing in the product
                         sends email yet. Saying so beats an unexplained
@@ -199,12 +275,11 @@ export default function RegisterPage() {
                     </p>
                   </div>
 
-                  <Button
-                    type="submit"
-                    className="w-full"
-                    loading={start.isPending}
-                    disabled={fullName.trim().length < 2 || !phone}
-                  >
+                  {/* Not disabled until the schema is satisfied. A button
+                      that is dead until every field is right gives somebody
+                      nothing to press and no reason why; submitting and being
+                      told which field is wrong is the kinder failure. */}
+                  <Button type="submit" className="w-full" loading={start.isPending}>
                     Send me a code
                   </Button>
                 </form>
@@ -213,34 +288,27 @@ export default function RegisterPage() {
               {step === 1 ? (
                 <form
                   className="space-y-4"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    verify.mutate();
-                  }}
+                  onSubmit={codeForm.handleSubmit((values) => verify.mutate(values))}
+                  noValidate
                 >
                   <div className="space-y-1.5">
                     <Label htmlFor="code">The {CODE_LENGTH}-digit code</Label>
                     <Input
                       id="code"
-                      value={code}
-                      onChange={(event) =>
-                        setCode(event.target.value.replace(/\D/g, '').slice(0, CODE_LENGTH))
-                      }
+                      {...codeForm.register('code')}
                       inputMode="numeric"
                       autoComplete="one-time-code"
+                      maxLength={CODE_LENGTH}
                       className="tabular text-lg tracking-[0.3em]"
+                      aria-invalid={Boolean(codeForm.formState.errors.code) || undefined}
                     />
+                    <FieldError message={codeForm.formState.errors.code?.message} />
                     <p className="text-xs text-muted-foreground">
                       Sent to {phone}. It expires in ten minutes.
                     </p>
                   </div>
 
-                  <Button
-                    type="submit"
-                    className="w-full"
-                    loading={verify.isPending}
-                    disabled={code.length !== CODE_LENGTH}
-                  >
+                  <Button type="submit" className="w-full" loading={verify.isPending}>
                     Confirm my number
                   </Button>
 
@@ -258,7 +326,7 @@ export default function RegisterPage() {
                       className="text-muted-foreground underline-offset-4 hover:underline"
                       onClick={() => {
                         setStep(0);
-                        setCode('');
+                        codeForm.reset();
                       }}
                     >
                       Change the number
@@ -276,20 +344,19 @@ export default function RegisterPage() {
               {step === 2 ? (
                 <form
                   className="space-y-4"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    finish.mutate();
-                  }}
+                  onSubmit={passwordForm.handleSubmit((values) => finish.mutate(values))}
+                  noValidate
                 >
                   <div className="space-y-1.5">
                     <Label htmlFor="password">Password</Label>
                     <Input
                       id="password"
                       type="password"
-                      value={password}
-                      onChange={(event) => setPassword(event.target.value)}
+                      {...passwordForm.register('password')}
                       autoComplete="new-password"
+                      aria-invalid={Boolean(passwordForm.formState.errors.password) || undefined}
                     />
+                    <FieldError message={passwordForm.formState.errors.password?.message} />
                     <p className="text-xs text-muted-foreground">
                       At least {MIN_PASSWORD} characters.
                     </p>
@@ -304,25 +371,14 @@ export default function RegisterPage() {
                     <Input
                       id="confirm"
                       type="password"
-                      value={confirm}
-                      onChange={(event) => setConfirm(event.target.value)}
+                      {...passwordForm.register('confirm')}
                       autoComplete="new-password"
-                      aria-invalid={mismatch || undefined}
-                      aria-describedby={mismatch ? 'confirm-problem' : undefined}
+                      aria-invalid={Boolean(passwordForm.formState.errors.confirm) || undefined}
                     />
-                    {mismatch ? (
-                      <p id="confirm-problem" className="text-xs text-destructive">
-                        These two do not match.
-                      </p>
-                    ) : null}
+                    <FieldError message={passwordForm.formState.errors.confirm?.message} />
                   </div>
 
-                  <Button
-                    type="submit"
-                    className="w-full"
-                    loading={finish.isPending}
-                    disabled={password.length < MIN_PASSWORD || confirm !== password}
-                  >
+                  <Button type="submit" className="w-full" loading={finish.isPending}>
                     Create my account
                   </Button>
 
@@ -348,34 +404,80 @@ export default function RegisterPage() {
         </div>
       </div>
 
-      {/* What a practitioner is actually signing up to, said before they do it
-          rather than discovered on the eligibility card afterwards. */}
+      {/* What they are actually signing up to, said before they do it rather
+          than discovered afterwards — a practitioner's eligibility card, or a
+          facility's verification queue. */}
       <div className="hidden bg-primary p-12 text-primary-foreground lg:flex lg:flex-col lg:justify-center">
-        <BadgeCheck className="size-10 opacity-90" />
+        {forFacility ? <Building2 className="size-10 opacity-90" /> : <BadgeCheck className="size-10 opacity-90" />}
         <p className="mt-6 max-w-md text-2xl font-semibold leading-snug tracking-tight">
-          An account is the start. Verification is what gets you offered work.
+          {forFacility
+            ? 'An account is the start. Your facility is next, and compliance verifies it before it can publish anything.'
+            : 'An account is the start. Verification is what gets you offered work.'}
         </p>
         <div className="mt-8 space-y-4 text-sm leading-relaxed text-primary-foreground/85">
-          <Card className="border-white/15 bg-white/10 text-primary-foreground shadow-none">
-            <CardHeader className="p-4">
-              <CardTitle className="text-sm">You will be asked for your credentials</CardTitle>
-              <CardDescription className="text-primary-foreground/75">
-                Your registration and credentials are reviewed before you can be matched to a shift.
-                Until then your profile says exactly what is outstanding.
-              </CardDescription>
-            </CardHeader>
-          </Card>
-          <Card className="border-white/15 bg-white/10 text-primary-foreground shadow-none">
-            <CardHeader className="p-4">
-              <CardTitle className="text-sm">Nothing is hidden from you</CardTitle>
-              <CardDescription className="text-primary-foreground/75">
-                If you are not eligible, the reasons are listed by name. No one has to ring support
-                to find out why.
-              </CardDescription>
-            </CardHeader>
-          </Card>
+          {forFacility ? (
+            <>
+              <Card className="border-white/15 bg-white/10 text-primary-foreground shadow-none">
+                <CardHeader className="p-4">
+                  <CardTitle className="text-sm">Your facility is checked against its CAC registration</CardTitle>
+                  <CardDescription className="text-primary-foreground/75">
+                    You can set it up and add colleagues straight away — it just cannot offer a
+                    shift to anybody until compliance has confirmed it is real.
+                  </CardDescription>
+                </CardHeader>
+              </Card>
+              <Card className="border-white/15 bg-white/10 text-primary-foreground shadow-none">
+                <CardHeader className="p-4">
+                  <CardTitle className="text-sm">This account is yours, not the facility&rsquo;s</CardTitle>
+                  <CardDescription className="text-primary-foreground/75">
+                    You can grant access to colleagues once the facility exists, so this is not the
+                    only login it will ever have.
+                  </CardDescription>
+                </CardHeader>
+              </Card>
+            </>
+          ) : (
+            <>
+              <Card className="border-white/15 bg-white/10 text-primary-foreground shadow-none">
+                <CardHeader className="p-4">
+                  <CardTitle className="text-sm">You will be asked for your credentials</CardTitle>
+                  <CardDescription className="text-primary-foreground/75">
+                    Your registration and credentials are reviewed before you can be matched to a
+                    shift. Until then your profile says exactly what is outstanding.
+                  </CardDescription>
+                </CardHeader>
+              </Card>
+              <Card className="border-white/15 bg-white/10 text-primary-foreground shadow-none">
+                <CardHeader className="p-4">
+                  <CardTitle className="text-sm">Nothing is hidden from you</CardTitle>
+                  <CardDescription className="text-primary-foreground/75">
+                    If you are not eligible, the reasons are listed by name. No one has to ring
+                    support to find out why.
+                  </CardDescription>
+                </CardHeader>
+              </Card>
+            </>
+          )}
         </div>
       </div>
     </main>
+  );
+}
+
+/**
+ * `useSearchParams` makes this page client-rendered, and Next refuses to
+ * prerender one without a boundary to show while that happens — the
+ * production build fails outright, which is how this was found. Development
+ * never complains, so the page worked for months and could not have shipped.
+ *
+ * The fallback is the page's own background rather than a spinner. There is
+ * nothing to wait for but the query string, so a spinner would flash for a
+ * frame and read as slowness that is not there.
+ */
+export default function RegisterPage() {
+  return (
+    <Suspense fallback={<main className="min-h-dvh bg-background" />}>
+      <RegisterForm />
+    </Suspense>
   );
 }

@@ -61,8 +61,11 @@ function Call {
 }
 
 # A fresh number per run, so the script is repeatable without resetting the
-# database and never collides with real seed data.
-$suffix = "{0:D7}" -f (Get-Random -Minimum 1000000 -Maximum 9999999)
+# database. The draw starts at 9 to keep it clear of `0803 120 0xxx`, which
+# `scripts/seed-demo.ts` owns — the comment here used to promise it "never
+# collides with real seed data", which a random draw over the whole range did
+# not actually guarantee.
+$suffix = "9{0:D6}" -f (Get-Random -Minimum 0 -Maximum 999999)
 $phone = "0803$suffix"
 $password = "Harmattan-Kaduna-$(Get-Random -Minimum 100 -Maximum 999)"
 

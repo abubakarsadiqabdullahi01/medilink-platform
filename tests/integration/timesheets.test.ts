@@ -17,6 +17,7 @@ import {
   assignmentOutcomes,
   confirmAssignment,
   getAssignment,
+  getAssignmentInScope,
   invitePractitioners,
   respondToInvitation,
 } from '@/modules/matching/application/assignment';
@@ -506,5 +507,85 @@ describe('the route table', () => {
     expect(submit?.permission).toBe('timesheet.submit');
     expect(review?.scopeType).toBe('FACILITY');
     expect(review?.permission).toBe('timesheet.approve');
+  });
+});
+
+/**
+ * Whose shift it is, asked before anything is read or written.
+ *
+ * The guard proves which scope a caller holds; it cannot know that the record
+ * named in a URL path belongs to that scope. Two read routes took the id from
+ * the path and the scope from the query, and the submit route declared the
+ * caller's own SELF scope unconditionally, so one practitioner naming
+ * another's assignment id was handed that person's hours, check-in times and
+ * pay — and could submit their timesheet under their own name. These cases
+ * exist so that cannot come back quietly.
+ */
+describe("somebody else's shift", () => {
+  it("refuses a practitioner another practitioner's assignment, as a 404", async () => {
+    const world = await buildWorld();
+    const stranger = await createUser({ fullName: 'Ifeoma Nwosu' });
+
+    await expect(
+      getAssignmentInScope({
+        assignmentId: world.assignmentId,
+        scopeType: 'SELF',
+        scopeId: stranger.id,
+      }),
+    ).rejects.toMatchObject({ code: 'assignment_not_found', status: 404 });
+
+    // 404 rather than 403: a distinguishable refusal would confirm the id exists.
+    await expect(
+      getAssignmentInScope({
+        assignmentId: world.assignmentId,
+        scopeType: 'SELF',
+        scopeId: world.practitionerId,
+      }),
+    ).resolves.toMatchObject({ id: world.assignmentId });
+  });
+
+  it("refuses a facility another facility's assignment", async () => {
+    const world = await buildWorld();
+    const other = await buildWorld();
+
+    await expect(
+      getAssignmentInScope({
+        assignmentId: world.assignmentId,
+        scopeType: 'FACILITY',
+        scopeId: other.facilityId,
+      }),
+    ).rejects.toMatchObject({ code: 'assignment_not_found', status: 404 });
+
+    await expect(
+      getAssignmentInScope({
+        assignmentId: world.assignmentId,
+        scopeType: 'FACILITY',
+        scopeId: world.facilityId,
+      }),
+    ).resolves.toMatchObject({ id: world.assignmentId });
+  });
+
+  it('lets a PLATFORM holder reach any of them, which is what PLATFORM is for', async () => {
+    const world = await buildWorld();
+
+    await expect(
+      getAssignmentInScope({ assignmentId: world.assignmentId, scopeType: 'PLATFORM' }),
+    ).resolves.toMatchObject({ id: world.assignmentId });
+  });
+
+  it('refuses a practitioner submitting a timesheet that is not theirs', async () => {
+    const world = await buildWorld();
+    const stranger = await createUser({ fullName: 'Ifeoma Nwosu' });
+
+    await expect(
+      submitTimesheet({ assignmentId: world.assignmentId, userId: stranger.id }),
+    ).rejects.toMatchObject({ code: 'assignment_not_found', status: 404 });
+
+    // Untouched: the refusal happens before anything is written.
+    const record = await prisma.attendanceRecord.findFirstOrThrow({
+      where: { assignmentId: world.assignmentId },
+    });
+    expect(record.status).not.toBe('SUBMITTED');
+    expect(record.submittedBy).toBeNull();
   });
 });

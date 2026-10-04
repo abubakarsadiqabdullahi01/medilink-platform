@@ -3,6 +3,7 @@ import { EVENTS } from '../lib/events';
 import { grantPractitionerRoleOnRegistration } from '../modules/practitioners/application/role-grants';
 import { screenPractitioner } from '../modules/practitioners/application/screening';
 import { notifyAssignmentConfirmed } from '../modules/notifications/application/handlers';
+import { computeAndSaveTimesheet } from '../modules/timesheets/application/timesheet';
 import type { EventHandler } from './processor';
 
 /**
@@ -18,6 +19,24 @@ export const handlers: Record<string, EventHandler> = {
   // gateway's latency — the reasoning issueOtp already documents.
   [EVENTS.AssignmentConfirmed]: async (payload) => {
     await notifyAssignmentConfirmed(payload);
+  },
+
+  /**
+   * Step 7.4, the half that was missing: the timesheet is worked out when the
+   * shift ends, not when the practitioner submits it.
+   *
+   * /practitioner/timesheets tells people "one is worked out for you as soon
+   * as you check out of a shift", and both timesheet pages build their cards
+   * from the timesheet row. Nothing created that row until submission, so a
+   * checked-out shift appeared on neither console — the practitioner had no
+   * card to submit from and no way to reach the only shift they could act on.
+   *
+   * Idempotent by construction: computeAndSaveTimesheet recomputes from
+   * whatever attendance currently says and replaces the figures, which is
+   * exactly what a retry should do.
+   */
+  [EVENTS.ShiftCompleted]: async (payload) => {
+    await computeAndSaveTimesheet(String(payload.assignmentId ?? ''));
   },
 
   [EVENTS.PractitionerRegistered]: async (payload) => {

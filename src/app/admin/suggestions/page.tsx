@@ -2,32 +2,19 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { MessageSquareText, TriangleAlert } from 'lucide-react';
+import { ChevronLeft, ChevronRight, MessageSquareText, TriangleAlert, X } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { api } from '@/lib/ui/api';
-import { useQueue, useQueueAction } from '@/lib/ui/queue';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Label } from '@/components/ui/label';
-import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Textarea } from '@/components/ui/textarea';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
 import { EmptyState, PageHeader, QueueSkeleton } from '@/components/app/page-shell';
 import { formatAgo } from '@/components/app/format';
-
-interface Suggestion {
-  id: string;
-  source: string;
-  raisedBy: string | null;
-  area: string;
-  body: string;
-  sourceRef: string | null;
-  status: string;
-  response: string | null;
-  createdAt: string;
-}
+import { ScreenTransition } from '@/components/app/motion';
+import { SuggestionDetail, type Suggestion } from './suggestion-detail';
 
 interface AreaCount {
   area: string;
@@ -36,35 +23,71 @@ interface AreaCount {
 }
 
 const STATUSES = ['NEW', 'TRIAGED', 'PLANNED', 'DONE', 'DECLINED'] as const;
-const MIN_RESPONSE = 10;
+const PAGE_SIZE = 20;
 
+/**
+ * The pilot's suggestion log — module 18.
+ *
+ * The one screen on this console where the list is the point: "where the
+ * complaints are" is read by comparing areas at a glance, which is why the
+ * bar chart stays here and leads. Answering an entry moved to its own screen
+ * (`suggestion-detail.tsx`) — a page of twenty rows used to be twenty open
+ * textareas, and a long suggestion was a paragraph squeezed into a card.
+ */
 export default function SuggestionsPage() {
   const [status, setStatus] = useState<string>('NEW');
-  const queueKey = ['suggestions', status];
-  const queue = useQueue<Suggestion>(
-    queueKey,
-    `/api/v1/suggestions?status=${status}`,
-    (body) => (body as { suggestions?: Suggestion[] }).suggestions ?? [],
-  );
+  // Null means every area. Clicking a bar in "Where the complaints are"
+  // narrows to it, the same way a status tab narrows by status.
+  const [area, setArea] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Suggestion | null>(null);
+
+  // Cursor rather than offset, for the reason the practitioner directory's
+  // does: a log a walkthrough script feeds constantly would quietly show the
+  // same row twice under offset paging if one landed between two pages.
+  const [cursors, setCursors] = useState<(string | null)[]>([null]);
+  const [pageIndex, setPageIndex] = useState(0);
+  const cursor = cursors[pageIndex] ?? null;
+
+  const queueKey = ['suggestions', status, area];
+  const queue = useQuery({
+    queryKey: [...queueKey, cursor],
+    queryFn: () => {
+      const params = new URLSearchParams({ status, limit: String(PAGE_SIZE) });
+      if (area) params.set('area', area);
+      if (cursor) params.set('cursor', cursor);
+      return api.get<{ suggestions?: Suggestion[]; nextCursor?: string | null }>(
+        `/api/v1/suggestions?${params.toString()}`,
+      );
+    },
+    placeholderData: (previous) => previous,
+  });
+  const rows = queue.data?.suggestions ?? [];
+  const nextCursor = queue.data?.nextCursor ?? null;
+
+  function startOver() {
+    setCursors([null]);
+    setPageIndex(0);
+  }
+
+  function chooseArea(next: string) {
+    setArea((current) => (current === next ? null : next));
+    startOver();
+  }
 
   const summary = useQuery({
     queryKey: ['suggestions-summary'],
     queryFn: () => api.get<{ areas: AreaCount[] }>('/api/v1/suggestions/summary'),
   });
 
-  const [response, setResponse] = useState<Record<string, string>>({});
-
-  const triage = useQueueAction<{ id: string; status: string }>({
-    queueKey,
-    run: ({ id, status: next }) =>
-      api.post(`/api/v1/suggestions/${id}/triage`, {
-        status: next,
-        response: response[id]?.trim() || undefined,
-      }),
-    success: ({ status: next }) => `Marked ${next.toLowerCase()}`,
-  });
-
   const busiest = Math.max(1, ...(summary.data?.areas.map((row) => row.total) ?? [1]));
+
+  if (selected) {
+    return (
+      <ScreenTransition screenKey={selected.id}>
+        <SuggestionDetail suggestion={selected} onBack={() => setSelected(null)} />
+      </ScreenTransition>
+    );
+  }
 
   return (
     <>
@@ -75,13 +98,37 @@ export default function SuggestionsPage() {
 
       {summary.data && summary.data.areas.length > 0 ? (
         <Card className="mb-6">
-          <CardHeader className="pb-3">
+          <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
             <CardTitle className="text-sm">Where the complaints are</CardTitle>
+            {area ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-auto py-1 text-xs text-muted-foreground"
+                onClick={() => chooseArea(area)}
+              >
+                <X />
+                Clear
+              </Button>
+            ) : null}
           </CardHeader>
           <CardContent className="space-y-2.5">
             {summary.data.areas.map((row) => (
-              <div key={row.area} className="flex items-center gap-3 text-sm">
-                <span className="w-32 shrink-0 truncate text-muted-foreground">
+              <button
+                key={row.area}
+                type="button"
+                onClick={() => chooseArea(row.area)}
+                className={cn(
+                  'flex w-full items-center gap-3 rounded-md px-1.5 py-1 text-sm transition-colors hover:bg-accent',
+                  area === row.area && 'bg-accent',
+                )}
+              >
+                <span
+                  className={cn(
+                    'w-32 shrink-0 truncate text-left text-muted-foreground',
+                    area === row.area && 'font-medium text-foreground',
+                  )}
+                >
                   {humanise(row.area)}
                 </span>
                 {/* A bar, because the useful reading is the comparison and a
@@ -96,13 +143,20 @@ export default function SuggestionsPage() {
                   {row.total}
                   {row.open > 0 ? ` · ${row.open} open` : ''}
                 </span>
-              </div>
+              </button>
             ))}
           </CardContent>
         </Card>
       ) : null}
 
-      <Tabs value={status} onValueChange={setStatus} className="mb-5">
+      <Tabs
+        value={status}
+        onValueChange={(value) => {
+          setStatus(value);
+          startOver();
+        }}
+        className="mb-5"
+      >
         <TabsList>
           {STATUSES.map((value) => (
             <TabsTrigger key={value} value={value}>
@@ -119,102 +173,87 @@ export default function SuggestionsPage() {
           <TriangleAlert />
           <AlertDescription>This queue could not be loaded.</AlertDescription>
         </Alert>
-      ) : queue.data.length === 0 ? (
-        <EmptyState icon={<MessageSquareText />} title={`Nothing ${status.toLowerCase()}`} />
+      ) : rows.length === 0 ? (
+        <EmptyState
+          icon={<MessageSquareText />}
+          title={`Nothing ${status.toLowerCase()}${area ? ` in ${humanise(area).toLowerCase()}` : ''}`}
+        />
       ) : (
-        <div className="space-y-4">
-          {queue.data.map((row) => {
-            const answer = response[row.id]?.trim() ?? '';
-            const closed = ['DONE', 'DECLINED'].includes(row.status);
-            const canClose = answer.length >= MIN_RESPONSE;
+        <ul className="space-y-3">
+          {rows.map((row) => (
+            <li key={row.id}>
+              <button
+                type="button"
+                onClick={() => setSelected(row)}
+                className="w-full rounded-xl border bg-card p-4 text-left transition-all hover:border-primary/50 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              >
+                <div className="flex flex-wrap items-center gap-4">
+                  <span className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-accent text-accent-foreground">
+                    <MessageSquareText className="size-5" aria-hidden="true" />
+                  </span>
 
-            return (
-              <Card key={row.id}>
-                <CardHeader className="space-y-3 pb-4">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="secondary">{humanise(row.area)}</Badge>
-                    <StatusBadge status={row.status} />
-                    {row.source === 'DECLINE_REASON' ? (
-                      <Badge variant="warning">From a declined invitation</Badge>
-                    ) : null}
-                    <span className="text-xs text-muted-foreground">{formatAgo(row.createdAt)}</span>
+                  <div className="min-w-0 flex-1">
+                    {/* Two lines of it, not one: a suggestion is prose and a
+                        single truncated line is often just its preamble. */}
+                    <p className="line-clamp-2 text-sm leading-relaxed">{row.body}</p>
+                    <p className="mt-1 truncate text-xs text-muted-foreground">
+                      {row.raisedByName ?? (row.source === 'DECLINE_REASON' ? 'No name' : 'Unattributed')}
+                      {' · '}
+                      {formatAgo(row.createdAt)}
+                      {row.response ? ' · answered' : ''}
+                    </p>
                   </div>
-                  <p className="text-sm leading-relaxed">{row.body}</p>
-                </CardHeader>
 
-                <CardContent className="space-y-4">
-                  {row.response ? (
-                    <div className="rounded-md bg-muted px-3 py-2 text-sm">
-                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                        Answered
-                      </p>
-                      <p className="mt-1">{row.response}</p>
-                    </div>
-                  ) : null}
-
-                  {closed ? null : (
-                    <>
-                      <Separator />
-                      <div className="space-y-2">
-                        <Label htmlFor={`response-${row.id}`}>
-                          Answer{' '}
-                          <span className="font-normal text-muted-foreground">
-                            — required to mark it done or declined
-                          </span>
-                        </Label>
-                        <Textarea
-                          id={`response-${row.id}`}
-                          rows={2}
-                          placeholder="What was done, or why it will not be."
-                          value={response[row.id] ?? ''}
-                          onChange={(event) =>
-                            setResponse((current) => ({ ...current, [row.id]: event.target.value }))
-                          }
-                        />
-                      </div>
-
-                      <div className="flex flex-wrap gap-2">
-                        {row.status === 'NEW' ? (
-                          <Button
-                            variant="outline"
-                            disabled={triage.isPending}
-                            onClick={() => triage.mutate({ id: row.id, status: 'TRIAGED' })}
-                          >
-                            Triaged
-                          </Button>
-                        ) : null}
-                        {row.status !== 'PLANNED' ? (
-                          <Button
-                            variant="outline"
-                            disabled={triage.isPending}
-                            onClick={() => triage.mutate({ id: row.id, status: 'PLANNED' })}
-                          >
-                            Planned
-                          </Button>
-                        ) : null}
-                        <Button
-                          variant="success"
-                          disabled={!canClose || triage.isPending}
-                          onClick={() => triage.mutate({ id: row.id, status: 'DONE' })}
-                        >
-                          Done
-                        </Button>
-                        <Button
-                          variant="destructive"
-                          disabled={!canClose || triage.isPending}
-                          onClick={() => triage.mutate({ id: row.id, status: 'DECLINED' })}
-                        >
-                          Decline
-                        </Button>
-                      </div>
-                    </>
-                  )}
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
+                  <div className="flex shrink-0 flex-wrap items-center gap-2">
+                    <Badge variant="secondary">{humanise(row.area)}</Badge>
+                    {row.source === 'DECLINE_REASON' ? (
+                      <Badge variant="warning">Declined invitation</Badge>
+                    ) : null}
+                    <StatusBadge status={row.status} />
+                  </div>
+                </div>
+              </button>
+            </li>
+          ))}
+        </ul>
       )}
+
+      {rows.length > 0 && (pageIndex > 0 || nextCursor) ? (
+        <div className="mt-5 flex items-center justify-between gap-3">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={pageIndex === 0 || queue.isFetching}
+            onClick={() => setPageIndex((index) => Math.max(0, index - 1))}
+          >
+            <ChevronLeft />
+            Previous
+          </Button>
+
+          <p className="tabular text-xs text-muted-foreground">
+            Page {pageIndex + 1}
+            {queue.isFetching ? ' · loading' : ''}
+          </p>
+
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!nextCursor || queue.isFetching}
+            onClick={() => {
+              if (!nextCursor) return;
+              setCursors((current) => {
+                const next = current.slice(0, pageIndex + 1);
+                next.push(nextCursor);
+                return next;
+              });
+              setPageIndex((index) => index + 1);
+            }}
+          >
+            Next
+            <ChevronRight />
+          </Button>
+        </div>
+      ) : null}
     </>
   );
 }

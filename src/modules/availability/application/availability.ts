@@ -247,14 +247,58 @@ export async function availabilityForWindow(
   userId: string,
   window: TimeWindow,
 ): Promise<AvailabilityVerdict> {
+  const verdicts = await availabilityForWindowBatch([userId], window);
+  return verdicts.get(userId) ?? availabilityFor([], [], window);
+}
+
+/**
+ * The same question for a whole shortlist, in two queries rather than two
+ * per practitioner.
+ *
+ * Matching asks this once per candidate, so at two hundred candidates the
+ * single-user version was four hundred round trips to answer one question
+ * about one shift. The verdict is still computed by the same pure
+ * `availabilityFor` per practitioner — only the loading is shared.
+ *
+ * A practitioner with no slots at all is still in the map, carrying whatever
+ * `availabilityFor` says about an empty diary. Leaving them out would make
+ * "no slots" indistinguishable from "not asked about", and the matcher would
+ * have to guess which.
+ */
+export async function availabilityForWindowBatch(
+  userIds: string[],
+  window: TimeWindow,
+): Promise<Map<string, AvailabilityVerdict>> {
+  const verdicts = new Map<string, AvailabilityVerdict>();
+  if (userIds.length === 0) return verdicts;
+
+  const ids = [...new Set(userIds)];
+
   const [slots, blocks] = await Promise.all([
-    prisma.availabilitySlot.findMany({ where: { userId, deletedAt: null } }),
-    prisma.blockedPeriod.findMany({ where: { userId, deletedAt: null } }),
+    prisma.availabilitySlot.findMany({ where: { userId: { in: ids }, deletedAt: null } }),
+    prisma.blockedPeriod.findMany({ where: { userId: { in: ids }, deletedAt: null } }),
   ]);
 
-  return availabilityFor(
-    slots as SlotLike[],
-    blocks.map((block) => ({ startsAt: block.startsAt, endsAt: block.endsAt })),
-    window,
-  );
+  const slotsOf = new Map<string, SlotLike[]>();
+  for (const slot of slots) {
+    const list = slotsOf.get(slot.userId) ?? [];
+    list.push(slot as SlotLike);
+    slotsOf.set(slot.userId, list);
+  }
+
+  const blocksOf = new Map<string, { startsAt: Date; endsAt: Date }[]>();
+  for (const block of blocks) {
+    const list = blocksOf.get(block.userId) ?? [];
+    list.push({ startsAt: block.startsAt, endsAt: block.endsAt });
+    blocksOf.set(block.userId, list);
+  }
+
+  for (const userId of ids) {
+    verdicts.set(
+      userId,
+      availabilityFor(slotsOf.get(userId) ?? [], blocksOf.get(userId) ?? [], window),
+    );
+  }
+
+  return verdicts;
 }

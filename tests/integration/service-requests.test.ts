@@ -411,6 +411,45 @@ describe('cancelling', () => {
   });
 });
 
+describe('listing', () => {
+  it('narrows by notes text and by start-date range', async () => {
+    const fixture = await setUp();
+    const wardA = await callCreate(
+      requestBody(fixture, { notes: 'Report to Ward A, ask for the charge nurse.' }),
+    );
+    const laterStart = new Date(NEXT_WEEK.getTime() + 14 * 24 * 60 * 60 * 1000);
+    const laterEnd = new Date(laterStart.getTime() + 8 * 60 * 60 * 1000);
+    const wardB = await callCreate(
+      requestBody(fixture, {
+        notes: 'Ward B, bring your own scrubs.',
+        startsAt: laterStart.toISOString(),
+        endsAt: laterEnd.toISOString(),
+      }),
+    );
+
+    const bySearch = await callList({
+      scopeType: 'FACILITY',
+      scopeId: fixture.facilityId,
+      search: 'Ward A',
+    });
+    expect(bySearch.status).toBe(200);
+    const searchIds = (bySearch.body.requests as { id: string }[]).map((row) => row.id);
+    expect(searchIds).toContain(wardA.body.id);
+    expect(searchIds).not.toContain(wardB.body.id);
+
+    const byRange = await callList({
+      scopeType: 'FACILITY',
+      scopeId: fixture.facilityId,
+      from: NEXT_WEEK.toISOString(),
+      to: NEXT_WEEK_END.toISOString(),
+    });
+    expect(byRange.status).toBe(200);
+    const rangeIds = (byRange.body.requests as { id: string }[]).map((row) => row.id);
+    expect(rangeIds).toContain(wardA.body.id);
+    expect(rangeIds).not.toContain(wardB.body.id);
+  });
+});
+
 describe('authorisation', () => {
   it('refuses an unauthenticated caller', async () => {
     expect((await callList({ scopeType: 'PLATFORM' })).status).toBe(401);

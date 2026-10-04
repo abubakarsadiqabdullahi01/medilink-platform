@@ -3,7 +3,10 @@ import {
   listRequestsSchema,
   raiseRequestSchema,
 } from '@/modules/audit-compliance/presentation/consent-schemas';
-import { listRequests, raiseRequest } from '@/modules/audit-compliance/application/data-subject';
+import {
+  listRequestQueue,
+  raiseRequest,
+} from '@/modules/audit-compliance/application/data-subject';
 
 /**
  * POST /api/v1/data-requests — a subject exercises a right.
@@ -29,6 +32,6 @@ export async function GET(request: Request) {
     schema: listRequestsSchema,
     permission: 'audit.read',
     scope: () => ({ type: 'PLATFORM' }),
-    action: async ({ input }) => ({ requests: await listRequests(input.status) }),
+    action: async ({ input }) => listRequestQueue(input),
   });
 }

@@ -87,63 +87,174 @@ export function requiresStepUp(permission: Permission): boolean {
 }
 
 /**
- * Starting bundles. Roles are convenience only — every check in application
- * code names a permission, never a role.
+ * The five roles, and what each one may do.
+ *
+ * There were nine. Operations, compliance and finance each held an overlapping
+ * slice of the platform side, and a facility had an administrator, a scheduler
+ * and a finance officer who between them could not complete a single shift
+ * without handing it to each other. Every one of those boundaries was a
+ * guess about how a Nigerian hospital divides work, made before a hospital
+ * had used the product — and the pilot answered it: one person does the lot.
+ *
+ * So the question each role answers is now "whose job is this?", not "which
+ * module is this?":
+ *
+ *   super_administrator   everything, including who may change the rules
+ *   administrator         the platform's day-to-day: onboarding, compliance, money
+ *   facility_owner        the MD — their administrator, plus staff and disputes
+ *   facility_administrator  one facility's whole operation
+ *   practitioner          their own record, their own shifts, their own pay
+ *
+ * **Roles are still convenience only.** Every check in application code names
+ * a permission and a scope; nothing anywhere asks "is this person an
+ * administrator?". That is what made collapsing nine roles into five a change
+ * to this file and a data migration, rather than a rewrite — and it is why
+ * the next reorganisation will be cheap too.
  */
+
+/** Their own record, their own shifts, their own pay. */
+const PRACTITIONER: Permission[] = [
+  'availability.read', 'availability.write',
+  'practitioner.profile.read', 'practitioner.profile.write', 'credential.submit',
+  'credential.document.read', 'service_request.read', 'attendance.record',
+  'timesheet.submit', 'invoice.read', 'payout.account.change', 'dispute.manage',
+  'suggestion.submit',
+];
+
+/**
+ * One facility's whole operation: the old administrator, scheduler and
+ * finance officer in one person.
+ *
+ * Each of those three was missing something the other two had, and the gaps
+ * showed up as a console that 403'd its own sidebar — an accounts officer who
+ * could approve a timesheet but not list the roster it came from, a scheduler
+ * who could confirm somebody onto a shift but not see the calendar. Merging
+ * them does not widen anybody's reach beyond their own facility: the scope on
+ * the grant is what confines them, and that has not changed.
+ *
+ * `incident.report` and `suggestion.submit` are new to this side. Neither of
+ * the three old roles carried them, which meant the person actually standing
+ * on the ward when something went wrong had to find the owner to report it.
+ * That was an oversight in the split, not a rule.
+ */
+const FACILITY_ADMINISTRATOR: Permission[] = [
+  'availability.read',
+  'facility.read', 'facility.write', 'facility.user.manage',
+  'service_request.read', 'service_request.publish',
+  'assignment.confirm', 'assignment.cancel', 'attendance.record',
+  'timesheet.approve', 'invoice.read', 'payout.manage',
+  'incident.report', 'suggestion.submit',
+];
+
+/**
+ * The platform's day-to-day: onboarding, compliance and money.
+ *
+ * The merge of operations_officer, compliance_officer and finance_officer.
+ * The three overlapped on two thirds of their keys already — all three needed
+ * `facility.read` to see the facilities they were acting on, two needed
+ * `audit.read`, two needed `practitioner.profile.read` — and the parts that
+ * did not overlap were not a separation of duties so much as three views of
+ * the same morning's work.
+ *
+ * `role.grant` is here so an administrator can appoint another one. The
+ * ceiling is enforced by `grantRole` rather than by withholding the key:
+ * nobody can grant a permission they do not themselves hold, so an
+ * administrator can create administrators and facility owners and is refused
+ * `super_administrator` — that bundle contains `config.manage`, which they
+ * have not got. A rule that holds for every role, including ones not written
+ * yet, beats a list of roles somebody has to remember to update.
+ *
+ * It is also a step-up permission, so appointing somebody costs a password
+ * re-entry. See STEP_UP_PERMISSIONS above for why that bar is set there.
+ *
+ * What it deliberately does *not* hold is below.
+ */
+const ADMINISTRATOR: Permission[] = [
+  'user.read', 'user.suspend', 'role.grant',
+  'practitioner.profile.read',
+  'credential.review', 'credential.document.read',
+  'facility.read', 'facility.write', 'facility.verify',
+  'availability.read',
+  'service_request.read', 'assignment.confirm', 'assignment.cancel',
+  'invoice.read', 'payout.manage',
+  'dispute.manage', 'sanction.apply', 'incident.manage',
+  'audit.read',
+  'suggestion.submit', 'suggestion.triage',
+];
+
 export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
-  practitioner: [
-    'availability.read', 'availability.write',
-    'practitioner.profile.read', 'practitioner.profile.write', 'credential.submit',
-    'credential.document.read', 'service_request.read', 'attendance.record',
-    'timesheet.submit', 'invoice.read', 'payout.account.change', 'dispute.manage',
-    'suggestion.submit',
-  ],
-  facility_owner: [
-    // attendance.record and role.grant alongside the rest. Without the first,
-    // an owner could confirm somebody onto a shift and approve the timesheet
-    // afterwards but not check them in — a hole in the middle of their own
-    // workflow. Without the second, a facility could never add a second
-    // member of staff. Both found by walking the product as a newly granted
-    // ward manager rather than by a test.
-    'facility.read', 'facility.write', 'facility.user.manage', 'role.grant',
-    'service_request.read', 'service_request.publish', 'assignment.confirm',
-    'assignment.cancel', 'attendance.record', 'timesheet.approve', 'invoice.read',
-    'payout.manage', 'dispute.manage', 'incident.report', 'suggestion.submit',
-  ],
-  facility_administrator: [
-    'facility.read', 'facility.write', 'facility.user.manage', 'service_request.read',
-  ],
-  facility_scheduler: [
-    'availability.read',
-    'facility.read', 'service_request.read', 'service_request.publish',
-    'assignment.confirm', 'assignment.cancel', 'attendance.record',
-  ],
-  facility_finance_officer: ['facility.read', 'timesheet.approve', 'invoice.read', 'payout.manage'],
-  operations_officer: [
-    // facility.write at PLATFORM is what lets operations onboard a facility.
-    // A facility is an organisation rather than a person and is not
-    // self-declared, so somebody on this side has to create the record;
-    // without this, only super_administrator could, which is not a role
-    // anyone should be doing daily onboarding under.
-    'availability.read',
-    'user.read', 'practitioner.profile.read', 'facility.read', 'facility.write',
-    'service_request.read', 'assignment.confirm', 'assignment.cancel', 'dispute.manage',
-    'suggestion.submit', 'suggestion.triage',
-  ],
-  compliance_officer: [
-    // facility.read alongside facility.verify: a compliance officer who can
-    // approve a facility and cannot list the ones waiting has a queue they
-    // cannot open. Found by building the console — the API refused the list
-    // while accepting the verify, which no test asked about because no test
-    // needed to see a queue before working it.
-    'user.read', 'user.suspend', 'practitioner.profile.read', 'credential.review',
-    'credential.document.read', 'facility.read', 'facility.verify', 'sanction.apply',
-    'incident.manage', 'audit.read',
-  ],
-  // facility.read is not decoration: billing a facility means knowing which
-  // facilities exist, and without it a finance officer cannot open the page
-  // that raises their invoices. Found by seeding a real finance officer and
-  // watching the console 403.
-  finance_officer: ['facility.read', 'invoice.read', 'payout.manage', 'audit.read'],
+  practitioner: PRACTITIONER,
+
+  facility_administrator: FACILITY_ADMINISTRATOR,
+
+  /**
+   * The MD. Their administrator, plus the two things that are theirs alone.
+   *
+   * `role.grant` is how a hospital staffs itself, and handing somebody else
+   * the keys is an owner's decision rather than an operational one.
+   * `dispute.manage` is here for the same reason: a dispute is an argument
+   * between the facility and a practitioner about money or conduct, and the
+   * person answering for the facility should be the one who answers it.
+   */
+  facility_owner: [...FACILITY_ADMINISTRATOR, 'role.grant', 'dispute.manage'],
+
+  administrator: ADMINISTRATOR,
+
+  /**
+   * Everything — and the two keys that are the difference between running the
+   * platform and *being* it.
+   *
+   * `config.manage` edits the controlled vocabularies and the rate floors: the
+   * minimum a nurse may legally be offered for a night shift is a policy
+   * decision, not an operational one, and the person clearing today's queue
+   * should not be able to move it.
+   *
+   * `config.manage` is therefore the whole of the difference. An
+   * administrator can appoint another administrator, but only a super
+   * administrator can appoint a super administrator — not because the key is
+   * withheld, but because granting that bundle means granting
+   * `config.manage`, and `grantRole` refuses to hand out what the granting
+   * actor has not got. The ceiling enforces itself.
+   */
   super_administrator: Object.keys(PERMISSIONS) as Permission[],
+};
+
+/**
+ * The roles that no longer exist, and what each became.
+ *
+ * Kept in the code rather than only in a migration because a grant can be
+ * written by a script, a seed or somebody's half-finished branch, and all of
+ * them should land on the same answer. `prisma/seed.ts` reads this to retire
+ * the old rows; `scripts/` read it so a demo built last month still signs in.
+ */
+export const RETIRED_ROLES: Record<string, keyof typeof ROLE_PERMISSIONS> = {
+  operations_officer: 'administrator',
+  compliance_officer: 'administrator',
+  finance_officer: 'administrator',
+  facility_scheduler: 'facility_administrator',
+  facility_finance_officer: 'facility_administrator',
+};
+
+/** Where a role's holder is meant to work, for the console that lists them. */
+export const ROLE_LABELS: Record<string, { name: string; description: string }> = {
+  practitioner: {
+    name: 'Practitioner',
+    description: 'Their own profile, availability, shifts, timesheets and pay.',
+  },
+  facility_administrator: {
+    name: 'Facility administrator',
+    description: 'Runs one facility: shifts, rosters, attendance, timesheets and invoices.',
+  },
+  facility_owner: {
+    name: 'Facility owner (MD)',
+    description: 'Everything an administrator does, plus adding staff and answering disputes.',
+  },
+  administrator: {
+    name: 'Administrator',
+    description: 'Onboarding, credential and facility verification, casework and money.',
+  },
+  super_administrator: {
+    name: 'Super administrator',
+    description: 'Everything, including the rate floors and who else may administer.',
+  },
 };

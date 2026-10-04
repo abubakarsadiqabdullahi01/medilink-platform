@@ -57,7 +57,7 @@ export const CredentialErrors = {
   /**
    * Closes a gap the design surfaced rather than merely documenting it:
    * nothing else stops a user holding both the practitioner and
-   * compliance_officer roles from approving their own submission.
+   * administrator role from approving their own submission.
    */
   cannotReviewOwnSubmission: () =>
     new CredentialError(

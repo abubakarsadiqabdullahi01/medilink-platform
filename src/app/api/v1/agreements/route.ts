@@ -17,7 +17,12 @@ export async function GET(request: Request) {
     schema: emptySelfSchema,
     permission: 'practitioner.profile.read',
     scope: (_input, session) => ({ type: 'SELF', id: session.userId }),
-    action: async ({ session }) => ({ agreements: await currentAgreements(session.userId) }),
+    // This endpoint is the practitioner's own: it is guarded on
+    // practitioner.profile.read at SELF, and /practitioner/privacy is what
+    // renders it. A facility's terms bind the hospital, not the locum.
+    action: async ({ session }) => ({
+      agreements: await currentAgreements(session.userId, 'PRACTITIONER'),
+    }),
   });
 }
 

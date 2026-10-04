@@ -104,6 +104,7 @@ export const listFacilitiesSchema = z.object({
   scopeId: facilityId.optional(),
   status: facilityStatus.optional(),
   stateId: z.string().uuid().optional(),
+  search: z.string().trim().max(120).optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
   cursor: facilityId.optional(),
 });
@@ -133,7 +134,9 @@ export type UpdateFacilityInput = z.infer<typeof updateFacilitySchema>;
 export const licenceUploadUrlSchema = z.object({
   id: facilityId,
   filename: z.string().trim().min(1).max(255),
-  contentType: z.string().refine((value) => ALLOWED_CONTENT_TYPES.has(value), 'Unsupported file type.'),
+  contentType: z
+    .string()
+    .refine((value) => ALLOWED_CONTENT_TYPES.has(value), 'Unsupported file type.'),
   sizeBytes: z.coerce.number().int().positive().max(MAX_UPLOAD_BYTES, 'File is too large.'),
 });
 export type LicenceUploadUrlInput = z.infer<typeof licenceUploadUrlSchema>;

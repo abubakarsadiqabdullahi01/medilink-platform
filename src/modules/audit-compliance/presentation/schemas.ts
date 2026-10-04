@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AUDIT_AREA_VALUES } from '../domain/audit-areas';
 
 /**
  * The audit trail is queried within a scope, never globally by default.
@@ -18,6 +19,10 @@ export const auditQuerySchema = z
     entityId: z.string().uuid().optional(),
     actorId: z.string().uuid().optional(),
     action: z.string().min(1).max(100).optional(),
+
+    // A group of subjects rather than one exact action: see domain/audit-areas.
+    // `action` stays an exact match for the callers that know what they want.
+    area: z.enum(AUDIT_AREA_VALUES).optional(),
 
     from: z.coerce.date().optional(),
     to: z.coerce.date().optional(),

@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { prefetch } from '@/lib/ui/api';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -44,6 +45,14 @@ export interface NavItem {
   icon: LucideIcon;
   /** null means everybody signed in; otherwise the permission it needs. */
   permission: string | null;
+  /**
+   * The first request this page makes, started on hover.
+   *
+   * Optional, and a wrong one costs nothing: `api.prefetch` warms by URL, so
+   * a page whose first call has changed simply fetches as it always did. See
+   * the note in lib/ui/api.ts for why it is not a query key.
+   */
+  prefetch?: string;
 }
 
 export interface NavSection {
@@ -174,6 +183,12 @@ export function ConsoleShell({
                   <Link
                     href={item.href}
                     onClick={() => setOpen(false)}
+                    // Hover and keyboard focus both count: somebody tabbing
+                    // through the sidebar is as likely to open the page as
+                    // somebody pointing at it, and they are the ones for whom
+                    // a skeleton is hardest to read.
+                    onMouseEnter={item.prefetch ? () => prefetch(item.prefetch!) : undefined}
+                    onFocus={item.prefetch ? () => prefetch(item.prefetch!) : undefined}
                     className={cn(
                       'flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors',
                       active
@@ -280,9 +295,18 @@ export function ConsoleShell({
           </div>
         </header>
 
-        <main className="min-w-0 flex-1 p-4 sm:p-6 lg:p-8">
-          <div className="mx-auto max-w-6xl">{children}</div>
-        </main>
+        {/*
+          Full width, not a centred column. This was capped at `max-w-6xl`,
+          which on a 1920 screen left about 450px of empty page on either side
+          of a queue that was itself cramped — a reviewer scrolling a roster
+          while two thirds of their monitor showed nothing.
+
+          Long prose is kept readable where it actually occurs rather than by
+          narrowing everything around it: `PageHeader` caps its own description,
+          and a queue card's text is short by nature. Tables, rosters and tile
+          grids get the room.
+        */}
+        <main className="min-w-0 flex-1 p-4 sm:p-6 lg:p-8">{children}</main>
       </div>
     </div>
   );

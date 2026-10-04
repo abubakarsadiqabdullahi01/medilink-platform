@@ -1,16 +1,28 @@
 'use client';
 
 import { useState } from 'react';
-import { TriangleAlert, Users } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { ChevronLeft, ChevronRight, Search, TriangleAlert, Users } from 'lucide-react';
+import { api } from '@/lib/ui/api';
 import { useFacilityId } from '@/lib/ui/facility';
-import { useQueue } from '@/lib/ui/queue';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
-import { Separator } from '@/components/ui/separator';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { StatusBadge } from '@/components/app/status-badge';
-import { Detail, DetailGrid, EmptyState, PageHeader, QueueSkeleton } from '@/components/app/page-shell';
-import { formatAgo, formatWhen, shortId } from '@/components/app/format';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { StatusBadge, humanise } from '@/components/app/status-badge';
+import { EmptyState, PageHeader } from '@/components/app/page-shell';
+import { formatAgo, formatWhen } from '@/components/app/format';
 import { AttendancePanel } from './attendance-panel';
 
 interface Assignment {
@@ -21,29 +33,75 @@ interface Assignment {
   status: string;
   startsAt: string;
   endsAt: string;
+  practitionerName: string;
+  practitionerPhone: string;
 }
 
 const STATUSES = ['CONFIRMED', 'COMPLETED', 'NO_SHOW', 'CANCELLED'] as const;
+const PAGE_SIZE = 20;
 
 /**
  * Who is due on the floor, and what happened when they got there.
  *
- * Sorted by start time so the next shift is the first thing read — a roster
+ * A table rather than a card per practitioner, for the same reason the
+ * shifts list became one — this is scanned, not read one entry at a time.
+ * Attendance only has anything to say for a confirmed shift, so its column
+ * only exists on that tab rather than sitting empty on the other three.
+ *
+ * Ordered by start time so the next shift is the first thing read — a roster
  * ordered by when a row was created is a roster nobody uses at 6am.
  */
 export default function RosterPage() {
   const facilityId = useFacilityId();
   const [status, setStatus] = useState<string>('CONFIRMED');
+  const [search, setSearch] = useState('');
+  const [applied, setApplied] = useState('');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
 
-  const queue = useQueue<Assignment>(
-    ['roster', facilityId, status],
-    `/api/v1/assignments?scopeType=FACILITY&scopeId=${facilityId}&status=${status}`,
-    (body) => (body as { assignments?: Assignment[] }).assignments ?? [],
-  );
+  const [cursors, setCursors] = useState<(string | null)[]>([null]);
+  const [pageIndex, setPageIndex] = useState(0);
+  const cursor = cursors[pageIndex] ?? null;
 
-  const rows = [...(queue.data ?? [])].sort(
+  function startOver() {
+    setCursors([null]);
+    setPageIndex(0);
+  }
+
+  const queue = useQuery({
+    queryKey: ['roster', facilityId, status, applied, from, to, cursor],
+    queryFn: () => {
+      const parts = [
+        'scopeType=FACILITY',
+        `scopeId=${facilityId}`,
+        `status=${status}`,
+        `limit=${PAGE_SIZE}`,
+        applied ? `search=${encodeURIComponent(applied)}` : '',
+        from ? `from=${from}` : '',
+        to ? `to=${to}` : '',
+        cursor ? `cursor=${cursor}` : '',
+      ].filter(Boolean);
+      return api.get<{ assignments?: Assignment[]; nextCursor?: string | null }>(
+        `/api/v1/assignments?${parts.join('&')}`,
+      );
+    },
+    placeholderData: (previous) => previous,
+  });
+
+  const rows = [...(queue.data?.assignments ?? [])].sort(
     (a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime(),
   );
+  const nextCursor = queue.data?.nextCursor ?? null;
+  const filtered = Boolean(applied) || Boolean(from) || Boolean(to);
+  const showsAttendance = status === 'CONFIRMED';
+
+  function clearFilters() {
+    setSearch('');
+    setApplied('');
+    setFrom('');
+    setTo('');
+    startOver();
+  }
 
   return (
     <>
@@ -52,7 +110,14 @@ export default function RosterPage() {
         description="Confirmed shifts, and the attendance behind them. The facility issues a code and the practitioner presents it — that direction is what makes it evidence rather than proof somebody owns a phone."
       />
 
-      <Tabs value={status} onValueChange={setStatus} className="mb-5">
+      <Tabs
+        value={status}
+        onValueChange={(value) => {
+          setStatus(value);
+          startOver();
+        }}
+        className="mb-5"
+      >
         <TabsList>
           {STATUSES.map((value) => (
             <TabsTrigger key={value} value={value}>
@@ -62,8 +127,80 @@ export default function RosterPage() {
         </TabsList>
       </Tabs>
 
+      <Card className="mb-6">
+        <CardContent className="pt-6">
+          <form
+            className="flex flex-wrap items-end gap-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              setApplied(search.trim());
+              startOver();
+            }}
+          >
+            <div className="min-w-[220px] flex-1 space-y-1.5">
+              <Label htmlFor="roster-search">Search by practitioner</Label>
+              <Input
+                id="roster-search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Amina, or 0803 123 4567"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="roster-from">Starts after</Label>
+              <Input
+                id="roster-from"
+                type="date"
+                value={from}
+                onChange={(event) => {
+                  setFrom(event.target.value);
+                  startOver();
+                }}
+                className="w-40"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="roster-to">Starts before</Label>
+              <Input
+                id="roster-to"
+                type="date"
+                value={to}
+                onChange={(event) => {
+                  setTo(event.target.value);
+                  startOver();
+                }}
+                className="w-40"
+              />
+            </div>
+
+            <Button type="submit" loading={queue.isFetching}>
+              <Search />
+              Search
+            </Button>
+
+            {filtered ? (
+              <Button type="button" variant="ghost" onClick={clearFilters}>
+                Clear
+              </Button>
+            ) : null}
+          </form>
+
+          {!queue.isPending && rows.length > 0 ? (
+            <p className="mt-3 text-xs text-muted-foreground">{rows.length} on this page</p>
+          ) : null}
+        </CardContent>
+      </Card>
+
       {queue.isPending ? (
-        <QueueSkeleton />
+        <Card className="p-4">
+          <div className="space-y-3">
+            {Array.from({ length: 5 }).map((_, index) => (
+              <Skeleton key={index} className="h-9 w-full" />
+            ))}
+          </div>
+        </Card>
       ) : queue.isError ? (
         <Alert variant="destructive">
           <TriangleAlert />
@@ -72,50 +209,102 @@ export default function RosterPage() {
       ) : rows.length === 0 ? (
         <EmptyState
           icon={<Users />}
-          title={`Nothing ${status.toLowerCase().replace('_', ' ')}`}
+          title={filtered ? 'Nothing matches that' : `Nothing ${humanise(status).toLowerCase()}`}
           description={
-            status === 'CONFIRMED'
-              ? 'Confirm somebody onto a published shift and they appear here.'
-              : undefined
+            filtered
+              ? 'Try part of a name, a phone number, or a different date range.'
+              : status === 'CONFIRMED'
+                ? 'Confirm somebody onto a published shift and they appear here.'
+                : undefined
           }
         />
       ) : (
-        <div className="space-y-4">
-          {rows.map((row) => {
-            const started = new Date(row.startsAt) <= new Date();
+        <Card>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Practitioner</TableHead>
+                <TableHead className="w-[170px]">Starts</TableHead>
+                <TableHead className="w-[150px]">Ends</TableHead>
+                <TableHead className="w-[110px]">Status</TableHead>
+                {showsAttendance ? <TableHead>Attendance</TableHead> : null}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((row) => {
+                const started = new Date(row.startsAt) <= new Date();
 
-            return (
-              <Card key={row.id}>
-                <CardHeader className="flex-row items-start justify-between gap-4 space-y-0 pb-4">
-                  <div className="min-w-0">
-                    <p className="font-mono text-sm font-medium">{shortId(row.userId)}</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      {formatWhen(row.startsAt)} · {started ? 'started' : 'starts'}{' '}
-                      {formatAgo(row.startsAt)}
-                    </p>
-                  </div>
-                  <StatusBadge status={row.status} />
-                </CardHeader>
-
-                <CardContent className="space-y-4">
-                  <DetailGrid>
-                    <Detail label="Starts">{formatWhen(row.startsAt)}</Detail>
-                    <Detail label="Ends">{formatWhen(row.endsAt)}</Detail>
-                    <Detail label="Shift">{shortId(row.serviceRequestId)}</Detail>
-                  </DetailGrid>
-
-                  {row.status === 'CONFIRMED' && facilityId ? (
-                    <>
-                      <Separator />
-                      <AttendancePanel assignmentId={row.id} facilityId={facilityId} />
-                    </>
-                  ) : null}
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
+                return (
+                  <TableRow key={row.id}>
+                    <TableCell>
+                      <p className="font-medium">{row.practitionerName}</p>
+                      <p className="font-mono text-xs text-muted-foreground">
+                        {row.practitionerPhone}
+                      </p>
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-xs">
+                      <p>{formatWhen(row.startsAt)}</p>
+                      <p className="text-muted-foreground">
+                        {started ? 'started' : 'starts'} {formatAgo(row.startsAt)}
+                      </p>
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-xs">
+                      {formatWhen(row.endsAt)}
+                    </TableCell>
+                    <TableCell>
+                      <StatusBadge status={row.status} />
+                    </TableCell>
+                    {showsAttendance ? (
+                      <TableCell className="min-w-[260px]">
+                        {facilityId ? (
+                          <AttendancePanel assignmentId={row.id} facilityId={facilityId} />
+                        ) : null}
+                      </TableCell>
+                    ) : null}
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </Card>
       )}
+
+      {rows.length > 0 && (pageIndex > 0 || nextCursor) ? (
+        <div className="mt-5 flex items-center justify-between gap-3">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={pageIndex === 0 || queue.isFetching}
+            onClick={() => setPageIndex((index) => Math.max(0, index - 1))}
+          >
+            <ChevronLeft />
+            Previous
+          </Button>
+
+          <p className="tabular text-xs text-muted-foreground">
+            Page {pageIndex + 1}
+            {queue.isFetching ? ' · loading' : ''}
+          </p>
+
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!nextCursor || queue.isFetching}
+            onClick={() => {
+              if (!nextCursor) return;
+              setCursors((current) => {
+                const next = current.slice(0, pageIndex + 1);
+                next.push(nextCursor);
+                return next;
+              });
+              setPageIndex((index) => index + 1);
+            }}
+          >
+            Next
+            <ChevronRight />
+          </Button>
+        </div>
+      ) : null}
     </>
   );
 }

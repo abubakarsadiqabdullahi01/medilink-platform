@@ -1,10 +1,15 @@
 # Running the whole thing end to end
 
-The URL is **http://localhost:3000** once the stack is up. It is an API — there
-is no interface yet — so the way to exercise it is the script below, which
-walks one shift from a facility that does not exist yet to a timesheet that
-has been disputed, upheld, corrected and approved, then reports a clinical
-incident and suspends somebody for it.
+The URL is **http://localhost:3000** once the stack is up, and there are three
+consoles behind it — `/admin`, `/facility` and `/practitioner`. This page is
+about the other way to exercise the product: the script below walks one shift
+from a facility that does not exist yet to a timesheet that has been disputed,
+upheld, corrected and approved, then reports a clinical incident and suspends
+somebody for it, entirely over HTTP and without loading a page.
+
+If what you want is a demo to look at rather than a walk to run, you want
+`scripts/seed-demo.ts` and the login sheet it prints — see "Running it" in
+`docs/interfaces.md`.
 
 ```bash
 docker compose up -d
@@ -58,6 +63,30 @@ business near production. It is idempotent, so run it as often as you like.
 
 Password for all three: `Medilink-demo-2026`. Not a secret and not meant to be.
 
+These three belong to this walk and exist only once the bootstrap has run. They
+are not the accounts to sign in with in a browser: `scripts/seed-demo.ts`
+builds a whole simulated pilot on the `+2348031200xxx` block — fifty-three
+accounts across four platform roles, four facility roles and ten named
+practitioners — and prints its own login sheet when it finishes.
+
+The two scripts share no phone number, no CAC number and no email address, so
+running either leaves the other's world alone.
+
+The two scripts do share their scaffolding, though — the demo password, the
+local-only refusal, the argon2 hash and the role sync all live in
+`scripts/support/demo.ts` and `src/lib/authz/sync-roles.ts`. They used to be
+copied into each script, and the copies had drifted far enough to undo each
+other: both reset every role's name to its slug, and neither removed a
+permission that had left a bundle, so a bootstrapped database granted
+whatever any previous version of the code had granted. What differs between
+the two scripts is the world each builds, which is the part worth having
+twice. That also means the bootstrap's
+accounts outlive a `seed-demo` re-run: `seed-demo` recognises its own work by
+email domain and CAC prefix, and the bootstrap writes neither. It is deliberate,
+because this walk needs them between runs — but a database that has seen both
+scripts carries a super administrator the login sheet does not list, and a
+sixth facility the pilot does not explain.
+
 ## What the walk covers
 
 1. **Health, and the demo actors.**
@@ -98,10 +127,15 @@ Password for all three: `Medilink-demo-2026`. Not a secret and not meant to be.
 
 ## What it does not cover
 
-- **Anything requiring a browser.** There is no interface to drive.
+- **Anything a browser does.** The consoles are walked by eye and by
+  `scripts/simulate.py`; this script drives the API directly and never renders
+  a page.
 - **File upload.** Credential documents, facility licences and dispute
   evidence all go to a signed Tigris URL, and the walk does not push bytes.
 - **The scheduled sweeps.** They run hourly in the worker; `docs/scheduled-
   jobs.md` covers forcing one.
-- **Anything to do with money.** Modules 11 and 12 do not exist, because the
-  3.1 revenue decision has not been made.
+- **Taking an actual payment.** Modules 11 and 12 are built — rate cards,
+  invoices, a double-entry ledger and payouts — but the gateway is a stub that
+  refuses to run outside `local`, so this walk stops at a payment recorded
+  rather than a payment taken. `scripts/seed-demo.ts` carries invoices and
+  payouts through every state if you want to look at them.

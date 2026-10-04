@@ -126,6 +126,12 @@ model UserRole {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
 
+  // Does less than it looks like: PostgreSQL treats NULLs as distinct, and a
+  // PLATFORM grant's scope_id is NULL, so this never constrained the widest
+  // scope. The real guard is a partial unique index over
+  // COALESCE(scope_id, ...) WHERE revoked_at IS NULL, added in
+  // migrations/20261004170000_one_live_grant. Prisma cannot express it, so it
+  // lives in SQL and this stays for the scopes it does cover.
   @@unique([userId, roleId, scopeType, scopeId])
   @@index([userId, revokedAt])
   @@map("user_roles")
@@ -1055,7 +1061,9 @@ enum InvitationStatus {
   ACCEPTED
   DECLINED
   EXPIRED
-  // The request was withdrawn or filled before they answered.
+  // Closed without becoming an assignment: the request filled, was cancelled
+  // or expired first. An accepted offer the facility never confirmed ends here
+  // too. Opened again by a fresh invitation if the shift reopens.
   WITHDRAWN
 
   @@schema("matching")

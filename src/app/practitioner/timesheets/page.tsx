@@ -40,6 +40,7 @@ import { formatMinutes, formatNaira, formatWhen } from '@/components/app/format'
 interface Assignment {
   id: string;
   facilityId: string;
+  facilityName: string;
   status: string;
   startsAt: string;
   endsAt: string;
@@ -190,6 +191,7 @@ export default function MyTimesheetsPage() {
                 <CardHeader className="flex-row items-start justify-between gap-4 space-y-0 pb-4">
                   <div className="min-w-0">
                     <p className="font-medium">{formatWhen(assignment.startsAt)}</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">{assignment.facilityName}</p>
                     {sheet.revision > 1 ? (
                       <p className="mt-0.5 text-xs text-muted-foreground">
                         revision {sheet.revision}

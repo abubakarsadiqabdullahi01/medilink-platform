@@ -89,13 +89,65 @@ export async function invitePractitioners(input: InviteParams): Promise<Invitati
     const created: InvitationView[] = [];
 
     for (const userId of input.userIds) {
-      // Re-inviting somebody who already has a live invitation is a no-op
-      // rather than an error: a facility clicking twice should not fail.
       const existing = await tx.invitation.findUnique({
         where: { serviceRequestId_userId: { serviceRequestId: request.id, userId } },
       });
-      if (existing) {
+
+      /**
+       * Re-inviting somebody whose offer is still live is a no-op rather than
+       * an error: a facility clicking twice should not fail. So is re-inviting
+       * somebody who declined — that was their answer.
+       *
+       * An offer that closed *without* becoming an assignment is opened again
+       * instead: withdrawn when the shift filled, or left to lapse. A filled
+       * shift reopens when a confirmed practitioner drops out, and the people
+       * it was withdrawn from are exactly who a scheduler asks next — returning
+       * the dead row would tell the facility they had been asked when nothing
+       * reached them.
+       */
+      const closedWithoutAnswer =
+        existing !== null &&
+        (existing.status === 'WITHDRAWN' ||
+          existing.status === 'EXPIRED' ||
+          (existing.status === 'INVITED' && !isInvitationOpen(existing)));
+
+      if (existing && !closedWithoutAnswer) {
         created.push(toInvitationView(existing));
+        continue;
+      }
+
+      if (existing) {
+        const reopened = await tx.invitation.update({
+          where: { id: existing.id },
+          data: {
+            status: 'INVITED',
+            expiresAt,
+            respondedAt: null,
+            declineReason: null,
+            invitedBy: input.actorId,
+            matchRunId: input.matchRunId ?? existing.matchRunId,
+          },
+        });
+
+        await recordAudit(tx, {
+          action: 'assignment.reinvited',
+          entityType: 'matching.invitations',
+          entityId: reopened.id,
+          actorId: input.actorId,
+          scopeType: 'SELF',
+          scopeId: userId,
+          before: toInvitationView(existing),
+          after: { serviceRequestId: request.id, status: 'INVITED', expiresAt },
+        });
+
+        await publishEvent(tx, {
+          eventType: EVENTS.ShiftInvited,
+          aggregateType: 'matching.invitations',
+          aggregateId: reopened.id,
+          payload: { invitationId: reopened.id, userId, serviceRequestId: request.id },
+        });
+
+        created.push(toInvitationView(reopened));
         continue;
       }
 
@@ -207,6 +259,81 @@ export async function respondToInvitation(input: RespondParams): Promise<Invitat
 
     return toInvitationView(updated);
   });
+}
+
+/**
+ * Closes every offer on a request that will not become an assignment.
+ *
+ * Reached when a request fills, is cancelled or expires. Each leaves two kinds
+ * of offer behind: one nobody answered, which the practitioner's offers page
+ * would otherwise list as open indefinitely, and one they accepted that the
+ * facility never confirmed — somebody told "accepted, the facility still has
+ * to confirm you" who would never hear that the answer was no. Both become
+ * WITHDRAWN, which is what the status exists for.
+ *
+ * Anyone who was ever confirmed onto the request keeps their accepted
+ * invitation, whatever became of the assignment since — cancelled, completed
+ * or a no-show. It did become an assignment, and it is the record of how they
+ * got the place; relabelling it when the reopened shift later expires would
+ * rewrite that history.
+ *
+ * Takes the caller's transaction, so the request's own change and the offers
+ * closing with it are one write or neither.
+ */
+export async function withdrawOutstandingInvitations(
+  tx: Tx,
+  input: {
+    requestId: string;
+    actorId: string;
+    actorType?: 'user' | 'system';
+    reason: string;
+    now?: Date;
+  },
+): Promise<number> {
+  const assigned = await tx.assignment.findMany({
+    where: { serviceRequestId: input.requestId },
+    select: { userId: true },
+  });
+  const outstanding = await tx.invitation.findMany({
+    where: {
+      serviceRequestId: input.requestId,
+      OR: [
+        { status: 'INVITED' },
+        { status: 'ACCEPTED', userId: { notIn: assigned.map((row) => row.userId) } },
+      ],
+    },
+  });
+
+  const now = input.now ?? new Date();
+  let withdrawn = 0;
+
+  for (const invitation of outstanding) {
+    // Conditional on the status just read: a practitioner answering at this
+    // moment either lands first and is withdrawn from what they chose, or
+    // finds the offer already closed — never both.
+    const applied = await tx.invitation.updateMany({
+      where: { id: invitation.id, status: invitation.status },
+      data: { status: 'WITHDRAWN', respondedAt: invitation.respondedAt ?? now },
+    });
+    if (applied.count !== 1) continue;
+    withdrawn += 1;
+
+    await recordAudit(tx, {
+      action: 'assignment.invitation_withdrawn',
+      entityType: 'matching.invitations',
+      entityId: invitation.id,
+      actorId: input.actorId,
+      actorType: input.actorType,
+      // Theirs to see in their own history, like the invitation itself.
+      scopeType: 'SELF',
+      scopeId: invitation.userId,
+      reason: input.reason,
+      before: toInvitationView(invitation),
+      after: { status: 'WITHDRAWN' },
+    });
+  }
+
+  return withdrawn;
 }
 
 export interface AssignmentView {
@@ -333,11 +460,18 @@ export async function confirmAssignment(input: ConfirmParams): Promise<Assignmen
       after: toAssignmentView(assignment),
     });
 
-    // The last confirmation closes the request.
+    // The last confirmation closes the request, and every offer on it that
+    // is not going to become an assignment closes with it.
     if (confirmedCount + 1 >= request.headcount) {
       await tx.serviceRequest.updateMany({
         where: { id: request.id, status: 'PUBLISHED' },
         data: { status: 'FILLED' },
+      });
+
+      const invitationsWithdrawn = await withdrawOutstandingInvitations(tx, {
+        requestId: request.id,
+        actorId: input.actorId,
+        reason: 'The shift was filled before this offer became an assignment',
       });
 
       await recordAudit(tx, {
@@ -347,7 +481,7 @@ export async function confirmAssignment(input: ConfirmParams): Promise<Assignmen
         actorId: input.actorId,
         scopeType: 'FACILITY',
         scopeId: request.facilityId,
-        after: { status: 'FILLED', confirmedCount: confirmedCount + 1 },
+        after: { status: 'FILLED', confirmedCount: confirmedCount + 1, invitationsWithdrawn },
       });
     }
 
@@ -440,6 +574,44 @@ export async function getAssignment(assignmentId: string): Promise<AssignmentVie
   return row ? toAssignmentView(row) : null;
 }
 
+export type ReadScopeType = 'SELF' | 'FACILITY' | 'PLATFORM';
+
+/**
+ * The same assignment, but only when it is inside the scope the caller was
+ * actually authorised for.
+ *
+ * The guard proves which scope somebody holds. It cannot know whether the
+ * record named in a URL path belongs to that scope, and two read routes took
+ * the id from the path while taking the scope from the query — so a
+ * practitioner who declared their own SELF scope and somebody else's
+ * assignment id was handed that person's hours, check-in times, device label
+ * and pay. The guard was working; nothing was asking it about the right
+ * record.
+ *
+ * Folding ownership into the lookup is the rule `loadForFacility` already
+ * follows in service-requests, and the refusal is a 404 for the same reason it
+ * gives there: a distinguishable 403 would confirm the id exists.
+ */
+export async function getAssignmentInScope(input: {
+  assignmentId: string;
+  scopeType: ReadScopeType;
+  scopeId?: string;
+}): Promise<AssignmentView> {
+  const assignment = await getAssignment(input.assignmentId);
+  if (!assignment) throw AssignmentErrors.assignmentNotFound();
+
+  if (input.scopeType === 'SELF' && assignment.userId !== input.scopeId) {
+    throw AssignmentErrors.assignmentNotFound();
+  }
+  if (input.scopeType === 'FACILITY' && assignment.facilityId !== input.scopeId) {
+    throw AssignmentErrors.assignmentNotFound();
+  }
+
+  // PLATFORM is deliberately unrestricted: a grant at PLATFORM is the one that
+  // is meant to reach every facility and every practitioner.
+  return assignment;
+}
+
 /**
  * Reached when an approved timesheet says the shift was worked (step 7.5).
  * `COMPLETED` has been in the enum since Stage 6 with nothing setting it, and
@@ -503,11 +675,45 @@ export async function markAssignmentCompleted(input: {
  * there was nothing here to read.
  */
 export async function assignmentOutcomes(userId: string): Promise<AssignmentOutcomes> {
-  const [completed, noShow] = await Promise.all([
-    prisma.assignment.count({ where: { userId, status: 'COMPLETED' } }),
-    prisma.assignment.count({ where: { userId, status: 'NO_SHOW' } }),
-  ]);
-  return { completed, noShow };
+  const outcomes = await assignmentOutcomesFor([userId]);
+  return outcomes.get(userId) ?? { completed: 0, noShow: 0 };
+}
+
+/**
+ * The same counts for a shortlist, as one grouped query.
+ *
+ * Reliability is wanted for every candidate in a match run, and the
+ * single-user version is two counts each — four hundred queries to rank two
+ * hundred people. Grouping asks the database to do the counting it is good
+ * at, once.
+ *
+ * Everybody asked about is in the map, at zero if they have no finished
+ * assignments: a practitioner who has never worked a shift has a real
+ * reliability answer, and it is not the same as not having been asked.
+ */
+export async function assignmentOutcomesFor(
+  userIds: string[],
+): Promise<Map<string, AssignmentOutcomes>> {
+  const outcomes = new Map<string, AssignmentOutcomes>();
+  if (userIds.length === 0) return outcomes;
+
+  const ids = [...new Set(userIds)];
+  for (const id of ids) outcomes.set(id, { completed: 0, noShow: 0 });
+
+  const grouped = await prisma.assignment.groupBy({
+    by: ['userId', 'status'],
+    where: { userId: { in: ids }, status: { in: ['COMPLETED', 'NO_SHOW'] } },
+    _count: { _all: true },
+  });
+
+  for (const row of grouped) {
+    const current = outcomes.get(row.userId);
+    if (!current) continue;
+    if (row.status === 'COMPLETED') current.completed = row._count._all;
+    if (row.status === 'NO_SHOW') current.noShow = row._count._all;
+  }
+
+  return outcomes;
 }
 
 /** How many shifts this practitioner has actually completed. */
@@ -515,29 +721,213 @@ export async function countCompletedAssignments(userId: string): Promise<number>
   return prisma.assignment.count({ where: { userId, status: 'COMPLETED' } });
 }
 
-export async function listInvitationsFor(userId: string): Promise<InvitationView[]> {
+export interface InvitationQueueRow extends InvitationView {
+  facilityName: string;
+  professionalCategoryId: string;
+  specialtyId: string | null;
+  shiftType: string;
+  hourlyRateKobo: number;
+  urgency: string;
+  startsAt: Date;
+  endsAt: Date;
+}
+
+/**
+ * A practitioner's own offers, with what they'd actually need to decide —
+ * where, when, what kind of shift and what it pays. The bare invitation row
+ * has none of that; only `serviceRequestId` says which shift it is at all.
+ *
+ * `Invitation` carries no Prisma relation to `ServiceRequest` — unlike
+ * `Assignment`, which does — so this is a second query and a merge by id
+ * rather than an `include`, the same shape `read-audit-trail.ts` uses to
+ * name an actor.
+ */
+export async function listInvitationsFor(userId: string): Promise<InvitationQueueRow[]> {
   const rows = await prisma.invitation.findMany({
     where: { userId },
     orderBy: { createdAt: 'desc' },
   });
-  return rows.map(toInvitationView);
+
+  const requestIds = [...new Set(rows.map((row) => row.serviceRequestId))];
+  const requests = requestIds.length
+    ? await prisma.serviceRequest.findMany({
+        where: { id: { in: requestIds }, deletedAt: null },
+        select: {
+          id: true,
+          professionalCategoryId: true,
+          specialtyId: true,
+          shiftType: true,
+          hourlyRateKobo: true,
+          urgency: true,
+          startsAt: true,
+          endsAt: true,
+          facility: { select: { name: true } },
+        },
+      })
+    : [];
+  const byId = new Map(requests.map((request) => [request.id, request]));
+
+  return rows.flatMap((row) => {
+    const request = byId.get(row.serviceRequestId);
+    // The shift itself was hard-deleted or is otherwise unreachable — leave
+    // the invitation out rather than show an offer with nothing on it.
+    if (!request) return [];
+    return [
+      {
+        ...toInvitationView(row),
+        facilityName: request.facility.name,
+        professionalCategoryId: request.professionalCategoryId,
+        specialtyId: request.specialtyId,
+        shiftType: request.shiftType,
+        hourlyRateKobo: request.hourlyRateKobo,
+        urgency: request.urgency,
+        startsAt: request.startsAt,
+        endsAt: request.endsAt,
+      },
+    ];
+  });
+}
+
+export interface RequestInvitationRow extends InvitationView {
+  practitionerName: string;
+}
+
+/**
+ * Everybody a facility has offered one shift to, and what each answered.
+ *
+ * The shift page used to keep the offers it had just sent in component state
+ * and nowhere else, while telling the scheduler to "refresh after they
+ * answer, then confirm below" — and a refresh emptied that state, taking the
+ * Offered and Ready-to-confirm lists with it. An accepted offer could then
+ * only be confirmed by somebody who had never left the page. The offers are
+ * rows in the database; this reads them.
+ *
+ * A request belonging to another facility is absent rather than forbidden:
+ * the caller has already proved they may read *this* facility.
+ */
+export async function listInvitationsForRequest(input: {
+  requestId: string;
+  facilityId: string;
+}): Promise<RequestInvitationRow[]> {
+  const request = await prisma.serviceRequest.findFirst({
+    where: { id: input.requestId, facilityId: input.facilityId, deletedAt: null },
+    select: { id: true },
+  });
+  if (!request) throw AssignmentErrors.assignmentNotFound();
+
+  const rows = await prisma.invitation.findMany({
+    where: { serviceRequestId: request.id },
+    orderBy: { createdAt: 'asc' },
+  });
+
+  // identity.users is the shared primitive every module names people from.
+  const users = rows.length
+    ? await prisma.user.findMany({
+        where: { id: { in: rows.map((row) => row.userId) } },
+        select: { id: true, fullName: true },
+      })
+    : [];
+  const names = new Map(users.map((user) => [user.id, user.fullName]));
+
+  return rows.map((row) => ({
+    ...toInvitationView(row),
+    practitionerName: names.get(row.userId) ?? 'Unknown practitioner',
+  }));
 }
 
 export interface ListAssignmentsQuery {
   scopeType: 'SELF' | 'FACILITY';
   scopeId: string;
   status?: AssignmentStatusValue;
+  serviceRequestId?: string;
+  search?: string;
+  from?: Date;
+  to?: Date;
+  limit?: number;
+  cursor?: string;
 }
 
-export async function listAssignments(
-  query: ListAssignmentsQuery,
-): Promise<AssignmentView[]> {
+export interface AssignmentQueueRow extends AssignmentView {
+  practitionerName: string;
+  practitionerPhone: string;
+  facilityName: string;
+  shiftType: string;
+  hourlyRateKobo: number;
+}
+
+export interface AssignmentsPage {
+  assignments: AssignmentQueueRow[];
+  nextCursor: string | null;
+}
+
+/**
+ * The schedule: a practitioner's own, or a facility's whole roster — named,
+ * searchable and paged.
+ *
+ * The roster was showing a fragment of a uuid where a practitioner's name
+ * belongs, the same gap `listUnhonoured` and `listDisputes` had closed for
+ * their own queues — the one screen a ward manager actually reads every
+ * morning still had it. `search` is meaningless at SELF scope (nobody
+ * searches their own single name) and quietly ignored there rather than
+ * refused, so the same query shape works for both scopes without a caller
+ * having to know which one it is.
+ */
+export async function listAssignments(query: ListAssignmentsQuery): Promise<AssignmentsPage> {
+  // Matches the schema's own default — see its comment: several existing
+  // callers read this list's length as a count and pass no limit at all.
+  const limit = query.limit ?? 200;
   const where: Prisma.AssignmentWhereInput =
     query.scopeType === 'SELF' ? { userId: query.scopeId } : { facilityId: query.scopeId };
   if (query.status) where.status = query.status;
+  if (query.serviceRequestId) where.serviceRequestId = query.serviceRequestId;
+  if (query.from || query.to) {
+    where.startsAt = {
+      ...(query.from ? { gte: query.from } : {}),
+      ...(query.to ? { lte: query.to } : {}),
+    };
+  }
 
-  const rows = await prisma.assignment.findMany({ where, orderBy: { startsAt: 'asc' } });
-  return rows.map(toAssignmentView);
+  if (query.scopeType === 'FACILITY' && query.search) {
+    const search = query.search.trim();
+    where.user = {
+      OR: [
+        { fullName: { contains: search, mode: 'insensitive' } },
+        { phone: { contains: search } },
+      ],
+    };
+  }
+
+  const rows = await prisma.assignment.findMany({
+    where,
+    orderBy: [{ startsAt: 'asc' }, { id: 'asc' }],
+    take: limit + 1,
+    ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
+    include: {
+      user: { select: { fullName: true, phone: true } },
+      serviceRequest: {
+        select: {
+          shiftType: true,
+          hourlyRateKobo: true,
+          facility: { select: { name: true } },
+        },
+      },
+    },
+  });
+
+  const page = rows.slice(0, limit);
+  const assignments = page.map((row) => ({
+    ...toAssignmentView(row),
+    practitionerName: row.user.fullName,
+    practitionerPhone: row.user.phone,
+    facilityName: row.serviceRequest.facility.name,
+    shiftType: row.serviceRequest.shiftType,
+    hourlyRateKobo: row.serviceRequest.hourlyRateKobo,
+  }));
+
+  return {
+    assignments,
+    nextCursor: rows.length > limit ? (assignments[assignments.length - 1]?.id ?? null) : null,
+  };
 }
 
 export interface StatusHistoryEntry {

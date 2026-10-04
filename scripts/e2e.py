@@ -139,7 +139,16 @@ def main():
     demo = bootstrap()
     ref = demo["reference"]
     actors = {a["key"]: a for a in demo["actors"]}
-    check("demo actors exist", len(actors) == 3)
+    # The keys this walk signs in as, rather than a count. The count was
+    # written when the bootstrap made exactly three actors and went stale the
+    # moment the facility console added two more — reporting one failure on a
+    # healthy stack, which is the kind that teaches a reader to ignore the
+    # number.
+    check(
+        "demo actors exist",
+        {"operations", "compliance", "superadmin"} <= actors.keys(),
+        f"got {sorted(actors)}",
+    )
 
     section("1. Authentication")
     ops = Client("operations")

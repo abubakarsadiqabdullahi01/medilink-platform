@@ -9,6 +9,7 @@ import { ArrowLeft, Sparkles, TriangleAlert, UserCheck, UserPlus } from 'lucide-
 import { cn } from '@/lib/utils';
 import { api, errorMessage } from '@/lib/ui/api';
 import { useFacilityId } from '@/lib/ui/facility';
+import { useSession } from '@/lib/ui/session';
 import { nameOf, useReference } from '@/lib/ui/reference';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -18,7 +19,7 @@ import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
 import { Detail, DetailGrid, EmptyState, PageHeader } from '@/components/app/page-shell';
-import { formatNaira, formatWhen, shortId } from '@/components/app/format';
+import { formatNaira, formatWhen } from '@/components/app/format';
 
 interface ServiceRequest {
   id: string;
@@ -47,11 +48,15 @@ interface Ranked {
   rank: number;
   score: number;
   factors: Factor[];
+  practitionerName: string;
+  practitionerPhone: string;
 }
 
 interface Excluded {
   userId: string;
   reasons: string[];
+  practitionerName: string;
+  practitionerPhone: string;
 }
 
 interface MatchRun {
@@ -66,6 +71,7 @@ interface MatchRun {
 interface Invitation {
   id: string;
   userId: string;
+  practitionerName: string;
   status: string;
   expiresAt: string;
   declineReason: string | null;
@@ -77,6 +83,8 @@ interface Assignment {
   status: string;
   startsAt: string;
   endsAt: string;
+  practitionerName: string;
+  practitionerPhone: string;
 }
 
 /**
@@ -95,6 +103,12 @@ export default function ShiftDetailPage() {
   const facilityId = useFacilityId();
   const reference = useReference();
   const queryClient = useQueryClient();
+
+  // Matching, offering and confirming are all guarded on assignment.confirm.
+  // This page is reached on service_request.read, which an administrator and
+  // an accounts officer hold without it, so the controls are hidden rather
+  // than left to answer 403 — the same rule the dashboard already follows.
+  const canStaff = useSession().permissions.includes('assignment.confirm');
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const shift = useQuery({
@@ -107,16 +121,37 @@ export default function ShiftDetailPage() {
   });
 
   const assignments = useQuery({
-    queryKey: ['shift-assignments', facilityId],
+    queryKey: ['shift-assignments', facilityId, requestId],
     queryFn: () =>
       api.get<{ assignments: Assignment[] }>(
-        `/api/v1/assignments?scopeType=FACILITY&scopeId=${facilityId}`,
+        `/api/v1/assignments?scopeType=FACILITY&scopeId=${facilityId}&serviceRequestId=${requestId}`,
       ),
     enabled: Boolean(facilityId),
   });
 
   const [matchRun, setMatchRun] = useState<MatchRun | null>(null);
-  const [invitations, setInvitations] = useState<Invitation[]>([]);
+
+  /**
+   * The offers, read from the server rather than remembered by the page.
+   *
+   * They used to live in component state, filled by the invite response —
+   * so the advice below to "refresh after they answer" emptied the very list
+   * the confirmation is made from, and an accepted offer could only be
+   * confirmed by somebody who had never navigated away.
+   */
+  const offers = useQuery({
+    queryKey: ['shift-invitations', facilityId, requestId],
+    queryFn: () =>
+      api.get<{ invitations: Invitation[] }>(
+        `/api/v1/service-requests/${requestId}/invitations?facilityId=${facilityId}`,
+      ),
+    enabled: Boolean(facilityId),
+    // While anybody has yet to answer, look again now and then, so an
+    // acceptance turns up without the scheduler having to think of reloading.
+    refetchInterval: (query) =>
+      query.state.data?.invitations.some((row) => row.status === 'INVITED') ? 15_000 : false,
+  });
+  const invitations = offers.data?.invitations ?? [];
 
   const runMatch = useMutation({
     mutationFn: () =>
@@ -136,7 +171,7 @@ export default function ShiftDetailPage() {
         matchRunId: matchRun?.id,
       }),
     onSuccess: (data) => {
-      setInvitations(data);
+      void queryClient.invalidateQueries({ queryKey: ['shift-invitations'] });
       setSelected(new Set());
       toast.success(`Offered to ${data.length} practitioner${data.length === 1 ? '' : 's'}`);
     },
@@ -149,6 +184,8 @@ export default function ShiftDetailPage() {
     onSuccess: () => {
       toast.success('Practitioner confirmed onto the shift');
       void queryClient.invalidateQueries({ queryKey: ['shift-assignments'] });
+      // Filling the last place withdraws everybody else's offer.
+      void queryClient.invalidateQueries({ queryKey: ['shift-invitations'] });
       void queryClient.invalidateQueries({ queryKey: ['shift', requestId] });
     },
     onError: (error) => toast.error('Could not confirm', { description: errorMessage(error) }),
@@ -221,7 +258,12 @@ export default function ShiftDetailPage() {
                     key={row.id}
                     className="flex items-center justify-between rounded-md border px-3 py-2 text-sm"
                   >
-                    <span className="font-mono text-xs">{shortId(row.userId)}</span>
+                    <div className="min-w-0">
+                      <p className="truncate">{row.practitionerName}</p>
+                      <p className="truncate font-mono text-xs text-muted-foreground">
+                        {row.practitionerPhone}
+                      </p>
+                    </div>
                     <StatusBadge status={row.status} />
                   </div>
                 ))}
@@ -240,7 +282,7 @@ export default function ShiftDetailPage() {
                     key={row.id}
                     className="flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm"
                   >
-                    <span className="font-mono text-xs">{shortId(row.userId)}</span>
+                    <span>{row.practitionerName}</span>
                     <span className="flex items-center gap-2">
                       <span className="text-xs text-muted-foreground">
                         lapses {formatWhen(row.expiresAt)}
@@ -250,8 +292,8 @@ export default function ShiftDetailPage() {
                   </div>
                 ))}
                 <p className="pt-1 text-xs text-muted-foreground">
-                  Accepting is not being confirmed — you still decide. Refresh after they answer,
-                  then confirm below.
+                  Accepting is not being confirmed — you still decide. Answers appear here as
+                  they come in; confirm below.
                 </p>
               </CardContent>
             </Card>
@@ -267,14 +309,16 @@ export default function ShiftDetailPage() {
                   </p>
                 ) : null}
               </div>
-              <Button
-                variant={matchRun ? 'outline' : 'default'}
-                loading={runMatch.isPending}
-                onClick={() => runMatch.mutate()}
-              >
-                <Sparkles />
-                {matchRun ? 'Run again' : 'Find candidates'}
-              </Button>
+              {canStaff ? (
+                <Button
+                  variant={matchRun ? 'outline' : 'default'}
+                  loading={runMatch.isPending}
+                  onClick={() => runMatch.mutate()}
+                >
+                  <Sparkles />
+                  {matchRun ? 'Run again' : 'Find candidates'}
+                </Button>
+              ) : null}
             </CardHeader>
 
             <CardContent>
@@ -309,7 +353,7 @@ export default function ShiftDetailPage() {
                               {candidate.rank}
                             </span>
                             <div>
-                              <p className="font-mono text-sm">{shortId(candidate.userId)}</p>
+                              <p className="text-sm font-medium">{candidate.practitionerName}</p>
                               <p className="text-xs text-muted-foreground">
                                 score <span className="tabular">{candidate.score}</span> of 100
                               </p>
@@ -347,14 +391,16 @@ export default function ShiftDetailPage() {
                   <Separator />
 
                   <div className="flex flex-wrap items-center gap-3">
-                    <Button
-                      disabled={selected.size === 0}
-                      loading={invite.isPending}
-                      onClick={() => invite.mutate()}
-                    >
-                      <UserCheck />
-                      Offer to {selected.size || 'the'} selected
-                    </Button>
+                    {canStaff ? (
+                      <Button
+                        disabled={selected.size === 0}
+                        loading={invite.isPending}
+                        onClick={() => invite.mutate()}
+                      >
+                        <UserCheck />
+                        Offer to {selected.size || 'the'} selected
+                      </Button>
+                    ) : null}
                     <p className="text-xs text-muted-foreground">
                       Nothing is offered until you click. The engine ranks; a person chooses.
                     </p>
@@ -369,8 +415,8 @@ export default function ShiftDetailPage() {
                   </summary>
                   <div className="mt-3 space-y-1.5">
                     {matchRun.excluded.map((row) => (
-                      <div key={row.userId} className="flex flex-wrap gap-2 text-xs">
-                        <span className="font-mono">{shortId(row.userId)}</span>
+                      <div key={row.userId} className="flex flex-wrap items-center gap-2 text-xs">
+                        <span>{row.practitionerName}</span>
                         {row.reasons.map((reason) => (
                           <Badge key={reason} variant="secondary">
                             {humanise(reason)}
@@ -397,14 +443,16 @@ export default function ShiftDetailPage() {
                       key={row.id}
                       className="flex items-center justify-between rounded-md border px-3 py-2"
                     >
-                      <span className="font-mono text-sm">{shortId(row.userId)}</span>
-                      <Button
-                        size="sm"
-                        loading={confirm.isPending && confirm.variables === row.userId}
-                        onClick={() => confirm.mutate(row.userId)}
-                      >
-                        Confirm
-                      </Button>
+                      <span className="text-sm">{row.practitionerName}</span>
+                      {canStaff ? (
+                        <Button
+                          size="sm"
+                          loading={confirm.isPending && confirm.variables === row.userId}
+                          onClick={() => confirm.mutate(row.userId)}
+                        >
+                          Confirm
+                        </Button>
+                      ) : null}
                     </div>
                   ))}
               </CardContent>

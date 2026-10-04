@@ -75,14 +75,23 @@ and the tile showed a dash. `facility.read` is now in the bundle.
 ## Running it
 
 ```bash
-docker compose exec web pnpm tsx scripts/bootstrap-demo.ts
+docker compose exec web pnpm tsx scripts/seed-demo.ts
 ```
 
-Then sign in at http://localhost:3000/login with `+2348031100002` (compliance)
-or `+2348031100003` (everything), password `Medilink-demo-2026`.
+Then sign in at http://localhost:3000/login with `+2348031200003` (compliance),
+`+2348031200002` (operations) or `+2348031200001` (everything), password
+`Medilink-demo-2026`. The seed prints the whole login sheet when it finishes,
+facility and practitioner accounts included, and a number works in either form
+— `+2348031200003` or `0803 120 0003`.
 
-A compliance officer sees four queues and an administrator sees all seven —
-which is the permission filtering working, not a page failing to load.
+`scripts/bootstrap-demo.ts` is a different thing and is not needed here. It
+makes the three bare accounts `scripts/e2e.py` needs, on the `+23480311000xx`
+block, and builds no history for any of them to work on.
+
+A compliance officer sees fewer entries in the menu than an administrator —
+which is the permission filtering working, not a page failing to load. The
+count is deliberately not written down here: it has gone stale twice already,
+once per console that landed.
 
 **New route segments need `docker compose restart web`** before the dev
 server serves them. This is the same trap `docs/end-to-end.md` describes.

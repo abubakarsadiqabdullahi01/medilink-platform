@@ -1,12 +1,11 @@
 'use client';
 
-import { useState } from 'react';
-import { useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMemo, useState } from 'react';
+import { useQueries, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { History, Receipt, TriangleAlert } from 'lucide-react';
+import { ChevronLeft, ChevronRight, History, Receipt, TriangleAlert } from 'lucide-react';
 import { api, errorMessage } from '@/lib/ui/api';
 import { useFacilityId } from '@/lib/ui/facility';
-import { useQueue } from '@/lib/ui/queue';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -20,7 +19,15 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { StatusBadge } from '@/components/app/status-badge';
 import {
@@ -30,7 +37,7 @@ import {
   PageHeader,
   QueueSkeleton,
 } from '@/components/app/page-shell';
-import { formatMinutes, formatNaira, formatWhen, shortId } from '@/components/app/format';
+import { formatMinutes, formatNaira, formatWhen } from '@/components/app/format';
 
 interface Assignment {
   id: string;
@@ -38,7 +45,16 @@ interface Assignment {
   status: string;
   startsAt: string;
   endsAt: string;
+  practitionerName: string;
+  practitionerPhone: string;
 }
+
+const PAGE_SIZE = 50;
+
+const TABS = [
+  { key: 'CONFIRMED', label: 'awaiting decision' },
+  { key: 'COMPLETED', label: 'approved' },
+] as const;
 
 interface Timesheet {
   id: string;
@@ -72,19 +88,66 @@ const MIN_NOTE = 10;
  * Only submitted ones are actionable, so the list is the roster filtered by
  * what the attendance record actually says — there is no "timesheets waiting"
  * endpoint, and inventing one would be a second thing to keep true.
+ *
+ * Approving a timesheet is what finally moves its assignment to `COMPLETED`
+ * — and this page used to read the roster at `status=CONFIRMED` only, so the
+ * moment a decision was made, the row it belonged to vanished with no way
+ * back to it. The "approved" tab reads the same roster at `status=COMPLETED`
+ * instead, purely read-only, so what was decided stays reachable.
+ *
+ * A free-text search asks the reader to already know a name or number to
+ * type. A facility's roster is small enough to just list, so the picker
+ * below is built from whoever is actually on the page rather than typed.
  */
 export default function TimesheetsPage() {
   const facilityId = useFacilityId();
   const queryClient = useQueryClient();
 
-  const roster = useQueue<Assignment>(
-    ['roster-for-timesheets', facilityId],
-    `/api/v1/assignments?scopeType=FACILITY&scopeId=${facilityId}&status=CONFIRMED`,
-    (body) => (body as { assignments?: Assignment[] }).assignments ?? [],
-  );
+  const [tab, setTab] = useState<(typeof TABS)[number]['key']>('CONFIRMED');
+  const [practitionerId, setPractitionerId] = useState('all');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+
+  /**
+   * Paged, the same way Shifts is. This asked for fifty rows, ignored the
+   * `nextCursor` the endpoint handed back and labelled the result "50 shown" —
+   * so the approved tab at a busy hospital showed the oldest fifty of a couple
+   * of hundred and offered no way to reach the rest. A truncation that says
+   * nothing reads exactly like a complete list.
+   */
+  const [cursors, setCursors] = useState<(string | null)[]>([null]);
+  const [pageIndex, setPageIndex] = useState(0);
+  const cursor = cursors[pageIndex] ?? null;
+
+  function startOver() {
+    setCursors([null]);
+    setPageIndex(0);
+  }
+
+  const roster = useQuery({
+    queryKey: ['roster-for-timesheets', facilityId, tab, from, to, cursor],
+    queryFn: () => {
+      const parts = [
+        'scopeType=FACILITY',
+        `scopeId=${facilityId}`,
+        `status=${tab}`,
+        `limit=${PAGE_SIZE}`,
+        from ? `from=${from}` : '',
+        to ? `to=${to}` : '',
+        cursor ? `cursor=${cursor}` : '',
+      ].filter(Boolean);
+      return api.get<{ assignments?: Assignment[]; nextCursor?: string | null }>(
+        `/api/v1/assignments?${parts.join('&')}`,
+      );
+    },
+    select: (body) => ({ rows: body.assignments ?? [], nextCursor: body.nextCursor ?? null }),
+  });
+
+  const rosterRows = roster.data?.rows ?? [];
+  const nextCursor = roster.data?.nextCursor ?? null;
 
   const sheets = useQueries({
-    queries: (roster.data ?? []).map((row) => ({
+    queries: rosterRows.map((row) => ({
       queryKey: ['timesheet', row.id],
       queryFn: () =>
         api.get<{ timesheet: Timesheet; revisions: Revision[] }>(
@@ -127,6 +190,7 @@ export default function TimesheetsPage() {
           : 'Rejected, with your reason on the record',
       );
       refresh(variables.assignmentId);
+      void queryClient.invalidateQueries({ queryKey: ['roster-for-timesheets'] });
     },
     onError: (error) => toast.error('That did not work', { description: errorMessage(error) }),
   });
@@ -148,9 +212,45 @@ export default function TimesheetsPage() {
     onError: (error) => toast.error('Could not correct it', { description: errorMessage(error) }),
   });
 
-  const withSheets = (roster.data ?? [])
+  const withSheets = rosterRows
     .map((row, index) => ({ assignment: row, result: sheets[index] }))
     .filter((entry) => entry.result?.data);
+
+  /**
+   * The roster arrives in one request; the timesheet behind each row arrives
+   * in its own. Between the two, `withSheets` is legitimately empty, and the
+   * page used to read that as "no timesheets" and say so — an accounts officer
+   * with eight shifts waiting was told there was nothing to do, for as long as
+   * the fan-out took. Only the first pass counts: once anything has resolved,
+   * a row refetching in the background must not blank the queue again.
+   */
+  const settling = withSheets.length === 0 && sheets.some((result) => result.isPending);
+
+  // Built from whoever is actually on this tab's page, not typed — a
+  // facility's roster is small enough to pick from rather than search.
+  const practitioners = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const { assignment } of withSheets) {
+      if (!seen.has(assignment.userId)) seen.set(assignment.userId, assignment.practitionerName);
+    }
+    return [...seen.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [withSheets]);
+
+  const visible =
+    practitionerId === 'all'
+      ? withSheets
+      : withSheets.filter((entry) => entry.assignment.userId === practitionerId);
+
+  const filtered = practitionerId !== 'all' || Boolean(from) || Boolean(to);
+
+  function clearFilters() {
+    setPractitionerId('all');
+    setFrom('');
+    setTo('');
+    startOver();
+  }
 
   return (
     <>
@@ -159,22 +259,114 @@ export default function TimesheetsPage() {
         description="What each shift came to, at the rate both sides agreed. Approving completes the assignment; rejecting needs a reason, or the practitioner has nothing to correct."
       />
 
-      {roster.isPending ? (
+      <Tabs
+        value={tab}
+        onValueChange={(value) => {
+          setTab(value as (typeof TABS)[number]['key']);
+          setPractitionerId('all');
+          startOver();
+        }}
+        className="mb-5"
+      >
+        <TabsList>
+          {TABS.map((entry) => (
+            <TabsTrigger key={entry.key} value={entry.key}>
+              {entry.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
+
+      <Card className="mb-6">
+        <CardContent className="flex flex-wrap items-end gap-3 pt-6">
+          <div className="min-w-[220px] space-y-1.5">
+            <Label>Practitioner</Label>
+            <Select value={practitionerId} onValueChange={setPractitionerId}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Everyone</SelectItem>
+                {practitioners.map((entry) => (
+                  <SelectItem key={entry.id} value={entry.id}>
+                    {entry.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="timesheet-from">Starts after</Label>
+            <Input
+              id="timesheet-from"
+              type="date"
+              value={from}
+              onChange={(event) => {
+                setFrom(event.target.value);
+                startOver();
+              }}
+              className="w-40"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="timesheet-to">Starts before</Label>
+            <Input
+              id="timesheet-to"
+              type="date"
+              value={to}
+              onChange={(event) => {
+                setTo(event.target.value);
+                startOver();
+              }}
+              className="w-40"
+            />
+          </div>
+
+          {filtered ? (
+            <Button type="button" variant="ghost" onClick={clearFilters}>
+              Clear
+            </Button>
+          ) : null}
+
+          {!roster.isPending && visible.length > 0 ? (
+            <p className="text-xs text-muted-foreground">
+              {visible.length} shown
+              {nextCursor ? ' · more on the next page' : ''}
+            </p>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      {roster.isPending || settling ? (
         <QueueSkeleton />
       ) : roster.isError ? (
         <Alert variant="destructive">
           <TriangleAlert />
           <AlertDescription>The roster could not be loaded.</AlertDescription>
         </Alert>
-      ) : withSheets.length === 0 ? (
+      ) : visible.length === 0 ? (
         <EmptyState
           icon={<Receipt />}
-          title="No timesheets yet"
-          description="One appears when a practitioner submits the hours for a shift they have checked out of."
+          title={
+            filtered
+              ? 'Nothing matches that'
+              : tab === 'COMPLETED'
+                ? 'Nothing approved yet'
+                : 'No timesheets yet'
+          }
+          description={
+            filtered
+              ? 'Try a different practitioner, or a wider date range.'
+              : tab === 'COMPLETED'
+                ? 'Approve one from "awaiting decision" and it appears here.'
+                : 'One appears when a practitioner submits the hours for a shift they have checked out of.'
+          }
         />
       ) : (
         <div className="space-y-4">
-          {withSheets.map(({ assignment, result }) => {
+          {visible.map(({ assignment, result }) => {
             const sheet = result!.data!.timesheet;
             const revisions = result!.data!.revisions;
             const note = notes[assignment.id]?.trim() ?? '';
@@ -184,7 +376,10 @@ export default function TimesheetsPage() {
               <Card key={assignment.id}>
                 <CardHeader className="flex-row items-start justify-between gap-4 space-y-0 pb-4">
                   <div className="min-w-0">
-                    <p className="font-mono text-sm font-medium">{shortId(assignment.userId)}</p>
+                    <p className="truncate text-sm font-medium">{assignment.practitionerName}</p>
+                    <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
+                      {assignment.practitionerPhone}
+                    </p>
                     <p className="mt-0.5 text-xs text-muted-foreground">
                       {formatWhen(assignment.startsAt)}
                       {sheet.revision > 1 ? ` · revision ${sheet.revision}` : ''}
@@ -302,6 +497,43 @@ export default function TimesheetsPage() {
           })}
         </div>
       )}
+
+      {rosterRows.length > 0 && (pageIndex > 0 || nextCursor) ? (
+        <div className="mt-5 flex items-center justify-between gap-3">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={pageIndex === 0 || roster.isFetching}
+            onClick={() => setPageIndex((index) => Math.max(0, index - 1))}
+          >
+            <ChevronLeft />
+            Previous
+          </Button>
+
+          <p className="tabular text-xs text-muted-foreground">
+            Page {pageIndex + 1}
+            {roster.isFetching ? ' · loading' : ''}
+          </p>
+
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!nextCursor || roster.isFetching}
+            onClick={() => {
+              if (!nextCursor) return;
+              setCursors((current) => {
+                const next = current.slice(0, pageIndex + 1);
+                next.push(nextCursor);
+                return next;
+              });
+              setPageIndex((index) => index + 1);
+            }}
+          >
+            Next
+            <ChevronRight />
+          </Button>
+        </div>
+      ) : null}
 
       <Dialog
         open={correcting !== null}

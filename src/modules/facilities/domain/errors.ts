@@ -38,7 +38,7 @@ export const FacilityErrors = {
 
   /**
    * The facilities equivalent of cannotReviewOwnSubmission: nothing else
-   * stops a user holding both facility_owner and compliance_officer from
+   * stops a user holding both facility_owner and administrator from
    * verifying the facility they represent.
    */
   cannotVerifyOwnFacility: () =>

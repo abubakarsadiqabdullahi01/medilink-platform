@@ -7,15 +7,18 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { StatusBadge } from '@/components/app/status-badge';
+import { StatusBadge, humanise } from '@/components/app/status-badge';
 import { Detail, DetailGrid, EmptyState, PageHeader, QueueSkeleton } from '@/components/app/page-shell';
-import { formatAgo, formatWhen, shortId } from '@/components/app/format';
+import { formatAgo, formatNaira, formatWhen } from '@/components/app/format';
 import { CheckInPanel } from './check-in-panel';
 
 interface Assignment {
   id: string;
   serviceRequestId: string;
   facilityId: string;
+  facilityName: string;
+  shiftType: string;
+  hourlyRateKobo: number;
   status: string;
   startsAt: string;
   endsAt: string;
@@ -88,8 +91,9 @@ export default function MyShiftsPage() {
               <CardContent className="space-y-4">
                 <DetailGrid>
                   <Detail label="Ends">{formatWhen(row.endsAt)}</Detail>
-                  <Detail label="Facility">{shortId(row.facilityId)}</Detail>
-                  <Detail label="Shift">{shortId(row.serviceRequestId)}</Detail>
+                  <Detail label="Facility">{row.facilityName}</Detail>
+                  <Detail label="Type">{humanise(row.shiftType)}</Detail>
+                  <Detail label="Rate">{formatNaira(row.hourlyRateKobo)}/hour</Detail>
                 </DetailGrid>
 
                 {row.status === 'CONFIRMED' ? (

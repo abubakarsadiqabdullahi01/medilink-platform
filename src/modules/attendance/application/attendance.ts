@@ -382,6 +382,22 @@ export async function recordManualAttendance(
       after: toView(updated),
     });
 
+    // The same event a code check-out publishes. A shift recorded from the
+    // ward register was still worked and still ends here, and everything
+    // downstream of completion — the timesheet it is costed into, most of all
+    // — had been reaching only the shifts that happened to have a working
+    // network at the end of them.
+    await publishEvent(tx, {
+      eventType: EVENTS.ShiftCompleted,
+      aggregateType: 'attendance.attendance_records',
+      aggregateId: record.id,
+      payload: {
+        assignmentId: input.assignmentId,
+        userId: assignment.userId,
+        facilityId: assignment.facilityId,
+      },
+    });
+
     return toView(updated);
   });
 }

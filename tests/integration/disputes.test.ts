@@ -27,8 +27,8 @@ import {
 import {
   beginReview,
   getDispute,
+  listDisputes,
   listDisputesFor,
-  listLiveDisputes,
   raiseDispute,
   resolveDispute,
   withdrawDispute,
@@ -560,7 +560,7 @@ describe('resolving a case', () => {
     const world = await buildWorld();
     const dispute = await openCase(world);
 
-    expect((await listLiveDisputes()).map((row) => row.id)).toContain(dispute.id);
+    expect((await listDisputes()).disputes.map((row) => row.id)).toContain(dispute.id);
 
     await resolveDispute({
       disputeId: dispute.id,
@@ -569,7 +569,12 @@ describe('resolving a case', () => {
       notes: 'The ward diary shows the handover finished at four, as recorded.',
     });
 
-    expect((await listLiveDisputes()).map((row) => row.id)).not.toContain(dispute.id);
+    expect((await listDisputes()).disputes.map((row) => row.id)).not.toContain(dispute.id);
+    // Resolved cases are still reachable — the point of moving beyond a
+    // hard-wired "live only" queue — just not under the live default.
+    expect(
+      (await listDisputes({ status: 'RESOLVED' })).disputes.map((row) => row.id),
+    ).toContain(dispute.id);
   });
 });
 

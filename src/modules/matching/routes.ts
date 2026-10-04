@@ -30,6 +30,12 @@ export const ROUTES: RouteDefinition[] = [
     scopeType: 'FACILITY',
   },
   {
+    method: 'GET',
+    path: '/api/v1/service-requests/:id/invitations',
+    permission: 'service_request.read',
+    scopeType: 'FACILITY',
+  },
+  {
     method: 'POST',
     path: '/api/v1/service-requests/:id/confirm',
     permission: 'assignment.confirm',

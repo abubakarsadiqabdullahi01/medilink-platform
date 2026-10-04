@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/db';
-import { getEligibility } from './eligibility';
+import { getEligibilityFor } from './eligibility';
 
 /**
  * The practitioner data the matcher needs, exposed as a function rather than
@@ -58,22 +58,19 @@ export async function listMatchCandidates(input: {
     },
   });
 
-  const candidates: MatchCandidateProfile[] = [];
+  // One batch rather than a call per profile. Every candidate here shares the
+  // category that selected them, so the per-practitioner version re-read the
+  // same category row and the same requirement list once for each of them.
+  const eligibility = await getEligibilityFor(profiles.map((profile) => profile.userId));
 
-  for (const profile of profiles) {
-    const eligibility = await getEligibility(profile.userId);
-
-    candidates.push({
-      userId: profile.userId,
-      professionalCategoryId: profile.professionalCategoryId,
-      specialtyId: profile.specialtyId,
-      yearsOfExperience: profile.yearsOfExperience,
-      homeStateId: profile.homeStateId,
-      homeLgaId: profile.homeLgaId,
-      travelPreference: profile.travelPreference,
-      eligible: eligibility.eligible,
-    });
-  }
-
-  return candidates;
+  return profiles.map((profile) => ({
+    userId: profile.userId,
+    professionalCategoryId: profile.professionalCategoryId,
+    specialtyId: profile.specialtyId,
+    yearsOfExperience: profile.yearsOfExperience,
+    homeStateId: profile.homeStateId,
+    homeLgaId: profile.homeLgaId,
+    travelPreference: profile.travelPreference,
+    eligible: eligibility.get(profile.userId)?.eligible ?? false,
+  }));
 }

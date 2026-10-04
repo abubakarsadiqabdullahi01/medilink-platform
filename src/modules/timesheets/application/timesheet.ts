@@ -170,6 +170,15 @@ export interface SubmitParams {
  */
 export async function submitTimesheet(input: SubmitParams): Promise<TimesheetView> {
   const { record, assignment } = await loadContext(input.assignmentId);
+
+  // Whose shift this is, asked before anything is written. The route can only
+  // authorise the caller against their own SELF scope, which it always
+  // satisfies; nothing there could tell that the assignment in the path
+  // belonged to somebody else, so without this a practitioner could submit
+  // another practitioner's hours under their own name. 404 rather than 403,
+  // the same way an assignment belonging to another facility is reported.
+  if (assignment.userId !== input.userId) throw AttendanceErrors.assignmentNotFound();
+
   guardTransition(record.status, 'SUBMITTED');
 
   // Recomputed at submission, so what is being submitted is what attendance

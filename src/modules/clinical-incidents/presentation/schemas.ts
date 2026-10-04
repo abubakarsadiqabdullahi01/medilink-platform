@@ -6,11 +6,7 @@ import {
 } from '../domain/incident';
 
 const uuid = z.string().uuid();
-const summary = z
-  .string()
-  .trim()
-  .min(INCIDENT_SUMMARY_MIN_LENGTH)
-  .max(INCIDENT_SUMMARY_MAX_LENGTH);
+const summary = z.string().trim().min(INCIDENT_SUMMARY_MIN_LENGTH).max(INCIDENT_SUMMARY_MAX_LENGTH);
 
 export const reportIncidentSchema = z.object({
   facilityId: uuid,
@@ -33,8 +29,6 @@ export const reportIncidentSchema = z.object({
   summary,
 });
 export type ReportIncidentInput = z.infer<typeof reportIncidentSchema>;
-
-export const listIncidentsSchema = z.object({ facilityId: uuid });
 
 export const incidentIdSchema = z.object({ id: uuid });
 
@@ -59,3 +53,35 @@ export const reinstateSchema = z.object({
 export type ReinstateInput = z.infer<typeof reinstateSchema>;
 
 export const emptyQuerySchema = z.object({});
+
+/**
+ * The compliance queue's filters. Every one optional, and an unstated status
+ * means no status filter rather than "open" — which is what lets a facility
+ * read its whole incident history through the same endpoint. A caller that
+ * wants only the open ones has to say so; this comment used to claim the
+ * opposite, and the admin dashboard believed it.
+ */
+export const incidentQueueSchema = z.object({
+  status: z.enum(['OPEN', 'REPORTED', 'UNDER_REVIEW', 'CLOSED']).optional(),
+  severity: z.enum(['NEAR_MISS', 'MINOR', 'MODERATE', 'SEVERE', 'DEATH']).optional(),
+  category: z
+    .enum([
+      'MEDICATION',
+      'CLINICAL_PROCEDURE',
+      'DOCUMENTATION',
+      'INFECTION_CONTROL',
+      'EQUIPMENT',
+      'STAFFING',
+      'CONDUCT',
+      'OTHER',
+    ])
+    .optional(),
+  search: z.string().trim().max(200).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  cursor: uuid.optional(),
+});
+export type IncidentQueueInput = z.infer<typeof incidentQueueSchema>;
+
+/** A facility's own reports — the queue's filters, narrowed to one facility. */
+export const listIncidentsSchema = incidentQueueSchema.extend({ facilityId: uuid });
+export type ListIncidentsInput = z.infer<typeof listIncidentsSchema>;

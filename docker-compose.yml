@@ -74,6 +74,9 @@ services:
       # impossible to open.
       STORAGE_PUBLIC_ENDPOINT: http://localhost:9000
       SMTP_URL: smtp://mail:1025
+      # Where the console SMS adapter also writes each message, inside the
+      # bind mount so the browser journeys on the host can read the codes.
+      SMS_CONSOLE_OUTBOX: .e2e/sms-outbox.jsonl
     env_file:
       - .env
     ports:
@@ -104,6 +107,9 @@ services:
       # impossible to open.
       STORAGE_PUBLIC_ENDPOINT: http://localhost:9000
       SMTP_URL: smtp://mail:1025
+      # Where the console SMS adapter also writes each message, inside the
+      # bind mount so the browser journeys on the host can read the codes.
+      SMS_CONSOLE_OUTBOX: .e2e/sms-outbox.jsonl
     env_file:
       - .env
     volumes:

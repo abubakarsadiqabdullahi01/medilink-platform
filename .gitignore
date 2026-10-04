@@ -5,6 +5,8 @@ build/
 coverage/
 playwright-report/
 test-results/
+# The browser journeys' world and SMS outbox, rebuilt every run
+.e2e/
 .env
 .env.local
 .env.*.local

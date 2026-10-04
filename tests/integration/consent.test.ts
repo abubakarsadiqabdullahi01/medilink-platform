@@ -183,7 +183,7 @@ describe('agreements', () => {
     expect(acceptance.version.body.length).toBeGreaterThan(50);
 
     // And the current list offers the new one, unaccepted.
-    const current = await currentAgreements(user.id);
+    const current = await currentAgreements(user.id, 'PRACTITIONER');
     const engagement = current.find((row) => row.kind === 'PRACTITIONER_ENGAGEMENT');
     expect(engagement?.acceptedAt).toBeNull();
   });

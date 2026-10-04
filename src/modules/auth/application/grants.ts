@@ -38,6 +38,24 @@ export const GrantErrors = {
       'You cannot grant a permission you do not hold yourself.',
       403,
     ),
+  cannotRevokeHigher: (roleKey: string) =>
+    new HttpError(
+      'cannot_revoke_higher',
+      `You cannot revoke ${roleKey} at platform scope — it carries permissions you do not hold yourself.`,
+      403,
+    ),
+  cannotRevokePeer: (roleKey: string) =>
+    new HttpError(
+      'cannot_revoke_peer',
+      `You cannot revoke ${roleKey} at platform scope — they hold exactly what you hold, and removing an equal is not yours to do. Ask a super administrator.`,
+      403,
+    ),
+  lastPlatformAdministrator: () =>
+    new HttpError(
+      'last_platform_administrator',
+      'This is the only account left that can appoint another. Revoking it would lock everybody out permanently — appoint a replacement first.',
+      409,
+    ),
 };
 
 export interface GrantView {
@@ -182,16 +200,128 @@ export async function grantRole(input: GrantRoleParams): Promise<GrantView> {
  * "They had access in March and it was taken away in June" is a question an
  * audit asks, and a DELETE would leave only the absence.
  */
+/**
+ * Nobody can revoke platform authority they do not themselves hold.
+ *
+ * `grantRole` has always refused to hand out a permission the granting actor
+ * lacks. Revoking had no such check, which left the mirror image open: an
+ * administrator could not *become* a super administrator, but could remove
+ * the one supervising them — and an oversight role that the people it
+ * oversees can switch off is not oversight.
+ *
+ * **Why PLATFORM only.** The symmetric rule — "you cannot revoke what you
+ * could not grant" — reads well and is wrong here. The practitioner bundle
+ * carries `credential.submit`, `availability.write` and `timesheet.submit`,
+ * which no administrator holds and none should; under the symmetric rule an
+ * administrator could not revoke a practitioner's own role, which is ordinary
+ * work. Those permissions are capabilities over one's own record, granted at
+ * SELF scope. They are not authority.
+ *
+ * Authority is what a PLATFORM grant confers, so that is where the rule
+ * applies. A facility grant is bounded by its facility and the scope check on
+ * the route already confines who may touch it.
+ *
+ * Stated as a permission comparison rather than as `roleKey ===
+ * 'super_administrator'`, so it holds for whatever roles exist later.
+ *
+ * **Peers cannot remove peers either.** Holding everything the grant confers
+ * is not enough when the grant confers everything *you* hold: that is an
+ * equal, not a subordinate, and three administrators able to remove one
+ * another is a standoff waiting to happen — the first one to click wins, and
+ * the audit trail records a coup rather than a decision.
+ *
+ * The exception is the top of the tree. A super administrator may remove
+ * another super administrator, because otherwise the role would be
+ * irrevocable: nobody below can touch it and nobody at the same level may
+ * either, so somebody who has left the organisation keeps full access
+ * forever. Being able to remove an equal is the price of being the last
+ * level, and `lastPlatformAdministrator` below stops that becoming a
+ * lockout.
+ */
+function assertMayRevoke(
+  roleKey: string,
+  scopeType: string,
+  actorPermissions: readonly Permission[],
+): void {
+  if (scopeType !== 'PLATFORM') return;
+
+  const conferred = ROLE_PERMISSIONS[roleKey];
+  // A role that no longer exists in code cannot be compared against, and a
+  // stale grant is exactly the thing somebody should be able to clear away.
+  if (!conferred) return;
+
+  const held = new Set(actorPermissions);
+  const beyond = conferred.filter((permission) => !held.has(permission));
+  if (beyond.length > 0) throw GrantErrors.cannotRevokeHigher(roleKey);
+
+  // Past that check the grant confers nothing the actor lacks. If the actor
+  // also holds nothing the grant lacks, the two sets are equal — an equal.
+  const confers = new Set<string>(conferred);
+  const isPeer = [...held].every((permission) => confers.has(permission));
+  if (!isPeer) return;
+
+  // Unless the actor is at the top, where there is no higher authority to
+  // ask and the alternative is an irrevocable role.
+  const atTheTop = Object.keys(PERMISSIONS).every((permission) =>
+    held.has(permission as Permission),
+  );
+  if (!atTheTop) throw GrantErrors.cannotRevokePeer(roleKey);
+}
+
+/**
+ * Refuses the revocation that would leave nobody able to appoint anybody.
+ *
+ * Created by the rule above rather than guarded against before it: once only
+ * a super administrator may remove a super administrator, two of them can
+ * remove each other down to zero — and `config.manage` is in the
+ * `super_administrator` bundle, so no one left could ever grant it again.
+ * The platform would need a database edit to recover.
+ *
+ * Phrased as "the last holder of `config.manage` at platform scope" rather
+ * than "the last super administrator", because that is the property that
+ * actually matters: it is the permission that cannot be re-granted once its
+ * last holder is gone, and the check keeps working if some other role is
+ * given it later.
+ */
+async function assertNotTheLastWhoCanAppoint(grant: {
+  id: string;
+  scopeType: string;
+  roleKey: string;
+}): Promise<void> {
+  if (grant.scopeType !== 'PLATFORM') return;
+  if (!ROLE_PERMISSIONS[grant.roleKey]?.includes('config.manage')) return;
+
+  const others = await prisma.userRole.count({
+    where: {
+      scopeType: 'PLATFORM',
+      revokedAt: null,
+      id: { not: grant.id },
+      role: { permissions: { some: { permission: { key: 'config.manage' } } } },
+    },
+  });
+
+  if (others === 0) throw GrantErrors.lastPlatformAdministrator();
+}
+
 export async function revokeGrant(input: {
   grantId: string;
   actorId: string;
   reason: string;
+  /** What the revoking actor holds, for the check above. */
+  actorPermissions: readonly Permission[];
 }): Promise<GrantView> {
   const existing = await prisma.userRole.findUnique({
     where: { id: input.grantId },
     include: { role: true, user: true },
   });
   if (!existing) throw GrantErrors.grantNotFound();
+
+  assertMayRevoke(existing.role.key, existing.scopeType, input.actorPermissions);
+  await assertNotTheLastWhoCanAppoint({
+    id: existing.id,
+    scopeType: existing.scopeType,
+    roleKey: existing.role.key,
+  });
 
   return prisma.$transaction(async (tx: Tx) => {
     const revoked = await tx.userRole.update({

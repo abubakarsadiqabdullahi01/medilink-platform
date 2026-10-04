@@ -1,3 +1,5 @@
+import { appendFile, mkdir } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import { env } from '../env';
 import { logger } from '../logger';
 import { maskPhone } from '../phone';
@@ -43,9 +45,26 @@ export const consoleSmsAdapter: SmsAdapter = {
   async send(message) {
     // eslint-disable-next-line no-console
     console.log(`[sms:console] to=${message.to}\n${message.body}`);
+    if (env.SMS_CONSOLE_OUTBOX) await appendToOutbox(env.SMS_CONSOLE_OUTBOX, message);
     return { provider: 'console', providerMessageId: null, accepted: true };
   },
 };
+
+/**
+ * The same message, as a line in a file a test can read.
+ *
+ * The browser journeys sign up through the real form, so they need the code
+ * the form sent — and neither the log of a server they did not start nor the
+ * hashed row in otp_codes will give it to them. No more exposed than the
+ * console line above, and under the same local-only guard.
+ */
+async function appendToOutbox(path: string, message: SmsMessage): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  await appendFile(
+    path,
+    `${JSON.stringify({ to: message.to, body: message.body, at: new Date().toISOString() })}\n`,
+  );
+}
 
 export class SmsNotConfiguredError extends Error {
   readonly code = 'sms_not_configured';

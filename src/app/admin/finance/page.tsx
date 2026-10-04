@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import {
   Bar,
@@ -10,9 +10,10 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { Banknote, Landmark, TriangleAlert, Wallet } from 'lucide-react';
+import { Banknote, ChevronLeft, ChevronRight, Landmark, TriangleAlert, Wallet } from 'lucide-react';
 import { api } from '@/lib/ui/api';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   ChartContainer,
@@ -20,6 +21,15 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from '@/components/ui/chart';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Table,
@@ -31,6 +41,9 @@ import {
 } from '@/components/ui/table';
 import { PageHeader } from '@/components/app/page-shell';
 import { formatNaira } from '@/components/app/format';
+
+const INVOICE_STATUSES = ['DRAFT', 'ISSUED', 'PAID'] as const;
+const PAGE_SIZE = 20;
 
 interface FacilitySummary {
   id: string;
@@ -145,6 +158,38 @@ export default function FinancePage() {
     }));
     return rows.filter((row) => row.outstanding > 0).sort((a, b) => b.outstanding - a.outstanding);
   }, [verified, invoices]);
+
+  // Filters and paging apply to the table only — the charts above answer "is
+  // the whole picture healthy", and narrowing them to match a filter would
+  // make them answer a different, smaller question without saying so.
+  const [facilitySearch, setFacilitySearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | (typeof INVOICE_STATUSES)[number]>('ALL');
+  const [page, setPage] = useState(1);
+
+  const facilityNames = useMemo(
+    () => new Map(verified.map((facility) => [facility.id, facility.name])),
+    [verified],
+  );
+
+  const filteredInvoices = useMemo(() => {
+    const search = facilitySearch.trim().toLowerCase();
+    return invoices.filter((row) => {
+      if (statusFilter !== 'ALL' && row.status !== statusFilter) return false;
+      const name = facilityNames.get(row.facilityId) ?? '';
+      if (search && !name.toLowerCase().includes(search)) return false;
+      return true;
+    });
+  }, [invoices, facilitySearch, statusFilter, facilityNames]);
+
+  // Clamped at read time rather than reset in an effect: a filter that
+  // shrinks the result set should not fight the page number for who updates
+  // first.
+  const totalPages = Math.max(1, Math.ceil(filteredInvoices.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pagedInvoices = filteredInvoices.slice(
+    (safePage - 1) * PAGE_SIZE,
+    safePage * PAGE_SIZE,
+  );
 
   const tiles = [
     {
@@ -305,34 +350,110 @@ export default function FinancePage() {
               No invoices have been raised.
             </p>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Number</TableHead>
-                  <TableHead>Facility</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Gross</TableHead>
-                  <TableHead className="text-right">Fee</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {invoices.map((row) => (
-                  <TableRow key={row.id}>
-                    <TableCell className="font-mono text-xs">{row.number}</TableCell>
-                    <TableCell>
-                      {verified.find((facility) => facility.id === row.facilityId)?.name ?? '—'}
-                    </TableCell>
-                    <TableCell className="text-xs">{row.status}</TableCell>
-                    <TableCell className="tabular text-right">
-                      {formatNaira(row.grossKobo)}
-                    </TableCell>
-                    <TableCell className="tabular text-right text-muted-foreground">
-                      {formatNaira(row.platformFeeKobo)}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+            <>
+              <div className="mb-4 flex flex-wrap items-end gap-3">
+                <div className="min-w-[220px] flex-1 space-y-1.5">
+                  <Label htmlFor="invoice-facility-search">Facility</Label>
+                  <Input
+                    id="invoice-facility-search"
+                    value={facilitySearch}
+                    onChange={(event) => {
+                      setFacilitySearch(event.target.value);
+                      setPage(1);
+                    }}
+                    placeholder="Search by facility name…"
+                  />
+                </div>
+                <div className="w-40 space-y-1.5">
+                  <Label>Status</Label>
+                  <Select
+                    value={statusFilter}
+                    onValueChange={(value) => {
+                      setStatusFilter(value as typeof statusFilter);
+                      setPage(1);
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ALL">Any status</SelectItem>
+                      {INVOICE_STATUSES.map((status) => (
+                        <SelectItem key={status} value={status}>
+                          {status.charAt(0) + status.slice(1).toLowerCase()}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {filteredInvoices.length === 0 ? (
+                <p className="py-10 text-center text-sm text-muted-foreground">
+                  No invoice matches that facility and status.
+                </p>
+              ) : (
+                <>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Number</TableHead>
+                        <TableHead>Facility</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Gross</TableHead>
+                        <TableHead className="text-right">Fee</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {pagedInvoices.map((row) => (
+                        <TableRow key={row.id}>
+                          <TableCell className="font-mono text-xs">{row.number}</TableCell>
+                          <TableCell>{facilityNames.get(row.facilityId) ?? '—'}</TableCell>
+                          <TableCell className="text-xs">{row.status}</TableCell>
+                          <TableCell className="tabular text-right">
+                            {formatNaira(row.grossKobo)}
+                          </TableCell>
+                          <TableCell className="tabular text-right text-muted-foreground">
+                            {formatNaira(row.platformFeeKobo)}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+
+                  <div className="mt-4 flex items-center justify-between gap-3">
+                    <p className="text-xs text-muted-foreground">
+                      {(safePage - 1) * PAGE_SIZE + 1}–
+                      {Math.min(safePage * PAGE_SIZE, filteredInvoices.length)} of{' '}
+                      {filteredInvoices.length}
+                    </p>
+                    <div className="flex items-center gap-3">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={safePage <= 1}
+                        onClick={() => setPage((current) => Math.max(1, current - 1))}
+                      >
+                        <ChevronLeft />
+                        Previous
+                      </Button>
+                      <p className="tabular text-xs text-muted-foreground">
+                        Page {safePage} of {totalPages}
+                      </p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={safePage >= totalPages}
+                        onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+                      >
+                        Next
+                        <ChevronRight />
+                      </Button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </>
           )}
         </CardContent>
       </Card>

@@ -228,11 +228,17 @@ async function eligiblePractitioner(
 }
 
 function ranked(body: Record<string, unknown>) {
-  return body.ranked as { userId: string; rank: number; score: number; factors: unknown[] }[];
+  return body.ranked as {
+    userId: string;
+    rank: number;
+    score: number;
+    factors: unknown[];
+    practitionerName: string;
+  }[];
 }
 
 function excluded(body: Record<string, unknown>) {
-  return body.excluded as { userId: string; reasons: string[] }[];
+  return body.excluded as { userId: string; reasons: string[]; practitionerName: string }[];
 }
 
 beforeEach(() => {
@@ -252,6 +258,29 @@ describe('running a match', () => {
     expect(ranked(result.body)[0]?.userId).toBe(practitioner.id);
     // Every factor, its weight and what it contributed.
     expect(ranked(result.body)[0]?.factors).toHaveLength(4);
+  });
+
+  it('names every candidate, ranked and excluded — a reviewer decides on a person, not a uuid', async () => {
+    const world = await buildWorld();
+    const eligible = await eligiblePractitioner(world, { fullName: 'Amaka Eze' });
+    const ineligible = await createUser({ fullName: 'Yusuf Bello' });
+    await createProfile({
+      userId: ineligible.id,
+      professionalCategoryId: world.categoryId,
+      yearsOfExperience: 1,
+    });
+    await issueSession({ userId: world.schedulerId });
+
+    const result = await callMatch(world.requestId, world.facilityId);
+
+    expect(ranked(result.body)[0]).toMatchObject({
+      userId: eligible.id,
+      practitionerName: 'Amaka Eze',
+    });
+    expect(excluded(result.body)[0]).toMatchObject({
+      userId: ineligible.id,
+      practitionerName: 'Yusuf Bello',
+    });
   });
 
   it('excludes an ineligible practitioner, naming the Stage 5 rule', async () => {

@@ -14,7 +14,12 @@ export const recordFaultSchema = z.object({
 });
 export type RecordFaultInput = z.infer<typeof recordFaultSchema>;
 
-export const listUnhonouredSchema = z.object({});
+export const listUnhonouredSchema = z.object({
+  status: z.enum(['AWAITING_DECISION', 'CLOSED']).optional(),
+  search: z.string().trim().max(120).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  cursor: uuid.optional(),
+});
 
 export const requestExcusalSchema = z.object({
   id: uuid,
@@ -32,8 +37,7 @@ export const decideExcusalSchema = z
   })
   .refine(
     (value) =>
-      value.decision === 'grant' ||
-      (value.notes?.trim().length ?? 0) >= FAULT_REASON_MIN_LENGTH,
+      value.decision === 'grant' || (value.notes?.trim().length ?? 0) >= FAULT_REASON_MIN_LENGTH,
     {
       message: 'A reason is required when refusing an excusal.',
       path: ['notes'],

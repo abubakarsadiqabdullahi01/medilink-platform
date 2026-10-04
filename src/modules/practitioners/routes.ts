@@ -11,6 +11,14 @@ export interface RouteDefinition {
 }
 
 export const ROUTES: RouteDefinition[] = [
+  // The directory compliance works from. PLATFORM only, with no SELF branch:
+  // a practitioner has /practitioners/me and no business enumerating anybody.
+  {
+    method: 'GET',
+    path: '/api/v1/practitioners',
+    permission: 'practitioner.profile.read',
+    scopeType: 'PLATFORM',
+  },
   {
     method: 'GET',
     path: '/api/v1/practitioners/me',
@@ -66,6 +74,17 @@ export const ROUTES: RouteDefinition[] = [
     path: '/api/v1/practitioners/me/photo-url',
     permission: 'practitioner.profile.read',
     scopeType: 'SELF',
+  },
+  // Lives under /users because it answers "who is this number", but it is
+  // listed here because this module's workflow is the only thing that needs
+  // it: an officer cannot record an identity against somebody they cannot
+  // find. Reuses the auth module's lookup behind a permission compliance
+  // actually holds.
+  {
+    method: 'GET',
+    path: '/api/v1/users/find',
+    permission: 'user.read',
+    scopeType: 'PLATFORM',
   },
   // Step 5.8. Read-only: activation itself only happens on the nightly
   // sweep, never as a side effect of this endpoint.

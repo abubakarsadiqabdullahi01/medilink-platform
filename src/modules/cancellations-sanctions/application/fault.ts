@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { prisma, type Tx } from '@/lib/db';
 import { recordAudit } from '@/lib/audit';
 import { HttpError } from '@/lib/http/errors';
@@ -63,17 +64,21 @@ export interface UnhonouredView {
   detectedAt: Date;
 }
 
-function toView(row: {
-  id: string;
-  assignmentId: string;
-  status: string;
-  fault: string | null;
-  reason: string | null;
-  decidedBy: string | null;
-  decidedAt: Date | null;
-  shiftEndedAt: Date;
-  detectedAt: Date;
-}, userId: string, facilityId: string): UnhonouredView {
+function toView(
+  row: {
+    id: string;
+    assignmentId: string;
+    status: string;
+    fault: string | null;
+    reason: string | null;
+    decidedBy: string | null;
+    decidedAt: Date | null;
+    shiftEndedAt: Date;
+    detectedAt: Date;
+  },
+  userId: string,
+  facilityId: string,
+): UnhonouredView {
   return {
     id: row.id,
     assignmentId: row.assignmentId,
@@ -236,6 +241,91 @@ export async function listAwaitingFault(): Promise<UnhonouredView[]> {
     views.push(toView(row, assignment.userId, assignment.facilityId));
   }
   return views;
+}
+
+/**
+ * The queue a person works through, filtered and paged.
+ *
+ * `listAwaitingFault` is kept for its callers, but it answers only one
+ * question — what is still awaiting a decision — and answers it by fetching
+ * every row and then calling `getAssignment` once per row. Fine at six flags;
+ * a query per row and no way to look at a decided one at sixty.
+ *
+ * The names are joined here because the screen was showing `76a16e95` where a
+ * nurse's name belongs. Deciding that somebody failed to turn up, against a
+ * fragment of a uuid, is not a decision anybody should be asked to make: the
+ * practitioner comes off the assignment, the facility off the request behind
+ * it, and both arrive in the same query rather than N more.
+ */
+export interface UnhonouredQueueRow extends UnhonouredView {
+  practitionerName: string;
+  practitionerPhone: string;
+  facilityName: string;
+  shiftStartsAt: Date;
+}
+
+export interface UnhonouredQueuePage {
+  unhonoured: UnhonouredQueueRow[];
+  nextCursor: string | null;
+}
+
+export interface ListUnhonouredQuery {
+  status?: UnhonouredStatusValue;
+  /** Matches the practitioner's name or the facility's. */
+  search?: string;
+  limit: number;
+  cursor?: string;
+}
+
+export async function listUnhonoured(query: ListUnhonouredQuery): Promise<UnhonouredQueuePage> {
+  const where: Prisma.UnhonouredAssignmentWhereInput = {
+    status: query.status ?? 'AWAITING_DECISION',
+  };
+
+  if (query.search) {
+    const search = query.search.trim();
+    where.assignment = {
+      OR: [
+        { user: { fullName: { contains: search, mode: 'insensitive' } } },
+        { serviceRequest: { facility: { name: { contains: search, mode: 'insensitive' } } } },
+      ],
+    };
+  }
+
+  const rows = await prisma.unhonouredAssignment.findMany({
+    where,
+    // Oldest first: an undecided flag is unfinished business, and the one that
+    // has waited longest is the one somebody is still owed an answer about.
+    orderBy: [{ detectedAt: 'asc' }, { id: 'asc' }],
+    take: query.limit + 1,
+    ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
+    include: {
+      assignment: {
+        select: {
+          userId: true,
+          facilityId: true,
+          startsAt: true,
+          user: { select: { fullName: true, phone: true } },
+          serviceRequest: { select: { facility: { select: { name: true } } } },
+        },
+      },
+    },
+  });
+
+  const page = rows.slice(0, query.limit);
+
+  const unhonoured = page.map((row) => ({
+    ...toView(row, row.assignment.userId, row.assignment.facilityId),
+    practitionerName: row.assignment.user.fullName,
+    practitionerPhone: row.assignment.user.phone,
+    facilityName: row.assignment.serviceRequest.facility.name,
+    shiftStartsAt: row.assignment.startsAt,
+  }));
+
+  return {
+    unhonoured,
+    nextCursor: rows.length > query.limit ? (page[page.length - 1]?.id ?? null) : null,
+  };
 }
 
 export async function getDetermination(assignmentId: string): Promise<UnhonouredView> {

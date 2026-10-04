@@ -10,6 +10,7 @@ import { EVENTS } from '@/lib/events';
 import { ROLE_PERMISSIONS } from '@/lib/authz/permissions';
 import { createFacility, verifyFacility } from '@/modules/facilities/application/facility';
 import {
+  cancelServiceRequest,
   createServiceRequest,
   publishServiceRequest,
 } from '@/modules/service-requests/application/request';
@@ -19,8 +20,12 @@ import {
   confirmAssignment,
   invitePractitioners,
   listAssignments,
+  listInvitationsFor,
+  listInvitationsForRequest,
   respondToInvitation,
 } from '@/modules/matching/application/assignment';
+import { GET as requestInvitationsRoute } from '@/app/api/v1/service-requests/[id]/invitations/route';
+import { issueSession } from '@/modules/auth/application/session-service';
 import { notifyAssignmentConfirmed } from '@/modules/notifications/application/handlers';
 import { expireStartedRequests } from '@/modules/service-requests/application/expiry';
 import { runOnce } from '@/worker/processor';
@@ -548,6 +553,167 @@ describe('invitations', () => {
   });
 });
 
+describe('offers that will not become an assignment', () => {
+  async function statusesOn(requestId: string): Promise<Record<string, string>> {
+    const rows = await prisma.invitation.findMany({ where: { serviceRequestId: requestId } });
+    return Object.fromEntries(rows.map((row) => [row.userId, row.status]));
+  }
+
+  it('withdraws every unconfirmed offer when the last place is filled', async () => {
+    const world = await buildWorld(1);
+    const chosen = await practitioner('Chosen Practitioner');
+    const alsoAccepted = await practitioner('Also Accepted');
+    const neverAnswered = await practitioner('Never Answered');
+
+    await acceptedInvitation(world, chosen.id);
+    await acceptedInvitation(world, alsoAccepted.id);
+    const [unanswered] = await invitePractitioners({
+      requestId: world.requestId,
+      facilityId: world.facilityId,
+      userIds: [neverAnswered.id],
+      actorId: world.schedulerId,
+    });
+
+    await confirmAssignment({
+      requestId: world.requestId,
+      facilityId: world.facilityId,
+      userId: chosen.id,
+      actorId: world.schedulerId,
+    });
+
+    // The confirmed practitioner keeps the record of how they got the place;
+    // the one who accepted and the one who never answered are both told no.
+    expect(await statusesOn(world.requestId)).toEqual({
+      [chosen.id]: 'ACCEPTED',
+      [alsoAccepted.id]: 'WITHDRAWN',
+      [neverAnswered.id]: 'WITHDRAWN',
+    });
+    await expect(
+      respondToInvitation({ invitationId: unanswered!.id, userId: neverAnswered.id, decision: 'accept' }),
+    ).rejects.toThrow(/no longer open/);
+    expect((await listInvitationsFor(neverAnswered.id))[0]?.status).toBe('WITHDRAWN');
+  });
+
+  it('leaves offers open while places remain', async () => {
+    const world = await buildWorld(2);
+    const first = await practitioner('First Practitioner');
+    const waiting = await practitioner('Still Deciding');
+
+    await acceptedInvitation(world, first.id);
+    await invitePractitioners({
+      requestId: world.requestId,
+      facilityId: world.facilityId,
+      userIds: [waiting.id],
+      actorId: world.schedulerId,
+    });
+    await confirmAssignment({
+      requestId: world.requestId,
+      facilityId: world.facilityId,
+      userId: first.id,
+      actorId: world.schedulerId,
+    });
+
+    expect((await statusesOn(world.requestId))[waiting.id]).toBe('INVITED');
+  });
+
+  it('offers the shift again to somebody it was withdrawn from when it reopens', async () => {
+    const world = await buildWorld(1);
+    const chosen = await practitioner('Chosen Practitioner');
+    const next = await practitioner('Next In Line');
+
+    await acceptedInvitation(world, chosen.id);
+    const [original] = await invitePractitioners({
+      requestId: world.requestId,
+      facilityId: world.facilityId,
+      userIds: [next.id],
+      actorId: world.schedulerId,
+    });
+    const assignment = await confirmAssignment({
+      requestId: world.requestId,
+      facilityId: world.facilityId,
+      userId: chosen.id,
+      actorId: world.schedulerId,
+    });
+    await cancelAssignment({
+      assignmentId: assignment.id,
+      facilityId: world.facilityId,
+      actorId: world.schedulerId,
+      reason: 'Practitioner called in sick.',
+    });
+
+    // Asking again reaches them, rather than returning the withdrawn row.
+    const [again] = await invitePractitioners({
+      requestId: world.requestId,
+      facilityId: world.facilityId,
+      userIds: [next.id],
+      actorId: world.schedulerId,
+    });
+    expect(again).toMatchObject({ id: original!.id, status: 'INVITED', respondedAt: null });
+    expect(again!.expiresAt.getTime()).toBeGreaterThan(Date.now());
+
+    await respondToInvitation({ invitationId: again!.id, userId: next.id, decision: 'accept' });
+    const covered = await confirmAssignment({
+      requestId: world.requestId,
+      facilityId: world.facilityId,
+      userId: next.id,
+      actorId: world.schedulerId,
+    });
+    expect(covered.status).toBe('CONFIRMED');
+  });
+
+  it('leaves a declined offer as the practitioner left it', async () => {
+    const world = await buildWorld(1);
+    const user = await practitioner();
+    const [invitation] = await invitePractitioners({
+      requestId: world.requestId,
+      facilityId: world.facilityId,
+      userIds: [user.id],
+      actorId: world.schedulerId,
+    });
+    await respondToInvitation({
+      invitationId: invitation!.id,
+      userId: user.id,
+      decision: 'decline',
+      reason: 'Already on nights that week.',
+    });
+
+    // Declining was their answer; asking again does not overwrite it.
+    const [again] = await invitePractitioners({
+      requestId: world.requestId,
+      facilityId: world.facilityId,
+      userIds: [user.id],
+      actorId: world.schedulerId,
+    });
+    expect(again).toMatchObject({ status: 'DECLINED', declineReason: 'Already on nights that week.' });
+  });
+
+  it('withdraws every offer when the facility cancels the shift', async () => {
+    const world = await buildWorld(2);
+    const accepted = await practitioner('Accepted Practitioner');
+    const invited = await practitioner('Invited Practitioner');
+
+    await acceptedInvitation(world, accepted.id);
+    await invitePractitioners({
+      requestId: world.requestId,
+      facilityId: world.facilityId,
+      userIds: [invited.id],
+      actorId: world.schedulerId,
+    });
+
+    await cancelServiceRequest({
+      requestId: world.requestId,
+      facilityId: world.facilityId,
+      actorId: world.schedulerId,
+      reason: 'Ward closed for fumigation.',
+    });
+
+    expect(await statusesOn(world.requestId)).toEqual({
+      [accepted.id]: 'WITHDRAWN',
+      [invited.id]: 'WITHDRAWN',
+    });
+  });
+});
+
 describe('step 6.5 — both parties notified on confirm', () => {
   it('sends and records a message to the practitioner and the facility', async () => {
     const world = await buildWorld();
@@ -625,6 +791,45 @@ describe('the expiry sweep', () => {
     expect(invitation.status).toBe('WITHDRAWN');
   });
 
+  it('withdraws an accepted offer the facility never confirmed', async () => {
+    const world = await buildWorld();
+    const user = await practitioner();
+    await acceptedInvitation(world, user.id);
+
+    const result = await expireStartedRequests(new Date(SHIFT_END.getTime() + 60 * 60 * 1000));
+
+    // Accepted is not confirmed; the shift has gone and they should know it.
+    expect(result).toMatchObject({ expired: 1, invitationsWithdrawn: 1 });
+    const invitation = await prisma.invitation.findFirstOrThrow({ where: { userId: user.id } });
+    expect(invitation.status).toBe('WITHDRAWN');
+  });
+
+  it('keeps the accepted offer of somebody whose assignment was later cancelled', async () => {
+    const world = await buildWorld();
+    const user = await practitioner();
+    await acceptedInvitation(world, user.id);
+    const assignment = await confirmAssignment({
+      requestId: world.requestId,
+      facilityId: world.facilityId,
+      userId: user.id,
+      actorId: world.schedulerId,
+    });
+    // Cancelled, so the request reopens — and then nobody covers it.
+    await cancelAssignment({
+      assignmentId: assignment.id,
+      facilityId: world.facilityId,
+      actorId: world.schedulerId,
+      reason: 'Practitioner called in sick.',
+    });
+
+    const result = await expireStartedRequests(new Date(SHIFT_END.getTime() + 60 * 60 * 1000));
+
+    // Their offer did become an assignment; expiry must not rewrite that.
+    expect(result).toMatchObject({ expired: 1, invitationsWithdrawn: 0 });
+    const invitation = await prisma.invitation.findFirstOrThrow({ where: { userId: user.id } });
+    expect(invitation.status).toBe('ACCEPTED');
+  });
+
   it('leaves a filled request alone', async () => {
     const world = await buildWorld();
     const user = await practitioner();
@@ -664,9 +869,228 @@ describe('the schedule list', () => {
     });
 
     const mine = await listAssignments({ scopeType: 'SELF', scopeId: user.id });
-    expect(mine).toHaveLength(1);
+    expect(mine.assignments).toHaveLength(1);
 
     const theirs = await listAssignments({ scopeType: 'FACILITY', scopeId: world.facilityId });
-    expect(theirs).toHaveLength(1);
+    expect(theirs.assignments).toHaveLength(1);
+    expect(theirs.assignments[0]?.practitionerName).toBe(user.fullName);
+  });
+
+  it('narrows the facility roster by a start-date range', async () => {
+    const soon = await buildWorld();
+    const soonUser = await practitioner('Amina Yusuf');
+    await acceptedInvitation(soon, soonUser.id);
+    await confirmAssignment({
+      requestId: soon.requestId,
+      facilityId: soon.facilityId,
+      userId: soonUser.id,
+      actorId: soon.schedulerId,
+    });
+
+    const laterStart = new Date(SHIFT_START.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const laterEnd = new Date(laterStart.getTime() + 8 * 60 * 60 * 1000);
+    const later = await buildWorld(1, { startsAt: laterStart, endsAt: laterEnd });
+    const laterUser = await practitioner('Bello Ibrahim');
+    await acceptedInvitation(later, laterUser.id);
+    await confirmAssignment({
+      requestId: later.requestId,
+      facilityId: later.facilityId,
+      userId: laterUser.id,
+      actorId: later.schedulerId,
+    });
+
+    // Two different facilities, so scoping to one already isolates its shift
+    // — the range narrows what's left rather than needing to separate them.
+    const inRange = await listAssignments({
+      scopeType: 'FACILITY',
+      scopeId: later.facilityId,
+      from: new Date(laterStart.getTime() - 60 * 60 * 1000),
+      to: new Date(laterEnd.getTime() + 60 * 60 * 1000),
+    });
+    expect(inRange.assignments).toHaveLength(1);
+    expect(inRange.assignments[0]?.practitionerName).toBe('Bello Ibrahim');
+
+    const outOfRange = await listAssignments({
+      scopeType: 'FACILITY',
+      scopeId: soon.facilityId,
+      from: new Date(laterStart.getTime() - 60 * 60 * 1000),
+      to: new Date(laterEnd.getTime() + 60 * 60 * 1000),
+    });
+    expect(outOfRange.assignments).toHaveLength(0);
+  });
+
+  it("narrows to one shift's own confirmations, not the whole facility's history", async () => {
+    const world = await buildWorld();
+    const first = await practitioner('Amina Yusuf');
+    await acceptedInvitation(world, first.id);
+    await confirmAssignment({
+      requestId: world.requestId,
+      facilityId: world.facilityId,
+      userId: first.id,
+      actorId: world.schedulerId,
+    });
+
+    const secondRequest = await createServiceRequest({
+      facilityId: world.facilityId,
+      professionalCategoryId: world.categoryId,
+      shiftType: 'DAY',
+      startsAt: new Date(SHIFT_START.getTime() + 24 * 60 * 60 * 1000),
+      endsAt: new Date(SHIFT_END.getTime() + 24 * 60 * 60 * 1000),
+      headcount: 1,
+      hourlyRateKobo: 500_000,
+      urgency: 'ROUTINE',
+      cancellationTerms: 'Either party may cancel up to 24 hours before the shift.',
+      actorId: world.schedulerId,
+    });
+    await publishServiceRequest({
+      requestId: secondRequest.id,
+      facilityId: world.facilityId,
+      actorId: world.schedulerId,
+    });
+    const second = await practitioner('Bello Ibrahim');
+    const [invitation] = await invitePractitioners({
+      requestId: secondRequest.id,
+      facilityId: world.facilityId,
+      userIds: [second.id],
+      actorId: world.schedulerId,
+    });
+    await respondToInvitation({ invitationId: invitation!.id, userId: second.id, decision: 'accept' });
+    await confirmAssignment({
+      requestId: secondRequest.id,
+      facilityId: world.facilityId,
+      userId: second.id,
+      actorId: world.schedulerId,
+    });
+
+    // Same facility, two shifts — a page for one of them should never show
+    // the other's confirmation.
+    const onlyFirst = await listAssignments({
+      scopeType: 'FACILITY',
+      scopeId: world.facilityId,
+      serviceRequestId: world.requestId,
+    });
+    expect(onlyFirst.assignments).toHaveLength(1);
+    expect(onlyFirst.assignments[0]?.practitionerName).toBe('Amina Yusuf');
+
+    const onlySecond = await listAssignments({
+      scopeType: 'FACILITY',
+      scopeId: world.facilityId,
+      serviceRequestId: secondRequest.id,
+    });
+    expect(onlySecond.assignments).toHaveLength(1);
+    expect(onlySecond.assignments[0]?.practitionerName).toBe('Bello Ibrahim');
+  });
+});
+
+describe('a practitioner reading their own offers', () => {
+  it('names the shift an invitation is for, not just its id', async () => {
+    const world = await buildWorld();
+    const user = await practitioner();
+    const [invitation] = await invitePractitioners({
+      requestId: world.requestId,
+      facilityId: world.facilityId,
+      userIds: [user.id],
+      actorId: world.schedulerId,
+    });
+
+    const [offer] = await listInvitationsFor(user.id);
+    expect(offer).toMatchObject({
+      id: invitation!.id,
+      facilityName: 'Owerri General Hospital',
+      professionalCategoryId: world.categoryId,
+      shiftType: 'DAY',
+      hourlyRateKobo: 500_000,
+    });
+    expect(offer!.startsAt.toISOString()).toBe(SHIFT_START.toISOString());
+    expect(offer!.endsAt.toISOString()).toBe(SHIFT_END.toISOString());
+  });
+
+  it('leaves out an invitation whose shift no longer exists, rather than throw', async () => {
+    const world = await buildWorld();
+    const user = await practitioner();
+    await invitePractitioners({
+      requestId: world.requestId,
+      facilityId: world.facilityId,
+      userIds: [user.id],
+      actorId: world.schedulerId,
+    });
+
+    // Nothing in this module deletes a service request — this stands in for
+    // the case the merge has to survive without a real deletion path to
+    // reach it through.
+    await prisma.serviceRequest.update({
+      where: { id: world.requestId },
+      data: { deletedAt: new Date() },
+    });
+
+    await expect(listInvitationsFor(user.id)).resolves.toEqual([]);
+  });
+});
+
+describe("a facility reading one shift's offers", () => {
+  async function callInvitations(requestId: string, facilityId: string) {
+    const response = await requestInvitationsRoute(
+      new Request(
+        `http://localhost/api/v1/service-requests/${requestId}/invitations?facilityId=${facilityId}`,
+      ),
+      { params: Promise.resolve({ id: requestId }) },
+    );
+    return { status: response.status, body: await response.json() };
+  }
+
+  it('reads back every offer and its answer, named — not only the ones this page just sent', async () => {
+    const world = await buildWorld(2);
+    const accepted = await practitioner('Amina Yusuf');
+    const waiting = await practitioner('Bisi Adeyemi');
+    await acceptedInvitation(world, accepted.id);
+    await invitePractitioners({
+      requestId: world.requestId,
+      facilityId: world.facilityId,
+      userIds: [waiting.id],
+      actorId: world.schedulerId,
+    });
+
+    const rows = await listInvitationsForRequest({
+      requestId: world.requestId,
+      facilityId: world.facilityId,
+    });
+
+    expect(rows.map((row) => [row.practitionerName, row.status])).toEqual([
+      ['Amina Yusuf', 'ACCEPTED'],
+      ['Bisi Adeyemi', 'INVITED'],
+    ]);
+  });
+
+  it("treats another facility's shift as absent", async () => {
+    const first = await buildWorld();
+    const second = await buildWorld();
+
+    await expect(
+      listInvitationsForRequest({ requestId: first.requestId, facilityId: second.facilityId }),
+    ).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('answers the route for a scheduler at the facility, and refuses everybody else', async () => {
+    const first = await buildWorld();
+    const user = await practitioner();
+    await acceptedInvitation(first, user.id);
+
+    clearCookies();
+    expect((await callInvitations(first.requestId, first.facilityId)).status).toBe(401);
+
+    await issueSession({ userId: first.schedulerId });
+    const own = await callInvitations(first.requestId, first.facilityId);
+    expect(own.status).toBe(200);
+    expect(own.body.invitations).toHaveLength(1);
+    expect(own.body.invitations[0]).toMatchObject({ userId: user.id, status: 'ACCEPTED' });
+
+    // A scheduler elsewhere names this facility and is refused by scope.
+    const second = await buildWorld();
+    await issueSession({ userId: second.schedulerId });
+    expect((await callInvitations(first.requestId, first.facilityId)).status).toBe(403);
+
+    // Being offered the shift grants nothing over the facility's list of offers.
+    await issueSession({ userId: user.id });
+    expect((await callInvitations(first.requestId, first.facilityId)).status).toBe(403);
   });
 });

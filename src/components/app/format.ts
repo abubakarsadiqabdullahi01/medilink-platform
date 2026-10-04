@@ -85,3 +85,30 @@ export function formatMinutes(minutes: number | null | undefined): string {
 export function shortId(id: string | null | undefined): string {
   return id ? id.slice(0, 8) : '—';
 }
+
+/**
+ * `facilities.facilities` → `Facility`, `identity.users` → `User`.
+ *
+ * Audit rows carry the schema-qualified table they changed, which is the
+ * right thing to store and the wrong thing to show: nobody investigating a
+ * complaint thinks in table names. The schema half is dropped because it
+ * repeats the table, and the table is singularised because one row is one
+ * thing.
+ */
+export function recordLabel(entityType: string | null | undefined): string {
+  if (!entityType) return 'Record';
+
+  const table = entityType.includes('.') ? entityType.slice(entityType.indexOf('.') + 1) : entityType;
+  const words = table.replace(/_/g, ' ');
+  const singular = singularise(words);
+
+  return singular.charAt(0).toUpperCase() + singular.slice(1);
+}
+
+/** Enough English for table names, which is all this has to handle. */
+function singularise(value: string): string {
+  if (value.endsWith('ies')) return `${value.slice(0, -3)}y`;
+  if (/(ch|sh|s|x|z)es$/.test(value)) return value.slice(0, -2);
+  if (value.endsWith('s') && !value.endsWith('ss')) return value.slice(0, -1);
+  return value;
+}

@@ -162,13 +162,58 @@ export async function attachEvidence(input: {
   });
 }
 
-/** Everything attached to the case, oldest first. */
-export async function listEvidence(disputeId: string): Promise<EvidenceView[]> {
-  const rows = await prisma.disputeEvidence.findMany({
-    where: { disputeId },
-    orderBy: { createdAt: 'asc' },
+/**
+ * Everything attached to the case, oldest first, with who attached it.
+ *
+ * `attachedBy` is a uuid on the row and an adjudicator cannot weigh a
+ * photograph without knowing which side produced it — a ward picture from the
+ * facility and the same picture from the practitioner are different evidence.
+ * Chronological order is kept because a dispute is an argument and the order
+ * things were said in is part of it.
+ *
+ * The side is derived rather than stored: the dispute already knows whose
+ * assignment it is and which facility, so asking the row would have meant
+ * trusting a second copy of the same fact.
+ */
+export interface EvidenceItem extends EvidenceView {
+  attachedByName: string;
+  /**
+   * Only ever one of two: `attachEvidence` refuses anybody who is not a party
+   * to the shift, so there is no third case to represent.
+   */
+  attachedBySide: 'PRACTITIONER' | 'FACILITY';
+}
+
+export async function listEvidence(disputeId: string): Promise<EvidenceItem[]> {
+  const [rows, dispute] = await Promise.all([
+    prisma.disputeEvidence.findMany({
+      where: { disputeId },
+      orderBy: { createdAt: 'asc' },
+    }),
+    prisma.dispute.findUnique({
+      where: { id: disputeId },
+      select: { assignment: { select: { userId: true } } },
+    }),
+  ]);
+
+  if (rows.length === 0) return [];
+
+  const practitionerId = dispute?.assignment.userId ?? null;
+
+  const people = await prisma.user.findMany({
+    where: { id: { in: [...new Set(rows.map((row) => row.attachedBy))] } },
+    select: { id: true, fullName: true },
   });
-  return rows.map(toView);
+  const names = new Map(people.map((person) => [person.id, person.fullName]));
+
+  return rows.map((row) => ({
+    ...toView(row),
+    attachedByName: names.get(row.attachedBy) ?? row.attachedBy.slice(0, 8),
+    attachedBySide:
+      row.attachedBy === practitionerId
+        ? ('PRACTITIONER' as const)
+        : ('FACILITY' as const),
+  }));
 }
 
 /**

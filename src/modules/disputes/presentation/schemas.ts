@@ -27,6 +27,15 @@ export const listDisputesSchema = z.object({
 
 export const disputeIdSchema = z.object({ id: uuid });
 
+/**
+ * One piece of evidence, identified by both ids.
+ *
+ * The dispute id comes from the path and the evidence id with it, so a
+ * request cannot name evidence belonging to a different case and have the
+ * scope check pass on the one it claims.
+ */
+export const evidenceUrlSchema = z.object({ id: uuid, evidenceId: uuid });
+
 export const resolveDisputeSchema = z.object({
   id: uuid,
   // No default and no optional: a resolution with no outcome tells the loser
@@ -51,4 +60,10 @@ export const attachEvidenceSchema = z.object({
 });
 export type AttachEvidenceInput = z.infer<typeof attachEvidenceSchema>;
 
-export const listQuerySchema = z.object({});
+export const disputeQueueSchema = z.object({
+  status: z.enum(['OPEN', 'UNDER_REVIEW', 'RESOLVED', 'WITHDRAWN']).optional(),
+  /** Matches the practitioner's name or the facility's. */
+  search: z.string().trim().max(120).optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  cursor: uuid.optional(),
+});

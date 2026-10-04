@@ -25,6 +25,7 @@ import {
   accountBalance,
   generateInvoice,
   issueInvoice,
+  listInvoices,
   recordPayment,
 } from '@/modules/billing-settlement/application/invoice';
 import {
@@ -32,6 +33,8 @@ import {
   preparePayout,
   releasePayout,
 } from '@/modules/billing-settlement/application/payout';
+import { GET as getPayoutsRoute } from '@/app/api/v1/payouts/route';
+import { issueSession } from '@/modules/auth/application/session-service';
 import { clearCookies } from './support/cookie-jar';
 import {
   createFacilityType,
@@ -257,6 +260,17 @@ describe('invoicing approved work', () => {
     });
     expect(audit?.actorId).toBe(world.financeId);
   });
+
+  it("names the practitioner on each line, reading the list back", async () => {
+    const world = await buildWorld();
+    await generateInvoice(period(world));
+
+    const [invoice] = await listInvoices(world.facilityId);
+    expect(invoice!.lines[0]).toMatchObject({
+      practitionerId: world.practitionerId,
+      practitionerName: 'Aisha Bello',
+    });
+  });
 });
 
 describe('a rate card changes the figures', () => {
@@ -443,6 +457,32 @@ describe('paying a practitioner', () => {
     await expect(
       releasePayout({ payoutId: payout.id, actorId: world.financeId }),
     ).rejects.toThrow(/cannot become RELEASED/);
+  });
+
+  it("reads through the route at PLATFORM scope — an officer reading someone else's is not a SELF read", async () => {
+    const world = await buildWorld();
+    await generateInvoice(period(world));
+    await preparePayout({ practitionerId: world.practitionerId, actorId: world.financeId });
+    await issueSession({ userId: world.financeId });
+
+    const platform = await getPayoutsRoute(
+      new Request(
+        `http://localhost/api/v1/payouts?scopeType=PLATFORM&scopeId=${world.practitionerId}`,
+      ),
+    );
+    expect(platform.status).toBe(200);
+    const body = (await platform.json()) as { payouts: { practitionerId: string }[] };
+    expect(body.payouts).toHaveLength(1);
+    expect(body.payouts[0]?.practitionerId).toBe(world.practitionerId);
+
+    // SELF means "the caller's own" — an officer holding only a PLATFORM
+    // grant has no SELF-scoped standing over somebody else's id, whatever
+    // permission they hold. This is the exact shape the console got wrong
+    // before it was fixed to ask for PLATFORM.
+    const self = await getPayoutsRoute(
+      new Request(`http://localhost/api/v1/payouts?scopeType=SELF&scopeId=${world.practitionerId}`),
+    );
+    expect(self.status).toBe(403);
   });
 });
 

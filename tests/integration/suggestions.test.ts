@@ -252,7 +252,7 @@ describe('triaging', () => {
 
     // Nothing is deleted from a log whose value is that it records what
     // people actually asked for.
-    expect((await listSuggestions()).map((row) => row.id)).toContain(suggestion.id);
+    expect((await listSuggestions()).suggestions.map((row) => row.id)).toContain(suggestion.id);
   });
 
   it('will not reopen a closed one', async () => {
@@ -275,11 +275,27 @@ describe('triaging', () => {
     const payments = await filed('PAYMENTS');
 
     const byArea = await listSuggestions({ area: 'PAYMENTS' });
-    expect(byArea.map((row) => row.id)).toContain(payments.id);
-    expect(byArea.map((row) => row.id)).not.toContain(matching.id);
+    expect(byArea.suggestions.map((row) => row.id)).toContain(payments.id);
+    expect(byArea.suggestions.map((row) => row.id)).not.toContain(matching.id);
 
     const byStatus = await listSuggestions({ status: 'NEW' });
-    expect(byStatus.map((row) => row.id)).toContain(matching.id);
+    expect(byStatus.suggestions.map((row) => row.id)).toContain(matching.id);
+  });
+
+  it('pages the log rather than returning all of it', async () => {
+    for (let index = 0; index < 3; index += 1) await filed();
+
+    const first = await listSuggestions({ limit: 2 });
+    expect(first.suggestions).toHaveLength(2);
+    expect(first.nextCursor).not.toBeNull();
+
+    const second = await listSuggestions({ limit: 2, cursor: first.nextCursor! });
+    expect(second.suggestions).toHaveLength(1);
+    expect(second.nextCursor).toBeNull();
+
+    // The two pages together are the three rows filed above, once each.
+    const ids = [...first.suggestions, ...second.suggestions].map((row) => row.id);
+    expect(new Set(ids).size).toBe(3);
   });
 });
 

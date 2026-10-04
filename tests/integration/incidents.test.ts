@@ -22,7 +22,7 @@ import {
   beginIncidentReview,
   closeIncident,
   getIncident,
-  listIncidentsForFacility,
+  listIncidents,
   listOpenIncidents,
   reportIncident,
 } from '@/modules/clinical-incidents/application/incident';
@@ -270,10 +270,46 @@ describe('reporting', () => {
       summary: SUMMARY,
     });
 
-    expect((await listIncidentsForFacility(world.facilityId)).map((r) => r.id)).toContain(
-      incident.id,
-    );
+    const facilityList = await listIncidents({ facilityId: world.facilityId, limit: 20 });
+    expect(facilityList.incidents.map((r) => r.id)).toContain(incident.id);
     expect((await listOpenIncidents()).map((r) => r.id)).toContain(incident.id);
+  });
+
+  it("does not show one facility's reports on another's list, and reads every status by default", async () => {
+    const mine = await buildWorld();
+    const theirs = await buildWorld();
+
+    const own = await reportIncident({
+      facilityId: mine.facilityId,
+      actorId: mine.reporterId,
+      occurredAt: OCCURRED,
+      severity: 'MINOR',
+      category: 'EQUIPMENT',
+      summary: SUMMARY,
+    });
+    await reportIncident({
+      facilityId: theirs.facilityId,
+      actorId: theirs.reporterId,
+      occurredAt: OCCURRED,
+      severity: 'MINOR',
+      category: 'EQUIPMENT',
+      summary: SUMMARY,
+    });
+
+    await beginIncidentReview({ incidentId: own.id, actorId: mine.officerId });
+    await closeIncident({
+      incidentId: own.id,
+      actorId: mine.officerId,
+      outcome: 'NO_ACTION',
+      notes: 'Nothing further to do.',
+    });
+
+    // No status filter at all — a facility's own history is everything it
+    // has filed, closed cases included, not the compliance queue's "open"
+    // default.
+    const list = await listIncidents({ facilityId: mine.facilityId, limit: 20 });
+    expect(list.incidents.map((r) => r.id)).toEqual([own.id]);
+    expect(list.incidents[0]?.status).toBe('CLOSED');
   });
 
   it('puts the most serious at the top of the queue', async () => {

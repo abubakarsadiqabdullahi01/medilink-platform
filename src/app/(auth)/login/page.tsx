@@ -106,10 +106,20 @@ export default function LoginPage() {
             </Link>
           </p>
 
+          <p className="mt-2 text-sm text-muted-foreground">
+            Represent a hospital or clinic?{' '}
+            <Link
+              href="/register?as=facility"
+              className="font-medium text-primary underline-offset-4 hover:underline"
+            >
+              Register your facility
+            </Link>
+          </p>
+
           <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
-            Locally, <code className="rounded bg-muted px-1 py-0.5">bootstrap-demo.ts</code> creates
-            the operations, compliance and administrator accounts. See{' '}
-            <code className="rounded bg-muted px-1 py-0.5">docs/end-to-end.md</code>.
+            Locally, <code className="rounded bg-muted px-1 py-0.5">seed-demo.ts</code> creates
+            every demo account and prints the login sheet. See{' '}
+            <code className="rounded bg-muted px-1 py-0.5">docs/interfaces.md</code>.
           </p>
         </div>
       </div>

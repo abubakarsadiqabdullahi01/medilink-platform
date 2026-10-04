@@ -13,6 +13,7 @@ import {
   ScrollText,
   ShieldCheck,
   Stethoscope,
+  UserRoundCheck,
 } from 'lucide-react';
 import { SessionProvider } from '@/lib/ui/session';
 import { ConsoleShell, type NavSection } from '@/components/app/console-shell';
@@ -32,14 +33,26 @@ const SECTIONS: NavSection[] = [
   {
     heading: 'Onboarding',
     items: [
+      // First in this group because it is first in the practitioner's life:
+      // identity and registration gate everything, and only this side can
+      // record them.
+      {
+        href: '/admin/practitioners',
+        prefetch: '/api/v1/practitioners?scopeType=PLATFORM&limit=20',
+        label: 'Practitioners',
+        icon: UserRoundCheck,
+        permission: 'credential.review',
+      },
       {
         href: '/admin/credentials',
+        prefetch: '/api/v1/credentials?scopeType=PLATFORM&status=PENDING&limit=20',
         label: 'Credentials',
         icon: FileCheck2,
         permission: 'credential.review',
       },
       {
         href: '/admin/facilities',
+        prefetch: '/api/v1/facilities?scopeType=PLATFORM&status=PENDING&limit=20',
         label: 'Facilities',
         icon: Building2,
         permission: 'facility.verify',
@@ -51,13 +64,16 @@ const SECTIONS: NavSection[] = [
     items: [
       {
         href: '/admin/incidents',
+        prefetch: '/api/v1/incidents/queue?status=OPEN&limit=20',
         label: 'Clinical incidents',
         icon: Stethoscope,
         permission: 'incident.manage',
       },
-      { href: '/admin/disputes', label: 'Disputes', icon: Gavel, permission: 'dispute.manage' },
+      { href: '/admin/disputes',
+        prefetch: '/api/v1/disputes?status=OPEN&limit=20', label: 'Disputes', icon: Gavel, permission: 'dispute.manage' },
       {
         href: '/admin/unhonoured',
+        prefetch: '/api/v1/unhonoured?status=AWAITING_DECISION&limit=20',
         label: 'Unhonoured shifts',
         icon: FileClock,
         permission: 'sanction.apply',
@@ -77,17 +93,20 @@ const SECTIONS: NavSection[] = [
     items: [
       {
         href: '/admin/suggestions',
+        prefetch: '/api/v1/suggestions?status=NEW&limit=20',
         label: 'Suggestions',
         icon: MessageSquareText,
         permission: 'suggestion.triage',
       },
       {
         href: '/admin/data-requests',
+        prefetch: '/api/v1/data-requests?status=RECEIVED&limit=20',
         label: 'Data requests',
         icon: ShieldCheck,
         permission: 'audit.read',
       },
-      { href: '/admin/audit', label: 'Audit trail', icon: ScrollText, permission: 'audit.read' },
+      { href: '/admin/audit',
+        prefetch: '/api/v1/audit?scopeType=PLATFORM&limit=50', label: 'Audit trail', icon: ScrollText, permission: 'audit.read' },
     ],
   },
 ];

@@ -144,24 +144,36 @@ compliance badge. The omission is the design.
 
 ```
 docker compose up -d
-docker compose exec web pnpm tsx scripts/bootstrap-demo.ts
 docker compose exec web pnpm tsx scripts/seed-demo.ts
 ```
 
-`bootstrap-demo` creates the first administrator, which nothing else can.
-`seed-demo` then builds a pilot's worth of history — three months of shifts,
-four facilities, ten practitioners, invoices in every state — **through the
-application layer rather than by inserting rows**. That matters: the audit
+`seed-demo` builds a pilot's worth of history on its own. It creates the first
+administrator itself — the one account no grant path can make, because
+granting a `PLATFORM` role is exactly what a `PLATFORM` role is for — and
+everybody after them is granted by that administrator, through the same code
+the console uses, escalation check included. Behind them: sixteen weeks of
+shifts, five facilities (three verified, one awaiting verification, one
+refused), thirty-nine practitioners at every stage of onboarding, and invoices
+in every state from draft to paid, all **through the application layer rather
+than by inserting rows**. That matters: the audit
 rows exist because the code that writes them ran, the outbox has events
 because something published them, and the ledger balances because
 `assertBalanced` refused anything that did not. A seed of straight
 `prisma.create` calls produces a database that looks right and is not.
 
 It is re-runnable and clears its own work first, so you get the same picture
-rather than three months of duplicates.
+rather than four months of duplicates.
 
-Then <http://localhost:3000>. The bootstrap prints every demo account; they
-share one password, which is printed with them and is not a secret.
+Then <http://localhost:3000>. `seed-demo` prints every demo account as it
+finishes, grouped by console, and they share one password, which is printed
+with them and is not a secret. [demo-walkthrough.md](demo-walkthrough.md) is
+the guided tour: which account shows which part of the product, and what each
+part is there to demonstrate.
+
+`scripts/bootstrap-demo.ts` is no longer part of this. It exists for
+`scripts/e2e.py`, which needs a fixed handful of actors whose ids it can read
+back as JSON, and it keeps to a separate phone block so the two demo worlds
+never touch.
 
 **After adding a route segment, restart the web container** — Next does not
 always pick up a new folder, and the symptom is a 404 on a page that exists.

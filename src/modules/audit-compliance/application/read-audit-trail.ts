@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db';
+import { AUDIT_AREAS } from '../domain/audit-areas';
 import type { AuditQuery } from '../presentation/schemas';
 
 /**
@@ -16,6 +17,8 @@ export interface AuditEntry {
   entityType: string;
   entityId: string | null;
   actorId: string | null;
+  /** The actor's name, or null when the row carries no actor or none is left. */
+  actorName: string | null;
   actorType: string;
   scopeType: string | null;
   scopeId: string | null;
@@ -46,6 +49,15 @@ export async function readAuditTrail(query: AuditQuery): Promise<AuditTrailPage>
   if (query.actorId) where.actorId = query.actorId;
   if (query.action) where.action = query.action;
 
+  // An area is a set of action subjects, matched on the prefix. `action`
+  // above stays an exact match, so a caller asking for one action and a
+  // console browsing a whole area do not fight over the same field.
+  if (query.area) {
+    where.OR = AUDIT_AREAS[query.area].map((subject) => ({
+      action: { startsWith: `${subject}.` },
+    }));
+  }
+
   if (query.from || query.to) {
     where.createdAt = {
       ...(query.from ? { gte: query.from } : {}),
@@ -75,8 +87,10 @@ export async function readAuditTrail(query: AuditQuery): Promise<AuditTrailPage>
     },
   });
 
-  const entries = rows.slice(0, query.limit);
+  const page = rows.slice(0, query.limit);
   const hasMore = rows.length > query.limit;
+
+  const entries = await withActorNames(page);
 
   // `before` and `after` are deliberately not returned. They hold the changed
   // values, redacted at write time but still the most sensitive column in the
@@ -86,6 +100,34 @@ export async function readAuditTrail(query: AuditQuery): Promise<AuditTrailPage>
     entries,
     nextCursor: hasMore ? (entries[entries.length - 1]?.id ?? null) : null,
   };
+}
+
+/**
+ * Puts a name against each row, in one further query rather than a join.
+ *
+ * There is no relation from an audit row to the user who wrote it, and there
+ * should not be: the row outlives the account, and a foreign key would have
+ * made the trail deletable by deleting somebody. So the ids on the page are
+ * resolved separately, and a row whose actor no longer exists keeps its uuid
+ * instead of losing the answer to who did it.
+ *
+ * This names an actor; it does not let anybody list one. The trail has no
+ * filter by person, and that omission is the design.
+ */
+async function withActorNames<T extends { actorId: string | null }>(
+  rows: T[],
+): Promise<(T & { actorName: string | null })[]> {
+  const ids = [...new Set(rows.map((row) => row.actorId).filter((id): id is string => Boolean(id)))];
+
+  const actors = ids.length
+    ? await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, fullName: true } })
+    : [];
+  const names = new Map(actors.map((actor) => [actor.id, actor.fullName]));
+
+  return rows.map((row) => ({
+    ...row,
+    actorName: row.actorId ? (names.get(row.actorId) ?? null) : null,
+  }));
 }
 
 /**
@@ -110,6 +152,8 @@ export async function recordAuditTrailAccess(input: {
         scopeType: input.query.scopeType,
         scopeId: input.query.scopeId ?? null,
         entityType: input.query.entityType ?? null,
+        entityId: input.query.entityId ?? null,
+        area: input.query.area ?? null,
         actorId: input.query.actorId ?? null,
         returned: input.returned,
         correlationId: input.correlationId,

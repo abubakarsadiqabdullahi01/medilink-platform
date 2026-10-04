@@ -29,4 +29,8 @@ export const ROUTES: RouteDefinition[] = [
   { method: 'POST', path: '/api/v1/disputes/:id/evidence/upload-url', permission: 'dispute.manage', scopeType: 'SELF' },
   { method: 'POST', path: '/api/v1/disputes/:id/evidence', permission: 'dispute.manage', scopeType: 'SELF' },
   { method: 'GET', path: '/api/v1/disputes/:id/evidence', permission: 'dispute.manage', scopeType: 'PLATFORM' },
+  // Reading one attachment. SELF because a party may re-read what they or the
+  // other side put in; a PLATFORM holder's grant covers every scope, so the
+  // adjudicator working the case reaches it through the same entry.
+  { method: 'POST', path: '/api/v1/disputes/:id/evidence/:evidenceId/url', permission: 'dispute.manage', scopeType: 'SELF' },
 ];

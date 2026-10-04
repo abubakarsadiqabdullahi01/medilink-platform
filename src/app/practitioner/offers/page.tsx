@@ -4,15 +4,17 @@ import { useState } from 'react';
 import { Inbox, TriangleAlert } from 'lucide-react';
 import { api } from '@/lib/ui/api';
 import { useQueue, useQueueAction } from '@/lib/ui/queue';
+import { nameOf, useReference } from '@/lib/ui/reference';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
-import { StatusBadge } from '@/components/app/status-badge';
+import { StatusBadge, humanise } from '@/components/app/status-badge';
 import { Detail, DetailGrid, EmptyState, PageHeader, QueueSkeleton } from '@/components/app/page-shell';
-import { formatAgo, formatWhen, shortId } from '@/components/app/format';
+import { formatAgo, formatNaira, formatWhen } from '@/components/app/format';
 
 interface Invitation {
   id: string;
@@ -22,6 +24,14 @@ interface Invitation {
   expiresAt: string;
   declineReason: string | null;
   createdAt: string;
+  facilityName: string;
+  professionalCategoryId: string;
+  specialtyId: string | null;
+  shiftType: string;
+  hourlyRateKobo: number;
+  urgency: string;
+  startsAt: string;
+  endsAt: string;
 }
 
 /**
@@ -35,8 +45,14 @@ interface Invitation {
  * the pilot's suggestion log, without the practitioner's name attached, and
  * are the main way anybody learns the rate is too low or the notice too
  * short.
+ *
+ * Every card used to say only "Shift a3f92e1c" — a decision that commits
+ * somebody's time, made with no facility, no rate and no times to decide it
+ * against. That was the offer itself withholding the answer to the only
+ * question that matters here.
  */
 export default function OffersPage() {
+  const reference = useReference();
   const queueKey = ['invitations'];
   const queue = useQueue<Invitation>(queueKey, '/api/v1/invitations', (body) => (body as { invitations?: Invitation[] }).invitations ?? []);
 
@@ -57,6 +73,13 @@ export default function OffersPage() {
 
   const open = (queue.data ?? []).filter((row) => row.status === 'INVITED');
   const answered = (queue.data ?? []).filter((row) => row.status !== 'INVITED');
+
+  const professionOf = (row: Invitation) => {
+    const category = nameOf(reference.data?.professionalCategories, row.professionalCategoryId);
+    return row.specialtyId
+      ? `${category} · ${nameOf(reference.data?.specialties, row.specialtyId)}`
+      : category;
+  };
 
   return (
     <>
@@ -88,19 +111,29 @@ export default function OffersPage() {
               <Card key={row.id}>
                 <CardHeader className="flex-row items-start justify-between gap-4 space-y-0 pb-4">
                   <div className="min-w-0">
-                    <p className="font-medium">Shift {shortId(row.serviceRequestId)}</p>
+                    <p className="font-medium">{professionOf(row)}</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">{row.facilityName}</p>
                     <p className="mt-0.5 text-xs text-muted-foreground">
                       offered {formatAgo(row.createdAt)}
                     </p>
                   </div>
-                  <StatusBadge status={row.status} />
+                  <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                    {row.urgency !== 'ROUTINE' ? (
+                      <Badge variant={row.urgency === 'EMERGENCY' ? 'destructive' : 'warning'}>
+                        {humanise(row.urgency)}
+                      </Badge>
+                    ) : null}
+                    <Badge variant="secondary">{humanise(row.shiftType)}</Badge>
+                    <StatusBadge status={row.status} />
+                  </div>
                 </CardHeader>
 
                 <CardContent className="space-y-4">
                   <DetailGrid>
-                    <Detail label="Answer by" className="sm:col-span-2">
-                      {formatWhen(row.expiresAt)}
-                    </Detail>
+                    <Detail label="Starts">{formatWhen(row.startsAt)}</Detail>
+                    <Detail label="Ends">{formatWhen(row.endsAt)}</Detail>
+                    <Detail label="Rate">{formatNaira(row.hourlyRateKobo)}/hour</Detail>
+                    <Detail label="Answer by">{formatWhen(row.expiresAt)}</Detail>
                   </DetailGrid>
 
                   {lapsed ? (
@@ -164,7 +197,12 @@ export default function OffersPage() {
                 <Card key={row.id}>
                   <CardContent className="flex flex-wrap items-center justify-between gap-3 pt-5">
                     <div className="min-w-0">
-                      <p className="text-sm">Shift {shortId(row.serviceRequestId)}</p>
+                      <p className="text-sm">
+                        {professionOf(row)} · {row.facilityName}
+                      </p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        {formatWhen(row.startsAt)}
+                      </p>
                       {row.declineReason ? (
                         <p className="mt-0.5 text-xs text-muted-foreground">
                           &ldquo;{row.declineReason}&rdquo;

@@ -29,6 +29,11 @@ export const SuggestionErrors = {
     new HttpError('suggestion_cannot_triage', `This cannot be triaged: ${blockers.join(', ')}.`, 409),
 };
 
+/** A queue row: the view, plus the author's name where there is an author. */
+export interface SuggestionItem extends SuggestionView {
+  raisedByName: string | null;
+}
+
 export interface SuggestionView {
   id: string;
   source: SuggestionSourceValue;
@@ -196,25 +201,77 @@ export async function getSuggestion(suggestionId: string): Promise<SuggestionVie
   return toView(row);
 }
 
+export interface SuggestionQueuePage {
+  suggestions: SuggestionItem[];
+  nextCursor: string | null;
+}
+
 /**
- * The log, newest first, optionally narrowed.
+ * The log, newest first, optionally narrowed and paged.
  *
  * Readable by area rather than only by date, because the thing a pilot needs
  * to see is not "what came in on Tuesday" but "eleven people have now said
  * the same thing about matching".
+ *
+ * Paged, where it once was not: a log fed by a walkthrough script that runs
+ * every day for months is not the handful of rows a pilot's actual users
+ * leave, and a page rendering all of them as open textareas at once was the
+ * result. `limit` defaults so a direct call — a test, say — keeps working
+ * without naming one.
  */
-export async function listSuggestions(filter: {
-  status?: SuggestionStatusValue;
-  area?: SuggestionAreaValue;
-} = {}): Promise<SuggestionView[]> {
+export async function listSuggestions(
+  filter: {
+    status?: SuggestionStatusValue;
+    area?: SuggestionAreaValue;
+    limit?: number;
+    cursor?: string;
+  } = {},
+): Promise<SuggestionQueuePage> {
+  const limit = filter.limit ?? 25;
   const rows = await prisma.suggestion.findMany({
     where: {
       ...(filter.status ? { status: filter.status } : {}),
       ...(filter.area ? { area: filter.area } : {}),
     },
-    orderBy: { createdAt: 'desc' },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    take: limit + 1,
+    ...(filter.cursor ? { cursor: { id: filter.cursor }, skip: 1 } : {}),
   });
-  return rows.map(toView);
+
+  const page = rows.slice(0, limit);
+  return {
+    suggestions: await withAuthors(page.map(toView)),
+    nextCursor: rows.length > limit ? (page[page.length - 1]?.id ?? null) : null,
+  };
+}
+
+/**
+ * Puts a name against the suggestions that have an author, and only those.
+ *
+ * **A decline reason has no author and must not acquire one.** Those rows are
+ * created with no `raisedBy` at all — see `recordDeclineAsSuggestion`, which
+ * writes its audit entry without an actor for the same reason — because the
+ * practitioner was answering an invitation, not filing a complaint, and
+ * naming them would report them as having done something they did not do.
+ *
+ * So the privacy decision lives in the data rather than in this function:
+ * there is no id here to resolve, and nothing downstream has to remember the
+ * rule. What this adds is a name for the people who *did* choose to write
+ * something, because somebody answering a suggestion should know whether they
+ * are replying to a nurse or to a hospital's administrator.
+ */
+async function withAuthors(views: SuggestionView[]): Promise<SuggestionItem[]> {
+  const ids = [...new Set(views.map((view) => view.raisedBy).filter((id): id is string => Boolean(id)))];
+
+  const people = ids.length
+    ? await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, fullName: true } })
+    : [];
+  const names = new Map(people.map((person) => [person.id, person.fullName]));
+
+  return views.map((view) => ({
+    ...view,
+    raisedByName: view.raisedBy ? (names.get(view.raisedBy) ?? null) : null,
+  }));
 }
 
 export interface AreaCount {

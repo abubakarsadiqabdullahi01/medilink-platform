@@ -4,6 +4,7 @@ import { recordAudit } from '@/lib/audit';
 import { publishEvent } from '@/lib/outbox';
 import { EVENTS } from '@/lib/events';
 import { getFacility } from '@/modules/facilities/application/facility';
+import { withdrawOutstandingInvitations } from '@/modules/matching/application/assignment';
 import {
   canTransition,
   MAX_SHIFT_HOURS,
@@ -307,6 +308,14 @@ export async function cancelServiceRequest(
       data: { status: 'CANCELLED', cancelledAt: now, cancellationReason: input.reason },
     });
 
+    // Nobody should be left holding an offer for a shift that no longer exists.
+    const invitationsWithdrawn = await withdrawOutstandingInvitations(tx, {
+      requestId: request.id,
+      actorId: input.actorId,
+      reason: `The facility cancelled the shift: ${input.reason}`,
+      now,
+    });
+
     await recordAudit(tx, {
       action: 'service_request.cancelled',
       entityType: 'service_requests.service_requests',
@@ -316,7 +325,7 @@ export async function cancelServiceRequest(
       scopeId: input.facilityId,
       reason: input.reason,
       before: toView(request),
-      after: toView(updated),
+      after: { ...toView(updated), invitationsWithdrawn },
     });
 
     return toView(updated);
@@ -335,6 +344,9 @@ export interface ListServiceRequestsQuery {
   scopeId?: string;
   status?: ServiceRequestStatusValue;
   professionalCategoryId?: string;
+  search?: string;
+  from?: Date;
+  to?: Date;
   limit: number;
   cursor?: string;
 }
@@ -352,6 +364,13 @@ export async function listServiceRequests(
   if (query.scopeType !== 'PLATFORM' || query.scopeId) where.facilityId = query.scopeId;
   if (query.status) where.status = query.status;
   if (query.professionalCategoryId) where.professionalCategoryId = query.professionalCategoryId;
+  if (query.search) where.notes = { contains: query.search, mode: 'insensitive' };
+  if (query.from || query.to) {
+    where.startsAt = {
+      ...(query.from ? { gte: query.from } : {}),
+      ...(query.to ? { lte: query.to } : {}),
+    };
+  }
 
   const rows = await prisma.serviceRequest.findMany({
     where,

@@ -1,18 +1,111 @@
 'use client';
 
+import { useMemo } from 'react';
 import Link from 'next/link';
 import { useQueries, useQuery } from '@tanstack/react-query';
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts';
 import { ArrowRight, CalendarPlus, Receipt, Users, type LucideIcon } from 'lucide-react';
 import { api } from '@/lib/ui/api';
 import { useFacility, useFacilityId, useFacilityIds } from '@/lib/ui/facility';
 import { useSession } from '@/lib/ui/session';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from '@/components/ui/chart';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PageHeader } from '@/components/app/page-shell';
 
+/** Kobo on the axis would be six digits of noise; naira is what people say. */
+const naira = (kobo: number) => `₦${Math.round(kobo / 100).toLocaleString('en-NG')}`;
+
 interface Assignment {
   id: string;
+}
+
+interface ServiceRequestRow {
+  id: string;
+  status: string;
+  startsAt: string;
+  headcount: number;
+  confirmedCount?: number;
+}
+
+interface InvoiceRow {
+  grossKobo: number;
+  status: string;
+  periodStart: string;
+}
+
+/** Both charts read the same two validated colours the finance overview
+ * uses — see docs/interfaces.md: fixed slots of a categorical palette
+ * checked for contrast and colour-vision separation in both themes, not a
+ * hue picked per chart. */
+const FULFILMENT_CONFIG = {
+  needed: { label: 'People needed', color: 'hsl(var(--chart-2))' },
+  filled: { label: 'People confirmed', color: 'hsl(var(--chart-1))' },
+} satisfies ChartConfig;
+
+const SPEND_CONFIG = {
+  invoiced: { label: 'Invoiced', color: 'hsl(var(--chart-1))' },
+  paid: { label: 'Paid', color: 'hsl(var(--chart-2))' },
+} satisfies ChartConfig;
+
+function weekLabel(iso: string): string {
+  const date = new Date(iso);
+  // Monday of that week, so two shifts three days apart land in one bar
+  // instead of splitting across a week boundary nobody drew on a calendar.
+  const day = (date.getUTCDay() + 6) % 7;
+  const monday = new Date(date);
+  monday.setUTCDate(date.getUTCDate() - day);
+  return monday.toLocaleDateString('en-NG', { timeZone: 'Africa/Lagos', day: 'numeric', month: 'short' });
+}
+
+function weekSortKey(iso: string): string {
+  const date = new Date(iso);
+  const day = (date.getUTCDay() + 6) % 7;
+  const monday = new Date(date);
+  monday.setUTCDate(date.getUTCDate() - day);
+  return monday.toISOString().slice(0, 10);
+}
+
+function monthLabel(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-NG', {
+    timeZone: 'Africa/Lagos',
+    month: 'short',
+    year: '2-digit',
+  });
+}
+
+function monthSortKey(iso: string): string {
+  const date = new Date(iso);
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+/** Every page of a cursor-paginated list — a trend needs the whole history,
+ * not just the newest page. Capped so a very old facility degrades to an
+ * undercount rather than a long chain of requests. */
+async function fetchAllServiceRequests(facilityId: string): Promise<ServiceRequestRow[]> {
+  const rows: ServiceRequestRow[] = [];
+  let cursor: string | null = null;
+  for (let index = 0; index < 10; index += 1) {
+    const parts: string[] = [
+      'scopeType=FACILITY',
+      `scopeId=${facilityId}`,
+      'limit=200',
+      cursor ? `cursor=${cursor}` : '',
+    ].filter(Boolean);
+    const body: { requests?: ServiceRequestRow[]; nextCursor?: string | null } = await api.get(
+      `/api/v1/service-requests?${parts.join('&')}`,
+    );
+    rows.push(...(body.requests ?? []));
+    if (!body.nextCursor) break;
+    cursor = body.nextCursor;
+  }
+  return rows;
 }
 
 /**
@@ -142,6 +235,50 @@ export default function FacilityDashboard() {
   const nothingGranted =
     !can('service_request.read') && !can('attendance.record') && !can('timesheet.approve');
 
+  const canSeeFulfilment = can('service_request.read');
+  const canSeeSpend = can('invoice.read');
+
+  const requestHistory = useQuery({
+    queryKey: ['facility-request-history', facilityId],
+    queryFn: () => fetchAllServiceRequests(facilityId!),
+    enabled: ready && canSeeFulfilment,
+  });
+
+  const invoiceHistory = useQuery({
+    queryKey: ['facility-invoice-history', facilityId],
+    queryFn: () => api.get<{ invoices?: InvoiceRow[] }>(`/api/v1/invoices?facilityId=${facilityId}`),
+    enabled: ready && canSeeSpend,
+  });
+
+  // One bar per week, in headcount rather than shift count: a shift needing
+  // three people going unfilled is a bigger gap than one needing one, and a
+  // count of requests would show them as the same bar.
+  const fulfilment = useMemo(() => {
+    const buckets = new Map<string, { week: string; needed: number; filled: number }>();
+    for (const row of requestHistory.data ?? []) {
+      if (row.status === 'DRAFT') continue;
+      const key = weekSortKey(row.startsAt);
+      const bucket = buckets.get(key) ?? { week: weekLabel(row.startsAt), needed: 0, filled: 0 };
+      bucket.needed += row.headcount;
+      bucket.filled += Math.min(row.confirmedCount ?? 0, row.headcount);
+      buckets.set(key, bucket);
+    }
+    return [...buckets.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, value]) => value);
+  }, [requestHistory.data]);
+
+  /** Invoiced against paid, by the month the work was done. */
+  const spend = useMemo(() => {
+    const buckets = new Map<string, { month: string; invoiced: number; paid: number }>();
+    for (const row of invoiceHistory.data?.invoices ?? []) {
+      const key = monthSortKey(row.periodStart);
+      const bucket = buckets.get(key) ?? { month: monthLabel(row.periodStart), invoiced: 0, paid: 0 };
+      bucket.invoiced += row.grossKobo;
+      if (row.status === 'PAID') bucket.paid += row.grossKobo;
+      buckets.set(key, bucket);
+    }
+    return [...buckets.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, value]) => value);
+  }, [invoiceHistory.data]);
+
   return (
     <>
       <PageHeader
@@ -220,6 +357,78 @@ export default function FacilityDashboard() {
           ) : null}
         </div>
       )}
+
+      {!nothingGranted && (canSeeFulfilment || canSeeSpend) ? (
+        <div className="mt-6 grid gap-6 lg:grid-cols-2">
+          {canSeeFulfilment ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Staffing your shifts</CardTitle>
+                <CardDescription>
+                  People needed against people confirmed, by the week the shift falls in.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {requestHistory.isPending ? (
+                  <Skeleton className="h-[240px] w-full" />
+                ) : fulfilment.length === 0 ? (
+                  <p className="py-16 text-center text-sm text-muted-foreground">
+                    Not enough shift history yet to chart a trend.
+                  </p>
+                ) : (
+                  <ChartContainer config={FULFILMENT_CONFIG} className="h-[240px] w-full">
+                    <BarChart data={fulfilment} accessibilityLayer>
+                      <CartesianGrid vertical={false} strokeDasharray="3 3" />
+                      <XAxis dataKey="week" tickLine={false} axisLine={false} tickMargin={8} />
+                      <YAxis tickLine={false} axisLine={false} tickMargin={8} width={28} allowDecimals={false} />
+                      <ChartTooltip content={<ChartTooltipContent />} />
+                      <Bar dataKey="needed" fill="var(--color-needed)" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="filled" fill="var(--color-filled)" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ChartContainer>
+                )}
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {canSeeSpend ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">What you&rsquo;re spending</CardTitle>
+                <CardDescription>Invoiced against paid, by the month the work was done.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {invoiceHistory.isPending ? (
+                  <Skeleton className="h-[240px] w-full" />
+                ) : spend.length === 0 ? (
+                  <p className="py-16 text-center text-sm text-muted-foreground">
+                    Nothing invoiced yet.
+                  </p>
+                ) : (
+                  <ChartContainer config={SPEND_CONFIG} className="h-[240px] w-full">
+                    <BarChart data={spend} accessibilityLayer>
+                      <CartesianGrid vertical={false} strokeDasharray="3 3" />
+                      <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={8} />
+                      <YAxis
+                        tickLine={false}
+                        axisLine={false}
+                        tickMargin={8}
+                        width={64}
+                        tickFormatter={naira}
+                      />
+                      <ChartTooltip
+                        content={<ChartTooltipContent formatter={(value) => naira(Number(value))} />}
+                      />
+                      <Bar dataKey="invoiced" fill="var(--color-invoiced)" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="paid" fill="var(--color-paid)" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ChartContainer>
+                )}
+              </CardContent>
+            </Card>
+          ) : null}
+        </div>
+      ) : null}
     </>
   );
 }

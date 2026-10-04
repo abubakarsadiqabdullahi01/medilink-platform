@@ -175,7 +175,9 @@ export interface CreateFacilityParams {
  * representative cannot reach it is not something worth half-creating.
  */
 export async function createFacility(input: CreateFacilityParams): Promise<FacilityView> {
-  const facilityType = await prisma.facilityType.findUnique({ where: { id: input.facilityTypeId } });
+  const facilityType = await prisma.facilityType.findUnique({
+    where: { id: input.facilityTypeId },
+  });
   if (!facilityType) throw FacilityErrors.facilityTypeNotFound();
 
   const state = await prisma.state.findUnique({ where: { id: input.stateId } });
@@ -264,6 +266,8 @@ export interface ListFacilitiesQuery {
   scopeId?: string;
   status?: FacilityStatusValue;
   stateId?: string;
+  /** Matches the facility name or its CAC number. */
+  search?: string;
   limit: number;
   cursor?: string;
 }
@@ -285,6 +289,17 @@ export async function listFacilities(query: ListFacilitiesQuery): Promise<Facili
 
   if (query.status) where.status = query.status;
   if (query.stateId) where.stateId = query.stateId;
+
+  // Name or CAC number. An officer with a hospital's paperwork in front of
+  // them has one or the other, and "Self Registered Clinic 17443486" is not
+  // something anybody scrolls to find.
+  if (query.search) {
+    const search = query.search.trim();
+    where.OR = [
+      { name: { contains: search, mode: 'insensitive' } },
+      { cacNumber: { contains: search, mode: 'insensitive' } },
+    ];
+  }
 
   const rows = await prisma.facility.findMany({
     where,
@@ -388,7 +403,7 @@ export async function verifyFacility(input: VerifyFacilityParams): Promise<Facil
   if (!existing) throw FacilityErrors.facilityNotFound();
 
   // Nothing else stops a user holding both facility_owner and
-  // compliance_officer from verifying the facility they represent.
+  // administrator from verifying the facility they represent.
   if (existing.representativeUserId === input.verifierId) {
     throw FacilityErrors.cannotVerifyOwnFacility();
   }

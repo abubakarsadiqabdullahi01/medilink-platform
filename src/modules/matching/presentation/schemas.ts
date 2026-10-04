@@ -27,6 +27,12 @@ export const inviteSchema = z.object({
 });
 export type InviteInput = z.infer<typeof inviteSchema>;
 
+export const requestInvitationsSchema = z.object({
+  id: z.string().uuid(),
+  facilityId,
+});
+export type RequestInvitationsInput = z.infer<typeof requestInvitationsSchema>;
+
 export const respondSchema = z
   .object({
     id: z.string().uuid(),
@@ -59,6 +65,21 @@ export const listAssignmentsSchema = z.object({
   scopeType: z.enum(['SELF', 'FACILITY']),
   scopeId: z.string().uuid().optional(),
   status: z.enum(['CONFIRMED', 'CANCELLED', 'COMPLETED', 'NO_SHOW']).optional(),
+  /** Narrows to one shift's confirmations — the roster reads across all of
+   * them; a shift's own detail page reads exactly one. */
+  serviceRequestId: z.string().uuid().optional(),
+  /** Matches the practitioner's name or phone number. Meaningless, and
+   * ignored, at SELF scope — a practitioner is not searching for themselves. */
+  search: z.string().trim().max(120).optional(),
+  from: z.coerce.date().optional(),
+  to: z.coerce.date().optional(),
+  // Defaults to the max rather than a small page: several existing callers
+  // (dashboard tiles, the practitioner's own timesheet history) read this
+  // list's length as a count and pass no limit at all. A small default would
+  // silently truncate those the day anyone's history passed it. Pages that
+  // actually paginate ask for a smaller one explicitly.
+  limit: z.coerce.number().int().min(1).max(200).default(200),
+  cursor: z.string().uuid().optional(),
 });
 export type ListAssignmentsInput = z.infer<typeof listAssignmentsSchema>;
 

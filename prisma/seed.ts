@@ -11,7 +11,7 @@
  * which is a real limitation rather than an omission.
  */
 import { PrismaClient } from '@prisma/client';
-import { PERMISSIONS, ROLE_PERMISSIONS } from '../src/lib/authz/permissions';
+import { syncRoles } from '../src/lib/authz/sync-roles';
 import { JOB_DEFINITIONS } from '../src/worker/jobs';
 
 const prisma = new PrismaClient();
@@ -22,31 +22,14 @@ import { NIGERIA, TOTAL_LGAS, TOTAL_STATES } from './data/nigeria';
 const OWNER_OPERATIONS = 'operations-officer';
 const OWNER_FINANCE = 'finance-officer';
 
+/**
+ * The permission catalogue and the role bundles.
+ *
+ * One line, because the logic is shared with the two demo scripts — they used
+ * to carry their own copies and undo this one. See src/lib/authz/sync-roles.
+ */
 async function seedPermissionsAndRoles() {
-  for (const [key, description] of Object.entries(PERMISSIONS)) {
-    await prisma.permission.upsert({
-      where: { key },
-      update: { description },
-      create: { key, description },
-    });
-  }
-
-  for (const [roleKey, permissionKeys] of Object.entries(ROLE_PERMISSIONS)) {
-    const role = await prisma.role.upsert({
-      where: { key: roleKey },
-      update: { name: roleKey },
-      create: { key: roleKey, name: roleKey },
-    });
-
-    for (const permissionKey of permissionKeys) {
-      const permission = await prisma.permission.findUniqueOrThrow({ where: { key: permissionKey } });
-      await prisma.rolePermission.upsert({
-        where: { roleId_permissionId: { roleId: role.id, permissionId: permission.id } },
-        update: {},
-        create: { roleId: role.id, permissionId: permission.id },
-      });
-    }
-  }
+  await syncRoles(prisma);
 }
 
 async function seedCategoriesAndSpecialties() {
@@ -66,20 +49,50 @@ async function seedCategoriesAndSpecialties() {
     });
   }
 
-  const doctor = await prisma.professionalCategory.findUniqueOrThrow({ where: { key: 'doctor' } });
-  const specialties = [
-    'general_practice', 'internal_medicine', 'paediatrics', 'obstetrics_gynaecology',
-    'general_surgery', 'anaesthesia', 'emergency_medicine', 'family_medicine',
-    'radiology', 'pathology', 'psychiatry', 'ophthalmology',
-  ];
+  /**
+   * Specialties, per category.
+   *
+   * Nursing had none, which made "Nurse / Midwife" a single undifferentiated
+   * pool — so a theatre asking for a perioperative nurse and a labour ward
+   * asking for a midwife were posting the same shift, and the matcher could
+   * not tell a candidate who had done neither from one who had done both.
+   * They are three distinct trainings under one regulator, which is exactly
+   * what a specialty is for: the NMCN registration is shared, the competence
+   * is not.
+   *
+   * Named as a nurse would describe themselves rather than as a ward would
+   * describe the post, because the person picking from this list is the
+   * practitioner filling in their own profile.
+   */
+  const specialtiesByCategory: Record<string, string[]> = {
+    doctor: [
+      'general_practice', 'internal_medicine', 'paediatrics', 'obstetrics_gynaecology',
+      'general_surgery', 'anaesthesia', 'emergency_medicine', 'family_medicine',
+      'radiology', 'pathology', 'psychiatry', 'ophthalmology',
+    ],
+    nurse: ['general_nursing', 'perioperative_nursing', 'midwifery'],
+  };
 
-  for (const key of specialties) {
-    const name = key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-    await prisma.specialty.upsert({
-      where: { key },
-      update: { name, categoryId: doctor.id, owner: OWNER_COMPLIANCE },
-      create: { key, name, categoryId: doctor.id, owner: OWNER_COMPLIANCE },
+  const names: Record<string, string> = {
+    general_nursing: 'General Nursing',
+    perioperative_nursing: 'Perioperative (Pre-op / Theatre) Nursing',
+    midwifery: 'Midwifery',
+  };
+
+  for (const [categoryKey, keys] of Object.entries(specialtiesByCategory)) {
+    const category = await prisma.professionalCategory.findUniqueOrThrow({
+      where: { key: categoryKey },
     });
+
+    for (const key of keys) {
+      const name =
+        names[key] ?? key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+      await prisma.specialty.upsert({
+        where: { key },
+        update: { name, categoryId: category.id, owner: OWNER_COMPLIANCE },
+        create: { key, name, categoryId: category.id, owner: OWNER_COMPLIANCE },
+      });
+    }
   }
 }
 

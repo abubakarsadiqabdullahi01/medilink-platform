@@ -358,13 +358,51 @@ export async function getInvoice(invoiceId: string): Promise<InvoiceView> {
   return toView(row);
 }
 
-export async function listInvoices(facilityId: string): Promise<InvoiceView[]> {
+export interface InvoiceLineWithPractitioner extends InvoiceLineView {
+  practitionerName: string;
+}
+
+export interface InvoiceQueueRow extends Omit<InvoiceView, 'lines'> {
+  lines: InvoiceLineWithPractitioner[];
+}
+
+/**
+ * A facility's invoices, with a name against every line.
+ *
+ * `invoice_lines.practitioner_id` carries no Prisma relation — struck once a
+ * shift is billed, an invoice line is meant to outlive the assignment it
+ * came from, and a relation would tie its existence to a row in another
+ * schema. Named here the same way an unrelated id gets named everywhere else
+ * in this codebase: a second query, batched, and merged by id.
+ */
+export async function listInvoices(facilityId: string): Promise<InvoiceQueueRow[]> {
   const rows = await prisma.invoice.findMany({
     where: { facilityId },
     include: { lines: true },
     orderBy: { createdAt: 'desc' },
   });
-  return rows.map(toView);
+
+  const practitionerIds = [
+    ...new Set(rows.flatMap((row) => row.lines.map((line) => line.practitionerId))),
+  ];
+  const people = practitionerIds.length
+    ? await prisma.user.findMany({
+        where: { id: { in: practitionerIds } },
+        select: { id: true, fullName: true },
+      })
+    : [];
+  const nameById = new Map(people.map((person) => [person.id, person.fullName]));
+
+  return rows.map((row) => {
+    const view = toView(row);
+    return {
+      ...view,
+      lines: view.lines.map((line) => ({
+        ...line,
+        practitionerName: nameById.get(line.practitionerId) ?? 'Unknown practitioner',
+      })),
+    };
+  });
 }
 
 /**

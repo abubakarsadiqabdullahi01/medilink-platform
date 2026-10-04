@@ -14,15 +14,12 @@
  *   docker compose exec web pnpm tsx scripts/bootstrap-demo.ts
  */
 import { PrismaClient } from '@prisma/client';
-import { hashPassword } from '../src/lib/password';
-import { ROLE_PERMISSIONS, type Permission } from '../src/lib/authz/permissions';
+import type { ROLE_PERMISSIONS } from '../src/lib/authz/permissions';
+import { DEMO_PASSWORD, assertLocal, demoPasswordHash, syncRoles } from './support/demo';
 
 const prisma = new PrismaClient();
 
-/** Every demo account shares it. This is not a secret and is not meant to be. */
-export const DEMO_PASSWORD = 'Medilink-demo-2026';
-
-const APP_ENV = process.env.APP_ENV ?? 'local';
+export { DEMO_PASSWORD };
 
 interface ActorSpec {
   key: string;
@@ -66,7 +63,7 @@ const FACILITY_STAFF: ActorSpec[] = [
     key: 'scheduler',
     fullName: 'Demo Facility Scheduler',
     phone: '+2348031100004',
-    role: 'facility_scheduler',
+    role: 'facility_administrator',
     scopeType: 'FACILITY',
   },
   {
@@ -88,14 +85,14 @@ const ACTORS: ActorSpec[] = [
     key: 'operations',
     fullName: 'Demo Operations Officer',
     phone: '+2348031100001',
-    role: 'operations_officer',
+    role: 'administrator',
     scopeType: 'PLATFORM',
   },
   {
     key: 'compliance',
     fullName: 'Demo Compliance Officer',
     phone: '+2348031100002',
-    role: 'compliance_officer',
+    role: 'administrator',
     scopeType: 'PLATFORM',
   },
   {
@@ -107,31 +104,8 @@ const ACTORS: ActorSpec[] = [
   },
 ];
 
-async function ensureRole(key: string, permissions: Permission[]) {
-  const role = await prisma.role.upsert({
-    where: { key },
-    update: { name: key },
-    create: { key, name: key },
-  });
-
-  for (const permission of permissions) {
-    const perm = await prisma.permission.upsert({
-      where: { key: permission },
-      update: {},
-      create: { key: permission, description: permission },
-    });
-    await prisma.rolePermission.upsert({
-      where: { roleId_permissionId: { roleId: role.id, permissionId: perm.id } },
-      update: {},
-      create: { roleId: role.id, permissionId: perm.id },
-    });
-  }
-
-  return role;
-}
-
 async function ensureActor(spec: ActorSpec, facilityId?: string) {
-  const passwordHash = await hashPassword(DEMO_PASSWORD);
+  const passwordHash = await demoPasswordHash();
 
   const user = await prisma.user.upsert({
     where: { phone: spec.phone },
@@ -145,7 +119,11 @@ async function ensureActor(spec: ActorSpec, facilityId?: string) {
     },
   });
 
-  const role = await ensureRole(spec.role, ROLE_PERMISSIONS[spec.role] ?? []);
+  // The role and its bundle are already in place: `syncRoles` runs first in
+  // main(). Looking it up rather than upserting it here is what stopped this
+  // script resetting role names to their slugs and leaving behind
+  // permissions the code had removed.
+  const role = await prisma.role.findUniqueOrThrow({ where: { key: spec.role } });
 
   const scopeId =
     spec.scopeType === 'SELF' ? user.id : spec.scopeType === 'FACILITY' ? (facilityId ?? null) : null;
@@ -153,12 +131,25 @@ async function ensureActor(spec: ActorSpec, facilityId?: string) {
   // findFirst then create, rather than upsert: Prisma will not accept a null
   // inside a compound unique's `where`, and a PLATFORM grant's scopeId is
   // null by definition — the scope is "everywhere".
+  //
+  // `revokedAt: null` in the lookup is not decoration. Without it this found
+  // whichever row came first, including a revoked one, and un-revoked it —
+  // so an account that had been revoked and re-granted through the API came
+  // out of a bootstrap run holding two live grants. The partial unique index
+  // added in 20261004170000_one_live_grant now refuses that outright; this
+  // makes the script do the right thing rather than hit the index.
   const existing = await prisma.userRole.findFirst({
-    where: { userId: user.id, roleId: role.id, scopeType: spec.scopeType, scopeId },
+    where: {
+      userId: user.id,
+      roleId: role.id,
+      scopeType: spec.scopeType,
+      scopeId,
+      revokedAt: null,
+    },
   });
 
   if (existing) {
-    await prisma.userRole.update({ where: { id: existing.id }, data: { revokedAt: null } });
+    // Already live and already correct. Nothing to do.
   } else {
     await prisma.userRole.create({
       data: { userId: user.id, roleId: role.id, scopeType: spec.scopeType, scopeId },
@@ -169,11 +160,11 @@ async function ensureActor(spec: ActorSpec, facilityId?: string) {
 }
 
 async function main() {
-  if (APP_ENV !== 'local') {
-    throw new Error(
-      `Refusing to run with APP_ENV=${APP_ENV}. This creates administrators with a known password.`,
-    );
-  }
+  assertLocal('bootstrap-demo');
+
+  // Shared with prisma/seed.ts and seed-demo.ts, so a bootstrapped database
+  // and a seeded one agree about what each role may do.
+  await syncRoles(prisma);
 
   const actors = [];
   for (const spec of ACTORS) {
