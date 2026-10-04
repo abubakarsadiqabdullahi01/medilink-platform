@@ -57,8 +57,8 @@ business near production. It is idempotent, so run it as often as you like.
 
 | Account | Phone | Role |
 | --- | --- | --- |
-| Operations | `+2348031100001` | `operations_officer` at PLATFORM |
-| Compliance | `+2348031100002` | `compliance_officer` at PLATFORM |
+| Operations | `+2348031100001` | `administrator` at PLATFORM |
+| Compliance | `+2348031100002` | `administrator` at PLATFORM |
 | Super administrator | `+2348031100003` | everything, at PLATFORM |
 
 Password for all three: `Medilink-demo-2026`. Not a secret and not meant to be.
@@ -127,11 +127,11 @@ sixth facility the pilot does not explain.
 
 ## What it does not cover
 
-- **Anything a browser does.** The consoles are walked by eye and by
-  `scripts/simulate.py`; this script drives the API directly and never renders
-  a page.
+- **Anything a browser does.** This script drives the API directly and never
+  renders a page. The browser journeys below do.
 - **File upload.** Credential documents, facility licences and dispute
   evidence all go to a signed Tigris URL, and the walk does not push bytes.
+  The onboarding journey does, for a credential document.
 - **The scheduled sweeps.** They run hourly in the worker; `docs/scheduled-
   jobs.md` covers forcing one.
 - **Taking an actual payment.** Modules 11 and 12 are built — rate cards,
@@ -139,3 +139,64 @@ sixth facility the pilot does not explain.
   refuses to run outside `local`, so this walk stops at a payment recorded
   rather than a payment taken. `scripts/seed-demo.ts` carries invoices and
   payouts through every state if you want to look at them.
+
+## The browser journeys
+
+`pnpm test:e2e` drives the three consoles in a real browser with Playwright:
+the same stories as the walk above, but through the pages a person uses.
+
+```bash
+docker compose up -d
+```
+
+```bash
+E2E_BROWSER_CHANNEL=chrome pnpm test:e2e
+```
+
+`E2E_BROWSER_CHANNEL=chrome` (or `msedge`) uses the browser already on the
+machine; leave it out to use Playwright's own Chromium after
+`pnpm exec playwright install chromium`. CI does the latter.
+
+| File | The story |
+| --- | --- |
+| `auth.spec.ts` | Sign up through the three-step form with the real one-time code; each role's sign-in lands in its own console; a wrong code, a wrong password and a signed-out visitor are refused. |
+| `staffing.spec.ts` | A scheduler publishes a shift, ranks candidates, offers it; the nurse accepts; the scheduler confirms her. |
+| `attendance.spec.ts` | The ward reads out a check-in code, the nurse types it in, then the same for check-out; a wrong code changes nothing. |
+| `after-the-shift.spec.ts` | A shift recorded by hand, priced by the worker, submitted, approved, disputed, and decided by an administrator. |
+| `onboarding.spec.ts` | A newcomer builds a profile, submits a credential by number and one by uploaded document; an administrator verifies one and asks for more on the other. |
+| `oversight.spec.ts` | An administrator verifies a waiting facility; a ward reports an incident and an administrator closes it with a finding. |
+| `mobile.spec.ts` | Every practitioner page at phone size, with no sideways scroll, and the menu working. |
+
+**Their world.** Global setup runs `scripts/e2e-world.ts`, which wipes what
+the previous run left and builds a small known starting point: an
+administrator, a verified hospital with its owner and scheduler, a hospital
+waiting for verification, a nurse cleared to work, one who has only just
+signed up, and two of the nurse's shifts. Everything it makes is tagged — the
+`e2e.medilink.test` email domain, the `RC99` CAC prefix, phones on
+`+23480399000NN` — so it shares nothing with the demo seed or the bootstrap,
+and the demo data a local run shares the database with is left alone.
+Locally it runs inside the `web` container, because a native PostgreSQL on
+some Windows machines answers port 5432 before Docker does.
+
+**One-time codes.** The journeys sign up through the real form, so they need
+the code it sent. `SMS_CONSOLE_OUTBOX` makes the console SMS adapter append
+each message to `.e2e/sms-outbox.jsonl` as well as printing it;
+`docker-compose.yml` sets it for `web` and `worker`, and the console adapter
+refuses to run outside `local` either way.
+
+**The worker has to be running.** The practitioner grant after sign-up and
+every timesheet arrive through the outbox; global setup refuses to start if an
+event has been waiting more than 90 seconds.
+
+**If a journey fails on a fresh container**, it is usually `next dev`
+compiling a route on its first request. Global setup requests every page and
+route the journeys use before they run, but a restart in the middle of a run
+undoes that. A `Cannot find module './NNNN.js'` or a missing
+`routes-manifest.json` in the `web` log means something ran `pnpm build` into
+the dev server's `.next`; clear it and restart:
+
+```bash
+docker compose exec web sh -c "rm -rf /app/.next/*" && docker compose restart web
+```
+
+Run `pnpm build` on the host, or in a separate container, never inside `web`.

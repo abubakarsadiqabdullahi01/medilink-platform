@@ -51,7 +51,7 @@ test('the console menu opens on a phone and reaches another page', async ({ page
   await expect(page.getByRole('heading', { level: 1, name: /^Hello, / })).toBeVisible();
 
   // The sidebar is off-canvas at this width; its trigger has to work.
-  await page.getByRole('button', { name: /toggle sidebar|menu/i }).first().click();
+  await page.getByRole('button', { name: 'Open navigation' }).click();
   await page.getByRole('link', { name: 'My shifts' }).click();
   await expect(page).toHaveURL(/\/practitioner\/shifts$/);
 });

@@ -132,6 +132,11 @@ jobs:
     name: End-to-end
     runs-on: ubuntu-latest
     needs: [quality]
+    env:
+      # The journeys sign up through the real form, so they read one-time
+      # codes off the console SMS adapter — which only runs in local.
+      APP_ENV: local
+      SMS_CONSOLE_OUTBOX: .e2e/sms-outbox.jsonl
     services:
       postgres:
         image: postgres:16
@@ -153,16 +158,30 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # MinIO stands in for Tigris, as it does in docker-compose. Started by
+      # hand because a service container cannot be given `server /data`.
+      - name: object storage
+        run: |
+          docker run -d --name minio -p 9000:9000             -e MINIO_ROOT_USER=medilink -e MINIO_ROOT_PASSWORD=medilink-secret             minio/minio server /data
+          for i in $(seq 1 30); do curl -sf http://localhost:9000/minio/health/live && break; sleep 2; done
+          docker run --rm --network host --entrypoint sh minio/mc -c             "mc alias set local http://localhost:9000 medilink medilink-secret && mc mb --ignore-existing local/medilink-documents"
       - run: pnpm prisma migrate deploy && pnpm db:seed
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm build
+      # Global setup waits for the app, warms it and builds the journeys'
+      # world with `pnpm tsx scripts/e2e-world.ts`. The worker has to run
+      # too: sign-up's grant and every timesheet arrive through the outbox.
       - name: start and test
         run: |
-          pnpm start &
-          npx wait-on http://localhost:3000/api/v1/health --timeout 60000
+          pnpm start > app.log 2>&1 &
+          pnpm worker > worker.log 2>&1 &
           pnpm test:e2e
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: playwright-report
-          path: playwright-report/
+          path: |
+            playwright-report/
+            test-results/
+            app.log
+            worker.log

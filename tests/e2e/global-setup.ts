@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process';
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import type { FullConfig } from '@playwright/test';
 import { SMS_OUTBOX } from './support/otp';
 import { WORLD_FILE, type World } from './support/world';
@@ -43,9 +43,56 @@ async function waitForApp(baseURL: string): Promise<void> {
   throw new Error(`The app at ${baseURL} never became healthy (${last}). Is it running?`);
 }
 
+/**
+ * Every page and API route the journeys touch, requested once before they run.
+ *
+ * `next dev` compiles a route on its first request, and after a restart that
+ * can take longer than any sensible assertion timeout — the failures that
+ * produces read as product bugs and are not. Unauthenticated requests are
+ * enough: the compile happens before the 401. Against `next start` on CI this
+ * is a few dozen fast requests.
+ */
+const NIL = '00000000-0000-0000-0000-000000000000';
+const WARM = [
+  '/', '/login', '/register',
+  '/admin', '/admin/credentials', '/admin/facilities', '/admin/incidents', '/admin/disputes',
+  '/facility', '/facility/shifts', `/facility/shifts/${NIL}`, '/facility/roster',
+  '/facility/timesheets', '/facility/incidents',
+  '/practitioner', '/practitioner/offers', '/practitioner/shifts', '/practitioner/timesheets',
+  '/practitioner/credentials', '/practitioner/profile', '/practitioner/availability',
+  '/api/v1/auth/session', '/api/v1/reference', '/api/v1/service-requests',
+  `/api/v1/service-requests/${NIL}`, `/api/v1/service-requests/${NIL}/invitations`,
+  `/api/v1/service-requests/${NIL}/match`, `/api/v1/service-requests/${NIL}/invite`,
+  `/api/v1/service-requests/${NIL}/confirm`, `/api/v1/service-requests/${NIL}/publish`,
+  '/api/v1/invitations', `/api/v1/invitations/${NIL}/respond`, '/api/v1/assignments',
+  `/api/v1/assignments/${NIL}/attendance`, `/api/v1/assignments/${NIL}/attendance/token`,
+  `/api/v1/assignments/${NIL}/attendance/present`, `/api/v1/assignments/${NIL}/attendance/manual`,
+  `/api/v1/assignments/${NIL}/timesheet`, `/api/v1/assignments/${NIL}/timesheet/submit`,
+  `/api/v1/assignments/${NIL}/timesheet/review`, `/api/v1/assignments/${NIL}/disputes`,
+  '/api/v1/disputes', `/api/v1/disputes/${NIL}/review`, `/api/v1/disputes/${NIL}/resolve`,
+  '/api/v1/credentials', '/api/v1/credentials/document-upload-url',
+  `/api/v1/credentials/${NIL}/review`, `/api/v1/credentials/${NIL}/document-url`,
+  '/api/v1/facilities', `/api/v1/facilities/${NIL}`, `/api/v1/facilities/${NIL}/verify`,
+  '/api/v1/incidents', '/api/v1/incidents/queue', `/api/v1/incidents/${NIL}`,
+  `/api/v1/incidents/${NIL}/review`, `/api/v1/incidents/${NIL}/close`,
+  '/api/v1/practitioners/me', '/api/v1/audit',
+];
+
+async function warm(baseURL: string): Promise<void> {
+  const queue = [...WARM];
+  const lane = async () => {
+    for (let path = queue.shift(); path; path = queue.shift()) {
+      await fetch(`${baseURL}${path}`).catch(() => undefined);
+    }
+  };
+  // A few at a time: the dev server compiles in one process either way.
+  await Promise.all([lane(), lane(), lane()]);
+}
+
 export default async function globalSetup(config: FullConfig): Promise<void> {
   const baseURL = config.projects[0]?.use.baseURL ?? 'http://localhost:3000';
   await waitForApp(baseURL);
+  await warm(baseURL);
 
   // A fresh outbox each run, so a code from yesterday's run can never be
   // mistaken for today's.
@@ -55,7 +102,6 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
   const command = process.env.E2E_WORLD_COMMAND ?? DEFAULT_COMMAND;
   execSync(command, { stdio: ['ignore', 'ignore', 'inherit'], timeout: 180_000 });
 
-  const { readFileSync } = await import('node:fs');
   const world = JSON.parse(readFileSync(WORLD_FILE, 'utf8')) as World;
   if (world.workerLagSeconds > MAX_WORKER_LAG_SECONDS) {
     throw new Error(

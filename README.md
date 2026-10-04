@@ -79,14 +79,20 @@ pnpm dev
 ```bash
 pnpm verify            # lint, typecheck, unit tests — run before every push
 pnpm test:integration  # one suite per module, against a real database
-pnpm test:e2e          # Playwright, needs the app running
+pnpm test:e2e          # Playwright journeys through all three consoles; needs web + worker
 pnpm db:updown         # migrate down and up again on an empty database
 ```
 
 `pnpm test:integration` creates and migrates `medilink_test`, separate from the
 development database because it truncates between cases. Run it inside the
 container — `docker compose exec web pnpm test:integration` — unless the host
-can reach PostgreSQL directly.
+can reach PostgreSQL directly. Two runs at once truncate each other's tables;
+give a second one its own database with
+`-e TEST_DATABASE_URL=postgresql://medilink:medilink@db:5432/medilink_other_test`.
+
+`pnpm test:e2e` builds its own world first and drives the consoles in a
+browser; `E2E_BROWSER_CHANNEL=chrome` uses the Chrome already installed. See
+"The browser journeys" in `docs/end-to-end.md`.
 
 ## Layout
 
