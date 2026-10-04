@@ -33,6 +33,7 @@ for (const [path, heading] of [
   ['/practitioner/offers', 'Offers'],
   ['/practitioner/shifts', 'My shifts'],
   ['/practitioner/timesheets', 'Timesheets'],
+  ['/practitioner/earnings', 'Earnings'],
   ['/practitioner/credentials', 'Credentials'],
   ['/practitioner/profile', 'Profile'],
   ['/practitioner/availability', 'Availability'],

@@ -15,6 +15,7 @@ import { WORLD_FILE, type World } from './support/world';
  *
  *   CI                    pnpm tsx scripts/e2e-world.ts
  *   local (the default)   docker compose exec -T web pnpm tsx scripts/e2e-world.ts
+ *   E2E_SERVICE=e2e       the same, in the built `e2e` service instead
  *   anything else         E2E_WORLD_COMMAND="…"
  *
  * Both write into the repository (the web container bind-mounts it at /app),
@@ -22,7 +23,7 @@ import { WORLD_FILE, type World } from './support/world';
  */
 const DEFAULT_COMMAND = process.env.CI
   ? 'pnpm tsx scripts/e2e-world.ts'
-  : 'docker compose exec -T web pnpm tsx scripts/e2e-world.ts';
+  : `docker compose exec -T ${process.env.E2E_SERVICE ?? 'web'} pnpm tsx scripts/e2e-world.ts`;
 
 /** Longer than this and the worker is not keeping up, or not running. */
 const MAX_WORKER_LAG_SECONDS = 90;
@@ -56,6 +57,7 @@ const NIL = '00000000-0000-0000-0000-000000000000';
 const WARM = [
   '/', '/login', '/register',
   '/admin', '/admin/credentials', '/admin/facilities', '/admin/incidents', '/admin/disputes',
+  '/admin/invoices', '/admin/payouts', '/facility/invoices', '/practitioner/earnings',
   '/facility', '/facility/shifts', `/facility/shifts/${NIL}`, '/facility/roster',
   '/facility/timesheets', '/facility/incidents',
   '/practitioner', '/practitioner/offers', '/practitioner/shifts', '/practitioner/timesheets',
@@ -75,7 +77,9 @@ const WARM = [
   '/api/v1/facilities', `/api/v1/facilities/${NIL}`, `/api/v1/facilities/${NIL}/verify`,
   '/api/v1/incidents', '/api/v1/incidents/queue', `/api/v1/incidents/${NIL}`,
   `/api/v1/incidents/${NIL}/review`, `/api/v1/incidents/${NIL}/close`,
-  '/api/v1/practitioners/me', '/api/v1/audit',
+  '/api/v1/practitioners/me', '/api/v1/audit', '/api/v1/invoices', '/api/v1/payouts',
+  `/api/v1/invoices/${NIL}/issue`, `/api/v1/invoices/${NIL}/pay`, `/api/v1/payouts/${NIL}/release`,
+  '/api/v1/practitioners',
 ];
 
 async function warm(baseURL: string): Promise<void> {

@@ -484,6 +484,40 @@ describe('paying a practitioner', () => {
     );
     expect(self.status).toBe(403);
   });
+
+  it('tells a practitioner what they are owed as well as what has been paid', async () => {
+    const world = await buildWorld();
+    await grant({
+      userId: world.practitionerId,
+      roleKey: 'practitioner',
+      permissions: ['invoice.read'],
+      scopeType: 'SELF',
+      scopeId: world.practitionerId,
+    });
+    await generateInvoice(period(world));
+    await issueSession({ userId: world.practitionerId });
+
+    const read = async () => {
+      const response = await getPayoutsRoute(
+        new Request('http://localhost/api/v1/payouts?scopeType=SELF'),
+      );
+      expect(response.status).toBe(200);
+      return (await response.json()) as { payouts: unknown[]; owedKobo: number };
+    };
+
+    // Credited when the work was invoiced, and nothing paid out yet.
+    expect(await read()).toEqual({ payouts: [], owedKobo: 4_000_000 });
+
+    const payout = await preparePayout({
+      practitionerId: world.practitionerId,
+      actorId: world.financeId,
+    });
+    await releasePayout({ payoutId: payout.id, actorId: world.financeId });
+
+    const after = await read();
+    expect(after.payouts).toHaveLength(1);
+    expect(after.owedKobo).toBe(await amountOwed(world.practitionerId));
+  });
 });
 
 describe('invoice status', () => {

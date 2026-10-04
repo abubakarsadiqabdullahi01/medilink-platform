@@ -145,13 +145,29 @@ sixth facility the pilot does not explain.
 `pnpm test:e2e` drives the three consoles in a real browser with Playwright:
 the same stories as the walk above, but through the pages a person uses.
 
+Run them against the built app, not the dev server. The `e2e` service builds
+and serves the app the way production does, on port 3100, into its own
+`.next-e2e` — so nothing done to `web` in the meantime (a restart, a build)
+can pull the app out from under a run, and no route is compiled on its first
+request. The whole suite takes under a minute that way, against ten or more
+on `next dev`.
+
 ```bash
 docker compose up -d
 ```
 
 ```bash
-E2E_BROWSER_CHANNEL=chrome pnpm test:e2e
+docker compose --profile e2e up -d e2e
 ```
+
+```bash
+APP_URL=http://localhost:3100 E2E_SERVICE=e2e E2E_BROWSER_CHANNEL=chrome pnpm test:e2e
+```
+
+The service borrows `web`'s image and installed `node_modules`, so starting it
+needs no network. It builds once when it starts; after changing code,
+`docker compose --profile e2e restart e2e` rebuilds. Against the dev server
+instead, leave out `APP_URL` and `E2E_SERVICE`.
 
 `E2E_BROWSER_CHANNEL=chrome` (or `msedge`) uses the browser already on the
 machine; leave it out to use Playwright's own Chromium after
@@ -165,13 +181,16 @@ machine; leave it out to use Playwright's own Chromium after
 | `after-the-shift.spec.ts` | A shift recorded by hand, priced by the worker, submitted, approved, disputed, and decided by an administrator. |
 | `onboarding.spec.ts` | A newcomer builds a profile, submits a credential by number and one by uploaded document; an administrator verifies one and asks for more on the other. |
 | `oversight.spec.ts` | An administrator verifies a waiting facility; a ward reports an incident and an administrator closes it with a finding. |
+| `money.spec.ts` | An administrator invoices approved work and issues it; the hospital sees what it owes; payment is recorded; the nurse sees what she is owed, and is paid. |
+| `multisite.spec.ts` | Somebody at two hospitals chooses which one the facility console acts for, and every page follows. |
 | `mobile.spec.ts` | Every practitioner page at phone size, with no sideways scroll, and the menu working. |
 
 **Their world.** Global setup runs `scripts/e2e-world.ts`, which wipes what
 the previous run left and builds a small known starting point: an
 administrator, a verified hospital with its owner and scheduler, a hospital
 waiting for verification, a nurse cleared to work, one who has only just
-signed up, and two of the nurse's shifts. Everything it makes is tagged — the
+signed up, a scheduler at both hospitals, and three of the nurse's shifts —
+one worked and approved yesterday, one nearly over, one about to start. Everything it makes is tagged — the
 `e2e.medilink.test` email domain, the `RC99` CAC prefix, phones on
 `+23480399000NN` — so it shares nothing with the demo seed or the bootstrap,
 and the demo data a local run shares the database with is left alone.
@@ -188,7 +207,7 @@ refuses to run outside `local` either way.
 every timesheet arrive through the outbox; global setup refuses to start if an
 event has been waiting more than 90 seconds.
 
-**If a journey fails on a fresh container**, it is usually `next dev`
+**If a journey fails against the dev server**, it is usually `next dev`
 compiling a route on its first request. Global setup requests every page and
 route the journeys use before they run, but a restart in the middle of a run
 undoes that. A `Cannot find module './NNNN.js'` or a missing

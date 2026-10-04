@@ -6,7 +6,7 @@ import { useQueries, useQuery } from '@tanstack/react-query';
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts';
 import { ArrowRight, CalendarPlus, Receipt, Users, type LucideIcon } from 'lucide-react';
 import { api } from '@/lib/ui/api';
-import { useFacility, useFacilityId, useFacilityIds } from '@/lib/ui/facility';
+import { useFacility, useFacilityId } from '@/lib/ui/facility';
 import { useSession } from '@/lib/ui/session';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -170,7 +170,6 @@ function Tile({
 
 export default function FacilityDashboard() {
   const session = useSession();
-  const facilityIds = useFacilityIds();
   const facilityId = useFacilityId();
   const facility = useFacility(facilityId);
 
@@ -285,19 +284,6 @@ export default function FacilityDashboard() {
         title={facility.data?.name ?? 'Your facility'}
         description="What this facility has open, and what is waiting on somebody here."
       />
-
-      {/* Somebody who works at two hospitals is shown the first of them, and
-          was shown it silently. Switching is not built; saying which one is
-          in view is the least this owes them. */}
-      {facilityIds.length > 1 ? (
-        <Alert variant="info" className="mb-6">
-          <AlertDescription>
-            This account holds grants at {facilityIds.length} facilities. Everything in this console
-            is for <strong>{facility.data?.name ?? 'the first of them'}</strong> only — switching
-            between them is not built yet.
-          </AlertDescription>
-        </Alert>
-      ) : null}
 
       {unverified ? (
         <Alert variant="warning" className="mb-6">

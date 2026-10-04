@@ -30,6 +30,7 @@
   "ignorePatterns": [
     "node_modules/",
     ".next/",
+    ".next-e2e/",
     "coverage/",
     "playwright-report/",
     "next-env.d.ts"

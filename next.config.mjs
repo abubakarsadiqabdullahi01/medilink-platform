@@ -1,6 +1,13 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  /**
+   * Where the build goes. Only the browser journeys' server changes it
+   * (docker-compose.yml, service `e2e`), so it can build and serve beside the
+   * dev server without either one overwriting the other's output — a
+   * production build written into the dev server's `.next` breaks it.
+   */
+  distDir: process.env.NEXT_DIST_DIR || '.next',
   poweredByHeader: false,
   /**
    * @node-rs/argon2 resolves to a prebuilt native .node addon. Webpack has

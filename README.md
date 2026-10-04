@@ -91,7 +91,9 @@ give a second one its own database with
 `-e TEST_DATABASE_URL=postgresql://medilink:medilink@db:5432/medilink_other_test`.
 
 `pnpm test:e2e` builds its own world first and drives the consoles in a
-browser; `E2E_BROWSER_CHANNEL=chrome` uses the Chrome already installed. See
+browser. Run it against the built app — `docker compose --profile e2e up -d
+e2e`, then `APP_URL=http://localhost:3100 E2E_SERVICE=e2e pnpm test:e2e` —
+and `E2E_BROWSER_CHANNEL=chrome` uses the Chrome already installed. See
 "The browser journeys" in `docs/end-to-end.md`.
 
 ## Layout

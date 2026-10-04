@@ -7,8 +7,9 @@
  * a small, known starting point: a platform administrator, a verified
  * hospital with its owner and scheduler, a hospital waiting for verification,
  * a practitioner who is fully cleared to work, one who has only just signed
- * up, one shift already worked and waiting to be recorded, and one about to
- * start.
+ * up, a scheduler who works at both hospitals, and three of the nurse's
+ * shifts: one worked and approved yesterday, one nearly over and waiting to be
+ * recorded, and one about to start.
  *
  * Everything is built through the application's own functions, the same as
  * `seed-demo.ts`, so a journey starts from state the product could actually
@@ -51,6 +52,12 @@ import {
   invitePractitioners,
   respondToInvitation,
 } from '../src/modules/matching/application/assignment';
+import { recordManualAttendance } from '../src/modules/attendance/application/attendance';
+import {
+  computeAndSaveTimesheet,
+  reviewTimesheet,
+  submitTimesheet,
+} from '../src/modules/timesheets/application/timesheet';
 import { clearWorld } from './support/clear-world';
 import { DEMO_PASSWORD, assertLocal, demoPasswordHash, syncRoles } from './support/demo';
 
@@ -254,98 +261,137 @@ async function main(): Promise<void> {
   await grantPractitionerRoleOnRegistration(newcomer.id);
   await screenPractitioner(newcomer.id);
 
-  // -------------------------------------------------------------- a shift
+  // ------------------------------------------------------------ the shifts
   /**
-   * A shift Ada has nearly finished, for the after-the-shift journey.
+   * Books Ada onto a shift at E2E General: published, offered, accepted and
+   * confirmed through the same functions the consoles call.
    *
-   * Created in the future, because a request cannot be published for a time
-   * that has passed, then moved: started eight hours ago, ends within the
-   * hour. Ending *after* now matters — a confirmed shift that has ended with
-   * no attendance is exactly what `assignment.unhonoured_sweep` looks for,
-   * and the sweep finding it before the journey does would be a flaky test
-   * that was right.
+   * A request cannot be published for a time that has passed, so a shift
+   * meant to be in the past is booked three hours out and then moved — the
+   * request and the assignment both, because confirmation copies the times
+   * onto the assignment and the overlap check, the roster and the timesheet
+   * all read that copy. Shifts are booked in time order, each moved out of
+   * the next one's way before it is confirmed, or the overlap check refuses.
    */
-  const placeholderStart = new Date(Date.now() + 3 * HOUR);
-  const request = await createServiceRequest({
-    facilityId: facility.id,
-    professionalCategoryId: nurse.id,
-    shiftType: 'DAY',
-    startsAt: placeholderStart,
-    endsAt: new Date(placeholderStart.getTime() + 9 * HOUR),
-    headcount: 1,
-    hourlyRateKobo: 500_000,
-    urgency: 'ROUTINE',
-    cancellationTerms: 'Either party may cancel up to 24 hours before the shift without penalty.',
-    notes: 'E2E: the shift the after-the-shift journey records by hand.',
-    actorId: scheduler.id,
+  const nurseCategoryId = nurse.id;
+  async function bookAda(input: {
+    startsAt: Date;
+    endsAt: Date;
+    urgency?: 'ROUTINE' | 'URGENT';
+    notes: string;
+  }) {
+    const inFuture = input.startsAt.getTime() > Date.now() + HOUR;
+    const bookedFrom = inFuture ? input.startsAt : new Date(Date.now() + 3 * HOUR);
+    const length = input.endsAt.getTime() - input.startsAt.getTime();
+    const request = await createServiceRequest({
+      facilityId: facility.id,
+      professionalCategoryId: nurseCategoryId,
+      shiftType: 'DAY',
+      startsAt: bookedFrom,
+      endsAt: new Date(bookedFrom.getTime() + length),
+      headcount: 1,
+      hourlyRateKobo: 500_000,
+      urgency: input.urgency ?? 'ROUTINE',
+      cancellationTerms: 'Either party may cancel up to 24 hours before the shift without penalty.',
+      notes: input.notes,
+      actorId: scheduler.id,
+    });
+    await publishServiceRequest({ requestId: request.id, facilityId: facility.id, actorId: scheduler.id });
+    const [invitation] = await invitePractitioners({
+      requestId: request.id,
+      facilityId: facility.id,
+      userIds: [nurseAda.id],
+      actorId: scheduler.id,
+    });
+    await respondToInvitation({ invitationId: invitation!.id, userId: nurseAda.id, decision: 'accept' });
+    const assignment = await confirmAssignment({
+      requestId: request.id,
+      facilityId: facility.id,
+      userId: nurseAda.id,
+      actorId: scheduler.id,
+    });
+    if (!inFuture) {
+      const moved = { startsAt: input.startsAt, endsAt: input.endsAt };
+      await prisma.serviceRequest.update({ where: { id: request.id }, data: moved });
+      await prisma.assignment.update({ where: { id: assignment.id }, data: moved });
+    }
+    return { assignmentId: assignment.id, startsAt: input.startsAt, endsAt: input.endsAt };
+  }
+
+  /**
+   * Yesterday's shift, worked, recorded, submitted and approved — the money
+   * journey's starting point: approved work nobody has invoiced yet.
+   *
+   * Attendance is recorded the moment it is moved into the past, so
+   * `assignment.unhonoured_sweep` never sees a finished shift with nobody on it.
+   */
+  const yesterday = floorToQuarterHour(new Date(Date.now() - 32 * HOUR));
+  const billable = await bookAda({
+    startsAt: yesterday,
+    endsAt: new Date(yesterday.getTime() + 8 * HOUR),
+    notes: 'E2E: worked and approved, waiting to be invoiced.',
   });
-  await publishServiceRequest({ requestId: request.id, facilityId: facility.id, actorId: scheduler.id });
-  const [invitation] = await invitePractitioners({
-    requestId: request.id,
-    facilityId: facility.id,
-    userIds: [nurseAda.id],
+  await recordManualAttendance({
+    assignmentId: billable.assignmentId,
     actorId: scheduler.id,
+    checkedInAt: billable.startsAt,
+    checkedOutAt: billable.endsAt,
+    breakMinutes: 0,
+    reason: 'E2E world: recorded from the ward paper log.',
   });
-  await respondToInvitation({ invitationId: invitation!.id, userId: nurseAda.id, decision: 'accept' });
-  const assignment = await confirmAssignment({
-    requestId: request.id,
+  await computeAndSaveTimesheet(billable.assignmentId);
+  await submitTimesheet({ assignmentId: billable.assignmentId, userId: nurseAda.id });
+  await reviewTimesheet({
+    assignmentId: billable.assignmentId,
     facilityId: facility.id,
-    userId: nurseAda.id,
     actorId: scheduler.id,
+    decision: 'approve',
   });
 
-  // Eight and a half hours from a quarter-hour at least eight hours ago, so
-  // it ends 15–30 minutes from now: after now, and before the next one.
+  /**
+   * A shift Ada has nearly finished, for the after-the-shift journey: started
+   * eight hours ago, ends 15–30 minutes from now. Ending *after* now matters —
+   * a confirmed shift that has ended with no attendance is exactly what the
+   * unhonoured sweep looks for, and it finding this one before the journey
+   * does would be a flaky test that was right.
+   */
   const workedFrom = floorToQuarterHour(new Date(Date.now() - 8 * HOUR));
-  const scheduledUntil = new Date(workedFrom.getTime() + 8.5 * HOUR);
-  await prisma.serviceRequest.update({
-    where: { id: request.id },
-    data: { startsAt: workedFrom, endsAt: scheduledUntil },
-  });
-  // Confirmation copies the times onto the assignment, and the overlap check,
-  // the roster and the timesheet all read that copy.
-  await prisma.assignment.update({
-    where: { id: assignment.id },
-    data: { startsAt: workedFrom, endsAt: scheduledUntil },
+  const afterShift = await bookAda({
+    startsAt: workedFrom,
+    endsAt: new Date(workedFrom.getTime() + 8.5 * HOUR),
+    notes: 'E2E: the shift the after-the-shift journey records by hand.',
   });
 
   /**
    * A shift about to start, for the attendance journey: the ward reads Ada a
-   * code and she checks in with it.
-   *
-   * Confirmed only after the shift above has been moved out of its way —
-   * confirmation refuses an overlapping booking, and at its placeholder times
-   * that one would have overlapped this. It starts on the next quarter-hour
-   * at least 45 minutes out, which is after the shift above ends.
+   * code and she checks in with it. The next quarter-hour at least 45 minutes
+   * out, which is after the shift above ends.
    */
   const liveFrom = floorToQuarterHour(new Date(Date.now() + HOUR));
-  const live = await createServiceRequest({
-    facilityId: facility.id,
-    professionalCategoryId: nurse.id,
-    shiftType: 'DAY',
+  const liveShift = await bookAda({
     startsAt: liveFrom,
     endsAt: new Date(liveFrom.getTime() + 8 * HOUR),
-    headcount: 1,
-    hourlyRateKobo: 500_000,
     urgency: 'URGENT',
-    cancellationTerms: 'Either party may cancel up to 24 hours before the shift without penalty.',
     notes: 'E2E: the shift the attendance journey checks in to.',
-    actorId: scheduler.id,
   });
-  await publishServiceRequest({ requestId: live.id, facilityId: facility.id, actorId: scheduler.id });
-  const [liveInvitation] = await invitePractitioners({
-    requestId: live.id,
-    facilityId: facility.id,
-    userIds: [nurseAda.id],
-    actorId: scheduler.id,
-  });
-  await respondToInvitation({ invitationId: liveInvitation!.id, userId: nurseAda.id, decision: 'accept' });
-  const liveAssignment = await confirmAssignment({
-    requestId: live.id,
-    facilityId: facility.id,
-    userId: nurseAda.id,
-    actorId: scheduler.id,
-  });
+
+  // ------------------------------------------------------- two hospitals
+  // Somebody who works at both, for the facility switcher. Each owner adds
+  // them, the way a hospital staffs itself.
+  const multisite = await makeUser('Musa Testmultisite', 14, 'ACTIVE');
+  for (const [site, granter] of [
+    [facility.id, owner.id],
+    [pendingFacility.id, pendingOwner.id],
+  ] as const) {
+    await grantRole({
+      userId: multisite.id,
+      roleKey: 'facility_administrator',
+      scopeType: 'FACILITY',
+      scopeId: site,
+      actorId: granter,
+      actorPermissions: ROLE_PERMISSIONS.facility_owner ?? [],
+    });
+  }
 
   const world = {
     builtAt: new Date().toISOString(),
@@ -359,16 +405,22 @@ async function main(): Promise<void> {
     newcomer,
     facility: { id: facility.id, name: facility.name },
     pendingFacility: { id: pendingFacility.id, name: pendingFacility.name },
+    multisite,
+    billableShift: {
+      assignmentId: billable.assignmentId,
+      startsAt: billable.startsAt.toISOString(),
+      endsAt: billable.endsAt.toISOString(),
+    },
     afterShift: {
-      assignmentId: assignment.id,
-      startsAt: workedFrom.toISOString(),
-      endsAt: scheduledUntil.toISOString(),
+      assignmentId: afterShift.assignmentId,
+      startsAt: afterShift.startsAt.toISOString(),
+      endsAt: afterShift.endsAt.toISOString(),
       hourlyRateKobo: 500_000,
     },
     liveShift: {
-      assignmentId: liveAssignment.id,
-      startsAt: live.startsAt,
-      endsAt: live.endsAt,
+      assignmentId: liveShift.assignmentId,
+      startsAt: liveShift.startsAt.toISOString(),
+      endsAt: liveShift.endsAt.toISOString(),
     },
     workerLagSeconds: await workerLagSeconds(),
   };

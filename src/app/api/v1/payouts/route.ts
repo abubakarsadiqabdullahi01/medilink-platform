@@ -3,7 +3,11 @@ import {
   myPayoutsSchema,
   preparePayoutSchema,
 } from '@/modules/billing-settlement/presentation/schemas';
-import { listPayouts, preparePayout } from '@/modules/billing-settlement/application/payout';
+import {
+  amountOwed,
+  listPayouts,
+  preparePayout,
+} from '@/modules/billing-settlement/application/payout';
 
 /**
  * POST /api/v1/payouts — prepare one for everything a practitioner is owed.
@@ -33,10 +37,17 @@ export async function GET(request: Request) {
       type: input.scopeType,
       id: input.scopeType === 'SELF' ? (input.scopeId ?? session.userId) : input.scopeId,
     }),
-    action: async ({ input, session }) => ({
-      payouts: await listPayouts(
-        input.scopeType === 'SELF' ? (input.scopeId ?? session.userId) : (input.scopeId as string),
-      ),
-    }),
+    action: async ({ input, session }) => {
+      const practitionerId =
+        input.scopeType === 'SELF' ? (input.scopeId ?? session.userId) : (input.scopeId as string);
+      // What is credited and not yet paid out, from the ledger — the number a
+      // practitioner opens the page to read, and the one no list of payouts
+      // can give them.
+      const [payouts, owedKobo] = await Promise.all([
+        listPayouts(practitionerId),
+        amountOwed(practitionerId),
+      ]);
+      return { payouts, owedKobo };
+    },
   });
 }

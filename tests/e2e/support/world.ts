@@ -23,8 +23,10 @@ export interface World {
   pendingOwner: Person;
   practitioner: Person;
   newcomer: Person;
+  multisite: Person;
   facility: { id: string; name: string };
   pendingFacility: { id: string; name: string };
+  billableShift: { assignmentId: string; startsAt: string; endsAt: string };
   afterShift: { assignmentId: string; startsAt: string; endsAt: string; hourlyRateKobo: number };
   liveShift: { assignmentId: string; startsAt: string; endsAt: string };
   workerLagSeconds: number;

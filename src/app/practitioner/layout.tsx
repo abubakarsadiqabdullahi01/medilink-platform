@@ -9,6 +9,7 @@ import {
   Receipt,
   ShieldCheck,
   UserRound,
+  Wallet,
 } from 'lucide-react';
 import { SessionProvider } from '@/lib/ui/session';
 import { ConsoleShell, type NavSection } from '@/components/app/console-shell';
@@ -51,6 +52,12 @@ const SECTIONS: NavSection[] = [
         label: 'Timesheets',
         icon: Receipt,
         permission: 'timesheet.submit',
+      },
+      {
+        href: '/practitioner/earnings',
+        label: 'Earnings',
+        icon: Wallet,
+        permission: 'invoice.read',
       },
     ],
   },

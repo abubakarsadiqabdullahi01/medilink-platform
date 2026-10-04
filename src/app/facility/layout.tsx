@@ -1,6 +1,14 @@
 'use client';
 
-import { CalendarPlus, LayoutDashboard, Percent, Receipt, Stethoscope, Users } from 'lucide-react';
+import {
+  CalendarPlus,
+  FileText,
+  LayoutDashboard,
+  Percent,
+  Receipt,
+  Stethoscope,
+  Users,
+} from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
@@ -8,6 +16,7 @@ import { buttonVariants } from '@/components/ui/button';
 import { SessionProvider, useScopeIds } from '@/lib/ui/session';
 import { ConsoleShell, type NavSection } from '@/components/app/console-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { FacilitySwitcher } from './facility-switcher';
 
 /**
  * The facility console: the people who create the work.
@@ -15,7 +24,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
  * Everything here is scoped to one facility, and the id comes from the
  * caller's own grants rather than from a picker — a scheduler at one hospital
  * should never have to know their facility's uuid. Somebody who works at two
- * is shown the first, and the dashboard says which one that is.
+ * chooses between them with the switcher above every page.
  */
 const SECTIONS: NavSection[] = [
   {
@@ -47,6 +56,12 @@ const SECTIONS: NavSection[] = [
         label: 'Timesheets',
         icon: Receipt,
         permission: 'timesheet.approve',
+      },
+      {
+        href: '/facility/invoices',
+        label: 'Invoices',
+        icon: FileText,
+        permission: 'invoice.read',
       },
       {
         href: '/facility/rates',
@@ -95,7 +110,12 @@ function Guard({ children }: { children: React.ReactNode }) {
     );
   }
 
-  return <>{children}</>;
+  return (
+    <>
+      {pathname !== '/facility/register' ? <FacilitySwitcher /> : null}
+      {children}
+    </>
+  );
 }
 
 export default function FacilityLayout({ children }: { children: React.ReactNode }) {

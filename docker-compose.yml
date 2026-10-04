@@ -91,6 +91,44 @@ services:
       storage-init:
         condition: service_completed_successfully
 
+  # The app as production runs it, for the browser journeys:
+  #   docker compose --profile e2e up -d e2e
+  #   APP_URL=http://localhost:3100 E2E_SERVICE=e2e pnpm test:e2e
+  # Built once rather than compiled on each first request, into its own
+  # .next-e2e, so restarting `web` — or a build run in it — cannot pull the
+  # app out from under a run. It borrows `web`'s image and installed
+  # node_modules rather than installing its own, so starting it needs no
+  # network. Shares the database, storage and worker.
+  e2e:
+    profiles: [e2e]
+    image: medilink-web
+    # `next build` rewrites next-env.d.ts and tsconfig.json to point at the
+    # build directory it used. Both live in the shared checkout, so they are
+    # put back afterwards — exactly as they were, edits included.
+    command: >
+      sh -c "cp next-env.d.ts tsconfig.json /tmp/ && pnpm build; built=$$?;
+      cp /tmp/next-env.d.ts /tmp/tsconfig.json ./;
+      [ $$built -eq 0 ] && pnpm start"
+    environment:
+      NODE_ENV: production
+      NEXT_DIST_DIR: .next-e2e
+      DATABASE_URL: postgresql://medilink:medilink@db:5432/medilink?schema=public
+      STORAGE_ENDPOINT: http://storage:9000
+      STORAGE_PUBLIC_ENDPOINT: http://localhost:9000
+      SMTP_URL: smtp://mail:1025
+      SMS_CONSOLE_OUTBOX: .e2e/sms-outbox.jsonl
+    env_file:
+      - .env
+    ports:
+      - "3100:3000"
+    volumes_from:
+      - web
+    depends_on:
+      db:
+        condition: service_healthy
+      web:
+        condition: service_started
+
   # The outbox worker. Runs separately from the web process so a slow
   # consumer can never block a request.
   worker:
