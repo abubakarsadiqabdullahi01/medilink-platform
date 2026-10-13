@@ -106,18 +106,28 @@ async function postTransaction(
  * The exclusive split, from the bands the timesheet recorded.
  *
  * `nightMinutes` and `holidayMinutes` overlap on the timesheet by design — a
- * reader wants to see both — so billing subtracts the overlap before pricing.
- * Without this a holiday night would be paid a night premium *and* a holiday
- * premium, which is a rate nobody agreed to.
+ * reader wants to see both — so pricing needs the buckets that do not. They
+ * used to be rebuilt here by subtracting one overlapping figure from the other,
+ * which loses minutes unless the holiday happens to sit wholly inside the
+ * night or the night wholly inside the holiday: a shift 18:00-02:00 with the
+ * second day a holiday was billed 120 minutes short, and with the first day a
+ * holiday, 120 night minutes short. The timesheet computed the exact split
+ * when it was worked out and now keeps it, so this reads it back.
+ *
+ * Holiday takes precedence over night, so `holidayMinutes` is the holiday
+ * bucket as it stands; ordinary is what is left.
  */
 function exclusiveBands(sheet: {
   billableMinutes: number;
-  nightMinutes: number;
+  nightOnlyMinutes: number;
   holidayMinutes: number;
 }) {
   return {
-    ordinaryMinutes: Math.max(0, sheet.billableMinutes - sheet.nightMinutes - sheet.holidayMinutes),
-    nightMinutes: Math.max(0, sheet.nightMinutes - sheet.holidayMinutes),
+    ordinaryMinutes: Math.max(
+      0,
+      sheet.billableMinutes - sheet.nightOnlyMinutes - sheet.holidayMinutes,
+    ),
+    nightMinutes: sheet.nightOnlyMinutes,
     holidayMinutes: sheet.holidayMinutes,
   };
 }

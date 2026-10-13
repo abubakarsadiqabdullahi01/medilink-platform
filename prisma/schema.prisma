@@ -1311,6 +1311,12 @@ model Timesheet {
   holidayMinutes  Int @map("holiday_minutes")
   onCallMinutes   Int @default(0) @map("on_call_minutes")
 
+  // Night minutes that are not also holiday minutes. night_minutes and
+  // holiday_minutes overlap, so the exact split cannot be rebuilt from them;
+  // holiday takes precedence, which makes holiday_minutes the holiday bucket
+  // and this the night bucket. Ordinary is what is left of billable_minutes.
+  nightOnlyMinutes Int @default(0) @map("night_only_minutes")
+
   // Integer kobo (rule 3), at the request's agreed hourly rate.
   hourlyRateKobo Int @map("hourly_rate_kobo")
   amountKobo     Int @map("amount_kobo")

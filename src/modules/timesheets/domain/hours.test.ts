@@ -258,3 +258,45 @@ describe('the amount', () => {
     expect(Number.isInteger(totals.amountKobo)).toBe(true);
   });
 });
+
+describe('the exclusive bands', () => {
+  // 18:00 WAT Thursday to 02:00 Friday: ordinary until 20:00, night until
+  // 06:00. The shape that shows whether a night and a holiday are split
+  // exactly or only approximately.
+  const overnight = {
+    checkedInAt: new Date('2026-09-10T17:00:00Z'),
+    checkedOutAt: new Date('2026-09-11T01:00:00Z'),
+    scheduledStartsAt: new Date('2026-09-10T17:00:00Z'),
+    scheduledEndsAt: new Date('2026-09-11T01:00:00Z'),
+  };
+
+  it('splits a holiday that starts part-way through the night exactly', () => {
+    const totals = computeTimesheet(shift({ ...overnight, holidayDates: new Set(['2026-09-11']) }));
+    // 18-20 ordinary, 20-00 night, 00-02 holiday.
+    expect(totals.exclusive).toEqual({ ordinaryMinutes: 120, nightMinutes: 240, holidayMinutes: 120 });
+    // The overlapping figures are what a reader sees, and are not the buckets.
+    expect(totals.nightMinutes).toBe(360);
+    expect(totals.holidayMinutes).toBe(120);
+  });
+
+  it('splits a holiday that ends part-way through the night exactly', () => {
+    const totals = computeTimesheet(shift({ ...overnight, holidayDates: new Set(['2026-09-10']) }));
+    // 18-00 holiday, 00-02 night.
+    expect(totals.exclusive).toEqual({ ordinaryMinutes: 0, nightMinutes: 120, holidayMinutes: 360 });
+  });
+
+  it('gives a holiday precedence over night, so a minute is paid once', () => {
+    const totals = computeTimesheet(
+      shift({ ...overnight, holidayDates: new Set(['2026-09-10', '2026-09-11']) }),
+    );
+    expect(totals.exclusive).toEqual({ ordinaryMinutes: 0, nightMinutes: 0, holidayMinutes: 480 });
+  });
+
+  it.each([0, 15, 30, 45, 60])('always adds up to the billable minutes, with a %i minute break', (breakMinutes) => {
+    const totals = computeTimesheet(
+      shift({ ...overnight, breakMinutes, holidayDates: new Set(['2026-09-11']) }),
+    );
+    const { ordinaryMinutes, nightMinutes, holidayMinutes } = totals.exclusive;
+    expect(ordinaryMinutes + nightMinutes + holidayMinutes).toBe(totals.billableMinutes);
+  });
+});

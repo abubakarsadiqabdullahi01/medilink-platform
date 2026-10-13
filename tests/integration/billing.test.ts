@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/modules/practitioners/application/bookable', () => import('./support/always-bookable'));
 
@@ -85,7 +85,9 @@ interface World {
 }
 
 /** A shift worked and approved — the state billing starts from. */
-async function buildWorld(): Promise<World> {
+async function buildWorld(
+  worked: { from: Date; to: Date } = { from: WORKED_FROM, to: WORKED_TO },
+): Promise<World> {
   await ensureRole('facility_owner', ROLE_PERMISSIONS.facility_owner ?? []);
 
   const state = await createState();
@@ -174,8 +176,8 @@ async function buildWorld(): Promise<World> {
   await recordManualAttendance({
     assignmentId: assignment.id,
     actorId: scheduler.id,
-    checkedInAt: WORKED_FROM,
-    checkedOutAt: WORKED_TO,
+    checkedInAt: worked.from,
+    checkedOutAt: worked.to,
     breakMinutes: 0,
     reason: 'Ward network was down for the whole shift; taken from the paper log.',
   });
@@ -206,6 +208,63 @@ const period = (world: World) => ({
 
 beforeEach(() => {
   clearCookies();
+});
+
+describe('a night that runs into a holiday', () => {
+  /**
+   * The timesheet records night and holiday minutes that overlap, because a
+   * reader wants to see both. Billing needs buckets that do not, and used to
+   * rebuild them by subtracting one overlapping figure from another — which
+   * is only right when the holiday and the night happen to nest one way round.
+   */
+  // Reference data survives the reset between tests, so what a test adds has
+  // to be taken away again or the next one is billed against its holidays.
+  afterEach(async () => {
+    await prisma.publicHoliday.deleteMany({ where: { owner: 'test' } });
+  });
+
+  async function billedWith(worked: { from: Date; to: Date }, holidays: string[]) {
+    for (const date of holidays) {
+      await prisma.publicHoliday.create({
+        data: { date: new Date(`${date}T00:00:00.000Z`), name: `Holiday ${date}`, year: 2026, owner: 'test' },
+      });
+    }
+    const world = await buildWorld(worked);
+    const invoice = await generateInvoice(period(world));
+    const line = invoice.lines[0]!;
+    return { line, total: line.ordinaryMinutes + line.nightMinutes + line.holidayMinutes };
+  }
+
+  it('loses no minutes when the holiday starts part-way through the night', async () => {
+    // 18:00 WAT Thursday to 02:00 Friday; Friday is the holiday.
+    //   18:00-20:00 ordinary (120), 20:00-00:00 night (240), 00:00-02:00 holiday (120).
+    const { line, total } = await billedWith(
+      { from: new Date('2026-09-10T17:00:00.000Z'), to: new Date('2026-09-11T01:00:00.000Z') },
+      ['2026-09-11'],
+    );
+    expect(line).toMatchObject({ ordinaryMinutes: 120, nightMinutes: 240, holidayMinutes: 120 });
+    expect(total).toBe(480);
+  });
+
+  it('loses no minutes when the holiday is the evening and the night runs past it', async () => {
+    // Same shift, Thursday the holiday: 18:00-00:00 holiday (360), 00:00-02:00 night (120).
+    const { line, total } = await billedWith(
+      { from: new Date('2026-09-10T17:00:00.000Z'), to: new Date('2026-09-11T01:00:00.000Z') },
+      ['2026-09-10'],
+    );
+    expect(line).toMatchObject({ ordinaryMinutes: 0, nightMinutes: 120, holidayMinutes: 360 });
+    expect(total).toBe(480);
+  });
+
+  it('bills the whole of a night that is wholly inside the holiday as holiday', async () => {
+    // 22:00 Thursday to 04:00 Friday, both days holidays: six hours, all holiday.
+    const { line, total } = await billedWith(
+      { from: new Date('2026-09-10T21:00:00.000Z'), to: new Date('2026-09-11T03:00:00.000Z') },
+      ['2026-09-10', '2026-09-11'],
+    );
+    expect(line).toMatchObject({ ordinaryMinutes: 0, nightMinutes: 0, holidayMinutes: 360 });
+    expect(total).toBe(360);
+  });
 });
 
 describe('invoicing approved work', () => {
@@ -277,19 +336,13 @@ describe('invoicing approved work', () => {
 
 describe('a rate card changes the figures', () => {
   it('pays a night premium on night minutes', async () => {
-    const world = await buildWorld();
-
-    // 20:00–04:00 WAT: entirely inside the night window.
-    await prisma.attendanceRecord.update({
-      where: { assignmentId: world.assignmentId },
-      data: {
-        checkedInAt: new Date('2026-09-09T19:00:00.000Z'),
-        checkedOutAt: new Date('2026-09-10T03:00:00.000Z'),
-      },
-    });
-    await prisma.timesheet.updateMany({
-      where: { attendanceRecord: { assignmentId: world.assignmentId } },
-      data: { nightMinutes: 480, billableMinutes: 480 },
+    // 20:00–04:00 WAT: entirely inside the night window, worked and recorded
+    // as a real shift rather than by editing the timesheet's figures after the
+    // fact — the bands are computed once, at the timesheet, and billing reads
+    // them back.
+    const world = await buildWorld({
+      from: new Date('2026-09-09T19:00:00.000Z'),
+      to: new Date('2026-09-10T03:00:00.000Z'),
     });
 
     await createRateCard({
