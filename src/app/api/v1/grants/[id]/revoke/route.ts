@@ -25,6 +25,7 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
       scope: (input) => ({ type: input.scopeType, id: input.scopeId }),
       action: async ({ input, session }) =>
         revokeGrant({
+          scope: { type: input.scopeType, id: input.scopeId },
           grantId: input.id,
           actorId: session.userId,
           reason: input.reason,

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { prisma } from '@/lib/db';
 import { ROLE_PERMISSIONS, type Permission } from '@/lib/authz/permissions';
@@ -66,6 +67,7 @@ describe('un-appointing', () => {
 
     await expect(
       revokeGrant({
+        scope: { type: 'PLATFORM' },
         grantId: grant.id,
         actorId: victim.id,
         reason: 'Trying it on.',
@@ -87,6 +89,7 @@ describe('un-appointing', () => {
     const grant = await grantTo(victim.id, 'super_administrator', SUPER);
 
     const revoked = await revokeGrant({
+      scope: { type: 'PLATFORM' },
       grantId: grant.id,
       actorId: victim.id,
       reason: 'Left the organisation.',
@@ -105,6 +108,7 @@ describe('un-appointing', () => {
 
     await expect(
       revokeGrant({
+        scope: { type: 'PLATFORM' },
         grantId: grant.id,
         actorId: peer.id,
         reason: 'Disagreed with me.',
@@ -121,6 +125,7 @@ describe('un-appointing', () => {
     const grant = await grantTo(admin.id, 'administrator', ADMIN);
 
     const revoked = await revokeGrant({
+      scope: { type: 'PLATFORM' },
       grantId: grant.id,
       actorId: admin.id,
       reason: 'Moved to another team.',
@@ -144,6 +149,7 @@ describe('un-appointing', () => {
 
     await expect(
       revokeGrant({
+        scope: { type: 'PLATFORM' },
         grantId: grant.id,
         actorId: onlySuper.id,
         reason: 'Leaving.',
@@ -177,6 +183,7 @@ describe('un-appointing', () => {
     });
 
     const revoked = await revokeGrant({
+      scope: { type: 'SELF', id: practitioner.id },
       grantId: grant.id,
       actorId: practitioner.id,
       reason: 'Struck off the register.',
@@ -188,8 +195,10 @@ describe('un-appointing', () => {
 
   it('leaves a facility grant to the facility scope check', async () => {
     // An owner holds everything a facility administrator does, but the point
-    // here is that the rule does not fire at all below PLATFORM — the route's
-    // own scope check is what confines who may touch a facility's staff.
+    // here is that the platform-authority rule does not fire below PLATFORM.
+    // What confines who may touch a facility's staff is the scope comparison in
+    // revokeGrant itself: the grant must lie in the scope the caller named
+    // (see 'un-appointing across tenants' below).
     const staff = await createUser({ fullName: 'Hauwa Abdullahi' });
     const facilityRole = await roleRow('facility_administrator');
     const grant = await prisma.userRole.create({
@@ -202,6 +211,7 @@ describe('un-appointing', () => {
     });
 
     const revoked = await revokeGrant({
+      scope: { type: 'FACILITY', id: staff.id },
       grantId: grant.id,
       actorId: staff.id,
       reason: 'Left the hospital.',
@@ -229,6 +239,7 @@ describe('giving access back', () => {
 
     const first = await appoint();
     await revokeGrant({
+      scope: { type: 'FACILITY', id: facilityId },
       grantId: first.id,
       actorId: owner.id,
       reason: 'Moved to the night rota at our other site.',
@@ -246,5 +257,78 @@ describe('giving access back', () => {
 
     // And one live grant is still the limit.
     await expect(appoint()).rejects.toMatchObject({ code: 'already_granted' });
+  });
+});
+
+describe('un-appointing across tenants', () => {
+  /**
+   * The guard proves the caller holds `role.grant` over the scope the caller
+   * *names*. Nothing used to prove the grant being revoked lies in that scope,
+   * so the owner of one hospital could name their own hospital and revoke any
+   * other hospital's staff by identifier.
+   */
+  async function facilityGrant(facilityId: string) {
+    const user = await createUser({ fullName: 'Hospital Staff Member' });
+    const row = await grantRole({
+      userId: user.id,
+      roleKey: 'facility_administrator',
+      scopeType: 'FACILITY',
+      scopeId: facilityId,
+      actorId: user.id,
+      actorPermissions: SUPER,
+    });
+    return { user, grant: row };
+  }
+
+  it('refuses revoking a grant at another facility, whatever scope the caller named', async () => {
+    const facilityA = randomUUID();
+    const facilityB = randomUUID();
+    const owner = await createUser({ fullName: 'Owner Of Hospital A' });
+    const { grant: otherTenantsGrant } = await facilityGrant(facilityB);
+
+    await expect(
+      revokeGrant({
+        scope: { type: 'FACILITY', id: facilityA },
+        grantId: otherTenantsGrant.id,
+        actorId: owner.id,
+        reason: 'Trying to reach into another hospital.',
+        actorPermissions: OWNER,
+      }),
+    ).rejects.toMatchObject({ code: 'grant_not_found' });
+
+    const still = await prisma.userRole.findUniqueOrThrow({ where: { id: otherTenantsGrant.id } });
+    expect(still.revokedAt).toBeNull();
+  });
+
+  it('refuses naming the wrong kind of scope for a facility grant', async () => {
+    const facilityB = randomUUID();
+    const owner = await createUser({ fullName: 'Owner Of Hospital A' });
+    const { grant: g } = await facilityGrant(facilityB);
+
+    await expect(
+      revokeGrant({
+        scope: { type: 'PLATFORM' },
+        grantId: g.id,
+        actorId: owner.id,
+        reason: 'Naming a different scope type.',
+        actorPermissions: OWNER,
+      }),
+    ).rejects.toMatchObject({ code: 'grant_not_found' });
+  });
+
+  it('still lets an owner revoke staff at their own facility', async () => {
+    const facilityA = randomUUID();
+    const owner = await createUser({ fullName: 'Owner Of Hospital A' });
+    const { grant: own } = await facilityGrant(facilityA);
+
+    const revoked = await revokeGrant({
+      scope: { type: 'FACILITY', id: facilityA },
+      grantId: own.id,
+      actorId: owner.id,
+      reason: 'Left the hospital.',
+      actorPermissions: OWNER,
+    });
+
+    expect(revoked.revokedAt).not.toBeNull();
   });
 });

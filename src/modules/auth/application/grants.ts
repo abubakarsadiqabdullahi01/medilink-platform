@@ -305,6 +305,14 @@ async function assertNotTheLastWhoCanAppoint(grant: {
 
 export async function revokeGrant(input: {
   grantId: string;
+  /**
+   * The scope the route's guard approved — the one the caller named, and held
+   * `role.grant` over. Required, not optional: the guard proves authority over
+   * *that* scope, so unless the grant lies in it the guard proved nothing about
+   * this grant. Without the comparison below, the owner of one hospital could
+   * name their own and revoke any other hospital's staff by identifier.
+   */
+  scope: { type: GrantScope; id?: string };
   actorId: string;
   reason: string;
   /** What the revoking actor holds, for the check above. */
@@ -315,6 +323,12 @@ export async function revokeGrant(input: {
     include: { role: true, user: true },
   });
   if (!existing) throw GrantErrors.grantNotFound();
+
+  // "Not found", not "forbidden": a caller probing identifiers learns nothing
+  // about whether a grant exists in somebody else's scope.
+  const sameScope =
+    existing.scopeType === input.scope.type && (existing.scopeId ?? null) === (input.scope.id ?? null);
+  if (!sameScope) throw GrantErrors.grantNotFound();
 
   assertMayRevoke(existing.role.key, existing.scopeType, input.actorPermissions);
   await assertNotTheLastWhoCanAppoint({
