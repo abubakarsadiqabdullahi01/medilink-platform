@@ -26,10 +26,30 @@ export interface ClaimedEvent {
 export const DEFAULT_BATCH_SIZE = 20;
 
 /**
+ * How long a claim holds an event before another worker may take it back.
+ *
+ * Handlers are short — a notification, a recomputed timesheet — so five minutes
+ * is far longer than a healthy one takes and short enough that a worker killed
+ * mid-event costs a few minutes of delay and not a lost event.
+ */
+export const CLAIM_LEASE_SECONDS = 300;
+
+/**
  * Claims due events for this worker, marking them PROCESSING and counting the
  * attempt before any handler runs — a handler that hangs must not be retried
  * for free. SKIP LOCKED is what lets several workers run at once without two
  * of them delivering the same event.
+ *
+ * The claim carries a **lease**: `available_at` is pushed out by
+ * CLAIM_LEASE_SECONDS, and a PROCESSING event whose lease has run out is
+ * claimable again. Before this, a worker killed after claiming (a deploy, an
+ * out-of-memory kill) left up to a batch of events in PROCESSING for ever,
+ * because the claim only looked at PENDING and FAILED.
+ *
+ * An event whose lease ran out *after its final attempt* is dead-lettered
+ * instead. A handler that kills the worker never reaches the code that
+ * dead-letters it, so reclaiming it without limit would take a worker down
+ * every lease.
  *
  * Due-ness is decided by the database clock rather than an injected one: the
  * comparison stays inside the same statement that takes the lock. A test that
@@ -40,12 +60,27 @@ export async function claimDueEvents(
   client: Pick<PrismaClient, '$queryRaw'> = prisma,
   batchSize: number = DEFAULT_BATCH_SIZE,
 ): Promise<ClaimedEvent[]> {
+  const abandoned = await client.$queryRaw<{ id: string }[]>`
+    UPDATE audit.outbox_events
+       SET status = 'DEAD_LETTER',
+           last_error = 'The worker that claimed this event stopped before finishing it, on its last attempt.'
+     WHERE status = 'PROCESSING'
+       AND available_at <= now()
+       AND attempts >= ${MAX_ATTEMPTS}
+     RETURNING id
+  `;
+  if (abandoned.length > 0) {
+    logger.error('outbox events abandoned on their last attempt', { count: abandoned.length });
+  }
+
   return client.$queryRaw<ClaimedEvent[]>`
     UPDATE audit.outbox_events
-       SET status = 'PROCESSING', attempts = attempts + 1
+       SET status = 'PROCESSING',
+           attempts = attempts + 1,
+           available_at = now() + make_interval(secs => ${CLAIM_LEASE_SECONDS})
      WHERE id IN (
        SELECT id FROM audit.outbox_events
-        WHERE status IN ('PENDING', 'FAILED')
+        WHERE status IN ('PENDING', 'FAILED', 'PROCESSING')
           AND available_at <= now()
         ORDER BY available_at
          FOR UPDATE SKIP LOCKED

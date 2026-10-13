@@ -218,3 +218,81 @@ describe('dispatch', () => {
     expect(rows.every((row) => row.attempts === 1)).toBe(true);
   });
 });
+
+
+describe('an event stranded by a worker that died', () => {
+  /**
+   * A claim marks the event PROCESSING and counts the attempt before the
+   * handler runs. A worker killed after that — a deploy, an out-of-memory kill —
+   * left up to twenty events in PROCESSING for ever, because the claim only
+   * looked at PENDING and FAILED.
+   */
+  const handlers: Record<string, EventHandler> = {
+    [EVENTS.PractitionerRegistered]: async () => undefined,
+  };
+
+  async function claimedByADeadWorker(attempts = 1) {
+    const event = await publish();
+    // What claiming does, without anybody finishing the job: processing, the
+    // attempt counted, and a lease running.
+    await prisma.$executeRaw`
+      UPDATE audit.outbox_events
+         SET status = 'PROCESSING', attempts = ${attempts}, available_at = now() + interval '5 minutes'
+       WHERE id = ${event.id}::uuid
+    `;
+    return event;
+  }
+
+  it('is not picked up again while the claim could still be alive', async () => {
+    const event = await claimedByADeadWorker();
+    // The claim carries a lease, so a slow handler is not run twice at once.
+    expect(await runOnce({ handlers })).toMatchObject({ claimed: 0 });
+    expect((await prisma.outboxEvent.findUniqueOrThrow({ where: { id: event.id } })).status).toBe(
+      'PROCESSING',
+    );
+  });
+
+  it('gets a lease from the claim, so there is something to expire', async () => {
+    const event = await publish();
+    let seen: { status: string; leaseEnds: number } | null = null;
+
+    // Looked at from inside the handler: claimed, and not yet finished.
+    await runOnce({
+      handlers: {
+        [EVENTS.PractitionerRegistered]: async () => {
+          const row = await prisma.outboxEvent.findUniqueOrThrow({ where: { id: event.id } });
+          seen = { status: row.status, leaseEnds: row.availableAt.getTime() };
+        },
+      },
+    });
+
+    expect(seen).not.toBeNull();
+    expect(seen!.status).toBe('PROCESSING');
+    expect(seen!.leaseEnds).toBeGreaterThan(Date.now() + 60 * 1000);
+  });
+
+  it('is reclaimed once the lease has run out, and processed', async () => {
+    const event = await claimedByADeadWorker();
+    await makeDue(event.id);
+
+    expect(await runOnce({ handlers })).toMatchObject({ claimed: 1, processed: 1 });
+    const row = await prisma.outboxEvent.findUniqueOrThrow({ where: { id: event.id } });
+    expect(row.status).toBe('PROCESSED');
+    // Counted both times: the abandoned attempt and this one.
+    expect(row.attempts).toBe(2);
+  });
+
+  it('is dead-lettered rather than run again if it has already used its attempts', async () => {
+    // An event whose handler kills the worker never reaches the code that
+    // dead-letters it, so reclaiming it for ever would take a worker down every
+    // lease. The attempt limit has to apply to a claim that never finished.
+    const event = await claimedByADeadWorker(MAX_ATTEMPTS);
+    await makeDue(event.id);
+
+    const pass = await runOnce({ handlers });
+    expect(pass.processed).toBe(0);
+    const row = await prisma.outboxEvent.findUniqueOrThrow({ where: { id: event.id } });
+    expect(row.status).toBe('DEAD_LETTER');
+    expect(row.lastError).toMatch(/worker|lease|claimed/i);
+  });
+});
