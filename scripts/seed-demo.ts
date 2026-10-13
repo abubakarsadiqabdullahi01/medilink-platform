@@ -50,6 +50,7 @@ import {
   verifyFacility,
 } from '../src/modules/facilities/application/facility';
 import { createProfile } from '../src/modules/practitioners/application/profile';
+import { submitForReview } from '../src/modules/practitioners/application/application-review';
 import { grantPractitionerRoleOnRegistration } from '../src/modules/practitioners/application/role-grants';
 import {
   recordIdentityVerification,
@@ -313,7 +314,7 @@ type OptionalCredential = 'nysc_certificate' | 'good_standing' | 'indemnity_cove
  * Where a practitioner stands. `complete` onboarding plus a `problem` is how
  * somebody who once worked ends up blocked; the other stages never finish.
  */
-type Stage = 'complete' | 'credentials_pending' | 'more_info' | 'no_profile';
+type Stage = 'complete' | 'credentials_pending' | 'more_info' | 'no_profile' | 'changes_needed';
 type Problem = 'flagged' | 'suspended' | 'expired_licence' | 'registration_lapsed' | 'name_mismatch';
 
 interface PractitionerSpec {
@@ -467,6 +468,13 @@ const PRACTITIONERS: PractitionerSpec[] = [
     state: 'NA', lga: 'Karu', travel: 'ANYWHERE', pattern: 'anytime', joinedDaysAgo: 260,
     problem: 'registration_lapsed', registrationExpires: new Date('2026-09-15T22:59:59.000Z'),
     bio: 'A&E nurse; triage and minor injuries.',
+  },
+  {
+    key: 'changesNeeded', label: 'Practitioner — a document was refused, must resubmit (changes needed)', phone: phoneFor(31),
+    fullName: 'Hadiza Lawan', category: 'doctor', specialty: 'general_practice', years: 4,
+    state: FCT, lga: 'Gwagwalada', travel: 'SAME_STATE', pattern: 'anytime', joinedDaysAgo: 6,
+    stage: 'changes_needed',
+    bio: 'General practitioner; primary care and outpatient clinics. Locum cover at weekends.',
   },
 
   // ---- FCT-area doctors
@@ -1042,7 +1050,7 @@ async function onboard(spec: PractitionerSpec, index: number, ctx: OnboardContex
   const reviewedAt = addDays(joinedAt, 2);
   const nin = String(22_000_000_000 + index * 7_919_113 + between(0, 999)).slice(0, 11);
 
-  if (spec.stage !== 'credentials_pending') {
+  if (spec.stage !== 'credentials_pending' && spec.stage !== 'changes_needed') {
     await recordIdentityVerification({
       userId: actor.id,
       nin,
@@ -1103,7 +1111,7 @@ async function onboard(spec: PractitionerSpec, index: number, ctx: OnboardContex
     });
     const submittedAt = addHours(joinedAt, between(2, 30));
 
-    if (spec.stage === 'credentials_pending') {
+    if (spec.stage === 'credentials_pending' || spec.stage === 'changes_needed') {
       await prisma.credentialSubmission.update({ where: { id: submission.id }, data: { createdAt: submittedAt } });
       continue;
     }
@@ -1152,6 +1160,43 @@ async function onboard(spec: PractitionerSpec, index: number, ctx: OnboardContex
   // Registration-time screening: on the name alone for someone whose folio is
   // not recorded yet, on both once it is.
   await screenPractitioner(actor.id);
+
+  // Everybody who got this far pressed "submit for approval" — that is what
+  // put them in the officer's queue — and it is stamped back to when they would
+  // have. Someone whose application is still incomplete simply cannot, and
+  // the server says so; that is a state worth seeing, not an error to hide.
+  const submittedForReviewAt = addHours(joinedAt, between(3, 36));
+  try {
+    await submitForReview({ userId: actor.id, hasAvailability: true });
+    await prisma.practitionerProfile.updateMany({
+      where: { userId: actor.id },
+      data: { submittedForReviewAt },
+    });
+  } catch {
+    // Incomplete application: left in draft.
+  }
+
+  // A document refused after submission sends the application back, which is
+  // how Hadiza ends up with a notice, a reason, and a resubmit to do.
+  if (spec.stage === 'changes_needed') {
+    const mbbs = ctx.ref.credentialTypes.get('mbbs_certificate');
+    const refused = mbbs
+      ? await prisma.credentialSubmission.findFirst({ where: { userId: actor.id, credentialTypeId: mbbs.id } })
+      : null;
+    if (refused) {
+      await reviewCredential({
+        submissionId: refused.id,
+        reviewerId: ctx.compliance.id,
+        decision: 'reject',
+        reviewNotes:
+          'The certificate is a photograph of a photocopy and the university seal is not readable. Please upload a clear scan of the original.',
+      });
+      await prisma.credentialSubmission.update({
+        where: { id: refused.id },
+        data: { reviewedAt: addDays(joinedAt, 2) },
+      });
+    }
+  }
 
   if (spec.problem === 'expired_licence') {
     practitioner.workUntil = addDays(reviewedAt, ctx.ref.credentialTypes.get('mdcn_practising_licence')!.reviewDays);
@@ -2731,10 +2776,11 @@ async function main(): Promise<void> {
     if (people.length === 0) return null;
     const invitations = await offer({ facility, requestId: request.id, people, matchRunId });
     const chosen = people[0]!;
-    const assignment = await acceptAndConfirm(facility, request.id, invitations[0]!.id, chosen);
+    // Filling the last place withdraws the remaining open invitations.
     if (invitations[1]) {
       await respondToInvitation({ invitationId: invitations[1].id, userId: people[1]!.id, decision: 'decline', reason: pick(DECLINE_REASONS) });
     }
+    const assignment = await acceptAndConfirm(facility, request.id, invitations[0]!.id, chosen);
     book(chosen.id, start, end);
     return { request, assignment, person: chosen };
   }

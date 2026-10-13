@@ -30,3 +30,4 @@ yarn.lock
 probe.txt
 
 .pnpm-store/
+.next-demo/
