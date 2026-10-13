@@ -4,8 +4,8 @@ import { recordAudit } from '@/lib/audit';
 import { publishEvent } from '@/lib/outbox';
 import { EVENTS } from '@/lib/events';
 import { HttpError } from '@/lib/http/errors';
-import { activeRateCard } from '@/modules/rates-contracts/application/rate-card';
-import { DEFAULT_RATE_CARD, priceTimesheet } from '@/modules/rates-contracts/domain/pricing';
+import { rateTermsFor, readRateTerms } from '@/modules/rates-contracts/application/rate-card';
+import { priceTimesheet } from '@/modules/rates-contracts/domain/pricing';
 import {
   PLATFORM_FEE_UNSET_BP,
   entriesForApprovedWork,
@@ -132,6 +132,11 @@ function exclusiveBands(sheet: {
   };
 }
 
+/** One line as it is written, before the invoice that holds it exists. */
+interface InvoiceLineData extends InvoiceLineView {
+  rateCardId: string | null;
+}
+
 export interface GenerateInvoiceParams {
   facilityId: string;
   periodStart: Date;
@@ -173,11 +178,17 @@ export async function generateInvoice(input: GenerateInvoiceParams): Promise<Inv
   );
   if (billable.length === 0) throw InvoiceErrors.nothingToBill();
 
-  const card = await activeRateCard(input.facilityId);
-  const rates = card ?? DEFAULT_RATE_CARD;
-
-  const lines = billable.map((row) => {
+  // Each shift is priced on the terms fixed when it was booked. A booking made
+  // before terms were kept has none, and is priced on the card in force on the
+  // shift's date - which is what the card's own dates meant. This used to be one
+  // card, "the active one", for every shift on the invoice, so a facility could
+  // replace its card between booking and billing and change what was agreed.
+  const lines: InvoiceLineData[] = [];
+  for (const row of billable) {
     const sheet = row.timesheet!;
+    const terms =
+      readRateTerms(row.assignment.rateTerms) ??
+      (await rateTermsFor(input.facilityId, row.assignment.startsAt));
     const bands = exclusiveBands(sheet);
     const priced = priceTimesheet(
       {
@@ -186,12 +197,12 @@ export async function generateInvoice(input: GenerateInvoiceParams): Promise<Inv
         onCallMinutes: sheet.onCallMinutes,
         hourlyRateKobo: sheet.hourlyRateKobo,
       },
-      rates,
+      terms,
     );
 
-    return {
+    lines.push({
       assignmentId: row.assignmentId,
-      rateCardId: card?.id ?? null,
+      rateCardId: terms.rateCardId,
       practitionerId: row.assignment.userId,
       hourlyRateKobo: sheet.hourlyRateKobo,
       ...bands,
@@ -200,8 +211,8 @@ export async function generateInvoice(input: GenerateInvoiceParams): Promise<Inv
       baseKobo: priced.baseKobo,
       premiumKobo: priced.premiumKobo,
       amountKobo: priced.totalKobo,
-    };
-  });
+    });
+  }
 
   const grossKobo = lines.reduce((total, line) => total + line.amountKobo, 0);
   const feeKobo = platformFeeKobo(grossKobo, platformFeeBp());

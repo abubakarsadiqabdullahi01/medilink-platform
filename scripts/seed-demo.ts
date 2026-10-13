@@ -100,7 +100,7 @@ import {
   reviewTimesheet,
   submitTimesheet,
 } from '../src/modules/timesheets/application/timesheet';
-import { createRateCard } from '../src/modules/rates-contracts/application/rate-card';
+import { createRateCard, rateTermsFor } from '../src/modules/rates-contracts/application/rate-card';
 import {
   generateInvoice,
   issueInvoice,
@@ -2233,6 +2233,24 @@ async function main(): Promise<void> {
   );
 
   // -------------------------------------------------------------- money
+  // Every shift here was booked today and then moved back in time, so the terms
+  // fixed at booking are today's. A real booking is priced on what applied when
+  // it was made, so the history is given the terms its own date would have had:
+  // otherwise June's invoices would carry July's premiums and the superseded
+  // card above would never be seen to have priced anything.
+  {
+    const history = await prisma.assignment.findMany({
+      where: { facilityId: { in: facilities.map((f) => f.id) } },
+      select: { id: true, facilityId: true, startsAt: true },
+    });
+    for (const row of history) {
+      await prisma.assignment.update({
+        where: { id: row.id },
+        data: { rateTerms: { ...(await rateTermsFor(row.facilityId, row.startsAt)) } },
+      });
+    }
+  }
+
   log('Invoicing, paying and settling month by month…');
 
   const firstMonth = new Date(watDay(-HISTORY_DAYS).getTime() + WAT);

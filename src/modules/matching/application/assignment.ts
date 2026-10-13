@@ -4,6 +4,7 @@ import { recordAudit } from '@/lib/audit';
 import { publishEvent } from '@/lib/outbox';
 import { EVENTS } from '@/lib/events';
 import { HttpError } from '@/lib/http/errors';
+import { rateTermsFor } from '@/modules/rates-contracts/application/rate-card';
 import {
   DEFAULT_INVITATION_HOURS,
   canTransitionAssignment,
@@ -528,9 +529,12 @@ export async function confirmAssignment(input: ConfirmParams): Promise<Assignmen
   // trusted from the match that preceded it. Read before the transaction opens:
   // neither is something this booking can race against within its own lock.
   const now = new Date();
-  const [facility, bookingBlockersNow] = await Promise.all([
+  const [facility, bookingBlockersNow, rateTerms] = await Promise.all([
     getFacility(known.facilityId),
     bookingBlockers(input.userId, known.professionalCategoryId, now),
+    // The allowances in force for this shift's date, fixed on the booking. A
+    // published shift's terms cannot change, so reading them before the locks is safe.
+    rateTermsFor(known.facilityId, known.startsAt, now),
   ]);
 
   return prisma.$transaction(async (tx: Tx) => {
@@ -583,6 +587,9 @@ export async function confirmAssignment(input: ConfirmParams): Promise<Assignmen
         startsAt: request.startsAt,
         endsAt: request.endsAt,
         confirmedBy: input.actorId,
+        // Priced on what applied when this was booked, not on whatever applies
+        // when it is invoiced.
+        rateTerms: { ...rateTerms },
       },
     });
 

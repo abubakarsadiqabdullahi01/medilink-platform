@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/modules/practitioners/application/bookable', () => import('./support/always-bookable'));
@@ -87,6 +88,11 @@ interface World {
 /** A shift worked and approved — the state billing starts from. */
 async function buildWorld(
   worked: { from: Date; to: Date } = { from: WORKED_FROM, to: WORKED_TO },
+  /**
+   * The facility's allowances *when the shift is booked*. Premiums are fixed at
+   * booking, so a card has to exist before the booking to apply to it.
+   */
+  card?: { name?: string; nightMultiplierBp?: number; holidayMultiplierBp?: number },
 ): Promise<World> {
   await ensureRole('facility_owner', ROLE_PERMISSIONS.facility_owner ?? []);
 
@@ -135,6 +141,16 @@ async function buildWorld(
     permissions: ['payout.manage', 'invoice.read'],
     scopeType: 'PLATFORM',
   });
+
+  if (card) {
+    await createRateCard({
+      facilityId: facility.id,
+      actorId: reviewer.id,
+      name: card.name ?? 'Allowances at booking',
+      nightMultiplierBp: card.nightMultiplierBp,
+      holidayMultiplierBp: card.holidayMultiplierBp,
+    });
+  }
 
   const request = await createServiceRequest({
     facilityId: facility.id,
@@ -340,17 +356,13 @@ describe('a rate card changes the figures', () => {
     // as a real shift rather than by editing the timesheet's figures after the
     // fact — the bands are computed once, at the timesheet, and billing reads
     // them back.
-    const world = await buildWorld({
-      from: new Date('2026-09-09T19:00:00.000Z'),
-      to: new Date('2026-09-10T03:00:00.000Z'),
-    });
-
-    await createRateCard({
-      facilityId: world.facilityId,
-      actorId: world.reviewerId,
-      name: 'Night premium',
-      nightMultiplierBp: 15_000,
-    });
+    const world = await buildWorld(
+      {
+        from: new Date('2026-09-09T19:00:00.000Z'),
+        to: new Date('2026-09-10T03:00:00.000Z'),
+      },
+      { name: 'Night premium', nightMultiplierBp: 15_000 },
+    );
 
     const invoice = await generateInvoice(period(world));
     // Eight night hours at 1.5x ₦5,000.
@@ -359,12 +371,7 @@ describe('a rate card changes the figures', () => {
   });
 
   it('leaves the figures alone at par', async () => {
-    const world = await buildWorld();
-    await createRateCard({
-      facilityId: world.facilityId,
-      actorId: world.reviewerId,
-      name: 'No allowances',
-    });
+    const world = await buildWorld(undefined, { name: 'No allowances' });
 
     const invoice = await generateInvoice(period(world));
     expect(invoice.grossKobo).toBe(4_000_000);
@@ -409,6 +416,112 @@ describe('a rate card changes the figures', () => {
         nightMultiplierBp: 9_000,
       }),
     ).rejects.toThrow(/below_par/);
+  });
+});
+
+describe('premiums are fixed when the shift is booked', () => {
+  /**
+   * One card, chosen when the invoice was raised, priced every shift on it. A
+   * facility could book a night shift under a 1.5x card and supersede it with a
+   * 1.0x one before the invoice, and the practitioner would be paid the lower
+   * figure for work they had agreed at the higher.
+   */
+  const NIGHT = {
+    from: new Date('2026-09-09T19:00:00.000Z'),
+    to: new Date('2026-09-10T03:00:00.000Z'),
+  };
+
+  it('is priced on the card that applied when it was booked, not the one that applies when it is invoiced', async () => {
+    const world = await buildWorld(NIGHT, { name: 'At booking', nightMultiplierBp: 15_000 });
+
+    // The facility replaces its card afterwards, down to par.
+    await createRateCard({
+      facilityId: world.facilityId,
+      actorId: world.reviewerId,
+      name: 'Cut after booking',
+      nightMultiplierBp: 10_000,
+    });
+
+    const invoice = await generateInvoice(period(world));
+    // Eight night hours at 1.5x ₦5,000, as agreed.
+    expect(invoice.grossKobo).toBe(6_000_000);
+    expect(invoice.lines[0]!.premiumKobo).toBe(2_000_000);
+  });
+
+  it('is not raised by a card created after it was booked either', async () => {
+    const world = await buildWorld(NIGHT, { name: 'At booking', nightMultiplierBp: 10_000 });
+
+    await createRateCard({
+      facilityId: world.facilityId,
+      actorId: world.reviewerId,
+      name: 'Raised after booking',
+      nightMultiplierBp: 20_000,
+    });
+
+    const invoice = await generateInvoice(period(world));
+    expect(invoice.grossKobo).toBe(4_000_000);
+    expect(invoice.lines[0]!.premiumKobo).toBe(0);
+  });
+
+  it('keeps the terms on the booking, with the card they came from', async () => {
+    const world = await buildWorld(NIGHT, { name: 'At booking', nightMultiplierBp: 15_000 });
+
+    const row = await prisma.assignment.findUniqueOrThrow({ where: { id: world.assignmentId } });
+    expect(row.rateTerms).toMatchObject({
+      nightMultiplierBp: 15_000,
+      holidayMultiplierBp: 10_000,
+    });
+    const card = await prisma.rateCard.findFirstOrThrow({ where: { facilityId: world.facilityId } });
+    expect(row.rateTerms).toHaveProperty('rateCardId', card.id);
+  });
+
+  it('is at par when there was no card at booking, and a later card does not change that', async () => {
+    const world = await buildWorld(NIGHT);
+    await createRateCard({
+      facilityId: world.facilityId,
+      actorId: world.reviewerId,
+      name: 'Created afterwards',
+      nightMultiplierBp: 15_000,
+    });
+
+    const invoice = await generateInvoice(period(world));
+    expect(invoice.grossKobo).toBe(4_000_000);
+    const row = await prisma.assignment.findUniqueOrThrow({ where: { id: world.assignmentId } });
+    expect(row.rateTerms).toMatchObject({ rateCardId: null, nightMultiplierBp: 10_000 });
+  });
+
+  it('uses the card whose dates cover the shift, for a booking made before any terms were kept', async () => {
+    // A booking from before this change has no terms on it. It is priced by the
+    // card in force on the shift's date - not whichever is active today.
+    const world = await buildWorld(NIGHT);
+    await prisma.assignment.update({ where: { id: world.assignmentId }, data: { rateTerms: Prisma.DbNull } });
+    const shift = await prisma.assignment.findUniqueOrThrow({ where: { id: world.assignmentId } });
+
+    const before = new Date(shift.startsAt.getTime() - 30 * 24 * 60 * 60 * 1000);
+    await prisma.rateCard.create({
+      data: {
+        facilityId: world.facilityId,
+        name: 'In force on the day',
+        nightMultiplierBp: 15_000,
+        status: 'SUPERSEDED',
+        effectiveFrom: before,
+        effectiveUntil: new Date(shift.startsAt.getTime() + 24 * 60 * 60 * 1000),
+        createdBy: world.reviewerId,
+      },
+    });
+    await prisma.rateCard.create({
+      data: {
+        facilityId: world.facilityId,
+        name: 'Only from next month',
+        nightMultiplierBp: 30_000,
+        status: 'ACTIVE',
+        effectiveFrom: new Date(shift.startsAt.getTime() + 30 * 24 * 60 * 60 * 1000),
+        createdBy: world.reviewerId,
+      },
+    });
+
+    const invoice = await generateInvoice(period(world));
+    expect(invoice.grossKobo).toBe(6_000_000);
   });
 });
 

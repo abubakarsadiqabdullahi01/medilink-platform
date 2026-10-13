@@ -1096,6 +1096,11 @@ model Assignment {
   endsAt           DateTime         @map("ends_at")
   status           AssignmentStatus @default(CONFIRMED)
   confirmedBy      String           @map("confirmed_by") @db.Uuid
+  // The facility's allowances (night, holiday, overtime, on-call multipliers)
+  // as they stood when this was booked, with the card they came from. What the
+  // shift is priced on, so a card replaced afterwards cannot change what was
+  // agreed. Null on bookings made before this existed.
+  rateTerms        Json?            @map("rate_terms")
   createdAt        DateTime         @default(now()) @map("created_at")
   updatedAt        DateTime         @updatedAt @map("updated_at")
 
