@@ -49,7 +49,7 @@ async function register(f: Awaited<ReturnType<typeof fixture>>, overrides: Recor
       body: JSON.stringify({ ...GOVERNMENT, facilityTypeId: f.type.id, stateId: f.state.id, ...overrides }),
     }),
   );
-  return { user, status: response.status, body: (await response.json()) as Record<string, any> };
+  return { user, status: response.status, body: (await response.json()) as Record<string, unknown> };
 }
 
 describe('registering without a CAC number', () => {
