@@ -6,6 +6,8 @@ export const EVENTS = {
   PractitionerRegistered: 'practitioner.registered',
   CredentialSubmitted: 'credential.submitted',
   CredentialVerified: 'credential.verified',
+  CredentialRejected: 'credential.rejected',
+  CredentialInfoRequested: 'credential.info_requested',
   CredentialExpired: 'credential.expired',
   FacilityVerified: 'facility.verified',
   ServiceRequestPublished: 'service_request.published',

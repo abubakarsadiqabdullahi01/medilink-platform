@@ -437,3 +437,59 @@ export async function notifyShiftAccepted(payload: Record<string, unknown>): Pro
     'the acceptance',
   );
 }
+
+/**
+ * A decision on a credential, told to the practitioner it concerns.
+ *
+ * Nothing was: "verified" had an event and no handler, and refusing or querying
+ * a credential published nothing at all, so a mandatory credential queried once
+ * could sit unanswered for as long as the practitioner did not open the app.
+ *
+ * The reviewer's notes are not in the text. They are the practitioner's to read
+ * signed in, and a phone is not always the practitioner's own.
+ */
+type CredentialDecision = 'credential.verified' | 'credential.rejected' | 'credential.info_requested';
+
+export async function notifyCredentialDecision(
+  kind: CredentialDecision,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  const submissionId = String(payload.submissionId ?? '');
+  const practitionerId = String(payload.userId ?? '');
+  const typeId = String(payload.credentialTypeId ?? '');
+
+  if (!submissionId || !practitionerId || !typeId) {
+    logger.warn('credential decision event missing ids; skipping notification', { kind });
+    return;
+  }
+
+  // One text per decision, not per submission: a query, an answer and an
+  // approval are three separate things to be told about the same row.
+  const decidedAfter = payload.decidedAt ? new Date(String(payload.decidedAt)) : undefined;
+  if (await alreadyNotified(practitionerId, kind, submissionId, decidedAfter)) return;
+
+  const type = await prisma.credentialType.findUnique({
+    where: { id: typeId },
+    select: { name: true },
+  });
+  const what = type?.name ?? 'credential';
+
+  const wording: Record<CredentialDecision, string> = {
+    'credential.verified': `Your ${what} has been verified. Medilink.`,
+    'credential.rejected': `Your ${what} could not be approved. Open Medilink to see why and send it again. Medilink.`,
+    'credential.info_requested': `Your ${what} needs more information. Open Medilink to see what is wanted. Medilink.`,
+  };
+
+  failIfAnyFailed(
+    [
+      await notify({
+        userId: practitionerId,
+        kind,
+        body: wording[kind],
+        relatedType: 'credentials.credential_submissions',
+        relatedId: submissionId,
+      }),
+    ],
+    'the credential decision',
+  );
+}

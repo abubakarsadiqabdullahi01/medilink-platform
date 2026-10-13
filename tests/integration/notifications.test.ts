@@ -15,6 +15,11 @@ import {
 import { startRegistration } from '@/modules/auth/application/registration';
 import { reportIncident } from '@/modules/clinical-incidents/application/incident';
 import { publishEvent } from '@/lib/outbox';
+import {
+  resupplyCredential,
+  reviewCredential,
+  submitCredential,
+} from '@/modules/credentials/application/submission';
 import { runOnce } from '@/worker/processor';
 import { handlers } from '@/worker/handlers';
 import {
@@ -22,7 +27,7 @@ import {
   eligiblePractitioner,
   type BookingWorld,
 } from './support/booking-world';
-import { createUser, grant } from './support/fixtures';
+import { createCredentialType, createUser, grant } from './support/fixtures';
 
 /**
  * What happens when a text does not go, and what it says when it does.
@@ -542,5 +547,87 @@ describe('an offer, and the answer to it', () => {
 
     const rows = await kindsFor(nurse.id, 'shift.invited');
     expect(rows.filter((row) => row.sentAt !== null)).toHaveLength(1);
+  });
+});
+
+
+describe('a decision on a credential', () => {
+  /**
+   * A practitioner found out their licence had been verified, queried or
+   * refused only by opening the app. The "verified" event had no handler and
+   * the other two decisions published nothing at all, so a mandatory credential
+   * queried once could sit unanswered for as long as nobody looked.
+   */
+  async function submitted() {
+    const world = await buildBookingWorld();
+    const nurse = await eligiblePractitioner(world);
+    const type = await createCredentialType({
+      name: 'Practising licence (nursing)',
+      verificationMethod: 'mdcn_status_check',
+    });
+    const submission = await submitCredential({
+      userId: nurse.id,
+      credentialTypeId: type.id,
+      referenceNumber: 'NMCN/12345',
+    });
+    const officer = await createUser({ fullName: 'Compliance Officer' });
+    // The booking world's own texts are not what is being looked at.
+    await runOnce({ handlers });
+    sms.send.mockClear();
+    return { nurse, type, submission, officer };
+  }
+
+  const messagesFor = (userId: string) =>
+    prisma.notificationMessage.findMany({ where: { userId, kind: { startsWith: 'credential.' } } });
+
+  it.each([
+    ['approve', 'credential.verified', /verified/i],
+    ['reject', 'credential.rejected', /not (been )?approved|refused|could not/i],
+    ['request_info', 'credential.info_requested', /more information|needs more/i],
+  ] as const)('tells the practitioner when it is %s', async (decision, kind, wording) => {
+    const { nurse, submission, officer } = await submitted();
+
+    await reviewCredential({
+      submissionId: submission.id,
+      reviewerId: officer.id,
+      decision,
+      reviewNotes: 'The scan is cut off at the edge; the expiry date cannot be read.',
+    });
+    await runOnce({ handlers });
+
+    const [message] = await messagesFor(nurse.id);
+    expect(message!.kind).toBe(kind);
+    expect(message!.body).toContain('Practising licence (nursing)');
+    expect(message!.body).toMatch(wording);
+    // The reviewer's notes are read in the app, signed in, not in a text.
+    expect(message!.body).not.toContain('cut off');
+  });
+
+  it('tells them again when the same submission is queried a second time', async () => {
+    const { nurse, submission, officer } = await submitted();
+
+    await reviewCredential({ submissionId: submission.id, reviewerId: officer.id, decision: 'request_info', reviewNotes: 'Which register is this on?' });
+    await runOnce({ handlers });
+    await resupplyCredential({ submissionId: submission.id, userId: nurse.id, referenceNumber: 'NMCN/12345' });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await reviewCredential({ submissionId: submission.id, reviewerId: officer.id, decision: 'request_info', reviewNotes: 'The number does not match the scan.' });
+    await runOnce({ handlers });
+
+    expect(
+      (await messagesFor(nurse.id)).filter((m) => m.kind === 'credential.info_requested' && m.sentAt),
+    ).toHaveLength(2);
+  });
+
+  it('is retried for a practitioner who could not be reached, and sent once', async () => {
+    const { nurse, submission, officer } = await submitted();
+    sms.send.mockResolvedValue(null);
+    await reviewCredential({ submissionId: submission.id, reviewerId: officer.id, decision: 'approve' });
+    expect((await runOnce({ handlers })).failed).toBeGreaterThanOrEqual(1);
+
+    sms.send.mockResolvedValue(ACCEPTED);
+    await makeDue();
+    await runOnce({ handlers });
+
+    expect((await messagesFor(nurse.id)).filter((m) => m.sentAt !== null)).toHaveLength(1);
   });
 });

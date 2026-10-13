@@ -5,6 +5,7 @@ import { screenPractitioner } from '../modules/practitioners/application/screeni
 import {
   notifyAssignmentCancelled,
   notifyAssignmentConfirmed,
+  notifyCredentialDecision,
   notifyDisputeEvent,
   notifyIncidentReported,
   notifyShiftAccepted,
@@ -27,6 +28,12 @@ export const handlers: Record<string, EventHandler> = {
   [EVENTS.AssignmentConfirmed]: async (payload) => {
     await notifyAssignmentConfirmed(payload);
   },
+
+  // Every decision on a credential, told to the practitioner it concerns.
+  [EVENTS.CredentialVerified]: (payload) => notifyCredentialDecision('credential.verified', payload),
+  [EVENTS.CredentialRejected]: (payload) => notifyCredentialDecision('credential.rejected', payload),
+  [EVENTS.CredentialInfoRequested]: (payload) =>
+    notifyCredentialDecision('credential.info_requested', payload),
 
   // The offer and the answer to it, each as a text: the premise is that a nurse
   // is told and answers in minutes, and nothing was sent.

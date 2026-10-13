@@ -416,20 +416,27 @@ export async function reviewCredential(
       });
     }
 
-    // No event on reject or on an information request — neither exists in
-    // the vocabulary, and the audit row above is the record.
-    if (approved) {
-      await publishEvent(tx, {
-        eventType: EVENTS.CredentialVerified,
-        aggregateType: 'credentials.credential_submissions',
-        aggregateId: updated.id,
-        payload: {
-          submissionId: updated.id,
-          userId: updated.userId,
-          credentialTypeId: updated.credentialTypeId,
-        },
-      });
-    }
+    // Every decision is an event, because every decision is something the
+    // practitioner has to hear about: they found out a licence had been queried
+    // or refused only by opening the app. The notes stay on the audit row and in
+    // the app; the event carries no free text.
+    await publishEvent(tx, {
+      eventType: approved
+        ? EVENTS.CredentialVerified
+        : input.decision === 'reject'
+          ? EVENTS.CredentialRejected
+          : EVENTS.CredentialInfoRequested,
+      aggregateType: 'credentials.credential_submissions',
+      aggregateId: updated.id,
+      payload: {
+        submissionId: updated.id,
+        userId: updated.userId,
+        credentialTypeId: updated.credentialTypeId,
+        // A submission can be queried more than once; this is what makes the
+        // second query a new thing to be told about, not a repeat of the first.
+        decidedAt: now.toISOString(),
+      },
+    });
 
     return toView(updated);
   });
