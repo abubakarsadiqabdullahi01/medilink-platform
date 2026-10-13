@@ -32,6 +32,10 @@ about themselves.
    returned `objectKey` is passed to POST or PATCH to attach the photo, which
    confirms the upload actually landed before trusting the reference.
 
+5. `POST /api/v1/practitioners/me/submit` — "I am done, review me" (added
+   2026-10-12). Stamps `submitted_for_review_at` on the profile. See
+   "Submitting for approval" below.
+
 Registration (Stage 4.2) already ends by publishing
 `EVENTS.PractitionerRegistered`. Its handler
 (`src/worker/handlers.ts`) now also grants the practitioner the
@@ -45,6 +49,38 @@ Registration (Stage 4.2) already ends by publishing
 | Bio length | 1000 characters | `BIO_MAX_LENGTH` |
 | Photo content types | pdf, jpeg, png, webp, heic | `lib/storage/tigris.ts` |
 | Photo size | 10 MB | `MAX_UPLOAD_BYTES` |
+
+## Submitting for approval
+
+Between registering and being offered work there are three things that are the
+practitioner's to do — their details, when they can work, and the documents
+their profession requires — and then a fourth that is nobody's but a compliance
+officer's: checking all of it. Until the practitioner says they are done there
+is nothing for the officer to check, so "done" is an explicit act:
+`POST /api/v1/practitioners/me/submit`.
+
+- **The server refuses an early one.** `application_incomplete` (422) names what
+  is missing. The page shows the same checklist and disables its button, but the
+  page is a courtesy — somebody calling the API directly must not put a
+  half-finished application in front of an officer looking complete. A document
+  still *waiting* for review counts as supplied (supplying is theirs, judging is
+  the officer's); a rejected one does not.
+- **Idempotent.** A second press changes nothing and writes no second audit row;
+  the timestamp orders the officer's queue, so a retry must not reorder it.
+- **SELF only.** The route names no user; the scope is the caller's own id.
+- **Not an eligibility blocker, on purpose.** Only an officer's verification
+  gates matching. Making submission a blocker would silently make every existing
+  practitioner ineligible until they pressed a button. The UI treats anybody who
+  is already eligible as approved.
+- **What it changes for the officer.** `GET /api/v1/practitioners` takes
+  `application=waiting|draft`. The admin Practitioners page opens on *Waiting for
+  approval*, longest-waiting first, with *Not submitted yet* (including people
+  with no profile) and *Everyone* beside it. Nothing stops an officer opening
+  someone who has not submitted; they are simply not what the queue is made of.
+- **Where it lives.** Pure rules in `domain/application-review.ts` (gaps and
+  state: DRAFT → READY → WAITING → APPROVED); the write in
+  `application/application-review.ts`. Availability belongs to another module,
+  so the route asks it and hands the answer in.
 
 ## The gap this closes
 

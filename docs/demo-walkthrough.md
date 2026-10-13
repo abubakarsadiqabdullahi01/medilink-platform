@@ -113,8 +113,8 @@ check-out code while you watch.
   has more rows than anybody typed.
 - **Timesheets** — one shift is checked out and waiting for her to submit.
   Nothing is paid until she does, and the page says so.
-- **Credentials** — six verified documents, each with the reviewer's decision.
-- **Your data** — she has deliberately *not* accepted the revised 2026 privacy
+- **My profile → Credentials** — six verified documents, each with the reviewer's decision.
+- **My profile → Privacy** — she has deliberately *not* accepted the revised 2026 privacy
   notice, so the outstanding-agreement path is visible. Blessing has.
 
 Then sign in as somebody who cannot work: **Emeka Nwosu** (`+2348031200026`)

@@ -96,9 +96,9 @@ Sign in as **Amina Yusuf**, `+2348031200021`.
 | Decline one, *with a reason* | It leaves her list — and the reason lands in the platform's suggestion log (sign in as operations later and look) |
 | **My shifts** | A shift in progress right now — she is checked in and not yet out |
 | **Timesheets** | One shift ready to submit, with an info banner saying nothing is paid until she does. Submit it |
-| **Credentials** | Six verified documents, each with the reviewer's decision |
-| **Availability** | A weekly pattern plus one booked block of leave |
-| **Your data** | The 2026 privacy notice shown as **not yet accepted** — accept it, and the badge clears |
+| **My profile → Credentials** | Six verified documents, each with the reviewer's decision |
+| **My profile → Availability** | A weekly pattern plus one booked block of leave |
+| **My profile → Privacy** | The 2026 privacy notice shown as **not yet accepted** — accept it, and the badge clears |
 
 Then sign in as **Blessing Okoro**, `+2348031200022`: a shift starting within
 the hour, and one timesheet already submitted and waiting on the hospital. Her
@@ -335,17 +335,27 @@ docker compose exec web pnpm test:integration  # 431 integration, separate datab
 
 Not bugs to report; they are not built yet.
 
-- **Screening flags have no console.** The rule works and Emeka Nwosu is
-  correctly flagged, but there is no screen for a compliance officer to answer
-  the flag from, so he stays flagged. The only queue in the product with no
-  surface.
-- **No practitioner payments page.** The payout data is there and the endpoint
-  works; the practitioner console has nowhere to ask "have I been paid?".
-- **Offer cards read "offered —"** — the invitations API does not return
-  `createdAt`.
-- **The data-requests "In progress" tab is always empty** — nothing writes that
-  status.
 - **No real SMS, NIMC or payment gateway.** All three are stubs by design until
   credentials exist.
 - **Documents are blank one-page PDFs.** Credential evidence is somebody's
   medical record; the demo must not contain anything resembling a real one.
+- **The on-call multiplier cannot be set below 1.0×.** Pricing treats on-call as
+  a fraction of the rate, the rate-card rule floors every band at par. Which is
+  right is a pricing decision still to be made.
+
+Closed since this list was first written, and worth testing once:
+
+- **Screening flags** are answered on the practitioner's page in
+  **Practitioners** → *Sanctions screening*: compare the matched entry, then
+  clear it with a reason. Emeka Nwosu is the seeded case.
+- **A queried credential can be answered.** After *Ask for more*, the
+  practitioner's credential card offers *Send what the reviewer asked for*.
+- **Staff** pages exist in both consoles (owner: *Staff*; platform: *Staff*),
+  each behind a password re-check.
+- **Excusals** are asked for from the practitioner's *My shifts* (on a shift
+  that ended with no check-in) and decided on the unhonoured shift's page.
+- **Suspensions** are lifted from the practitioner's page in **Practitioners**.
+- **Terms and notices** are published from *Terms and notices* (super
+  administrator); hospital staff accept facility terms from their dashboard.
+- **Staff sign-ups** (`/register?as=facility`, `/register?as=staff`) no longer
+  receive the practitioner role.

@@ -93,7 +93,7 @@ readable without colour at all.
 ## Data protection is a screen, not a paragraph
 
 A right that exists only in a privacy notice is not a right. So each one on
-`/practitioner/privacy` is a control: the export downloads a file, withdrawing
+the Privacy tab of My profile (`/practitioner/profile?tab=privacy`) is a control: the export downloads a file, withdrawing
 a consent writes a record, and the erasure check answers before you ask rather
 than after you are refused.
 

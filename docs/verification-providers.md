@@ -14,6 +14,45 @@ manual review path that already exists and works. Buying a subscription later
 changes **who supplies the evidence**, not the endpoints, the schema, the
 permissions or anything a caller sees.
 
+## How the evidence gets in while both are off
+
+"An officer records it by hand" used to mean: go and check the NIN or the
+licence somewhere else, then type the number and the answer into a form. The
+product never held the evidence, so the officer had to leave it, and the same
+number was entered twice — once by the practitioner, once by the officer.
+
+Now the practitioner sends the number **with a photograph of the slip or the
+licence** (the form asks for it exactly while the provider is off, and stops
+asking when one is switched on). The officer reads the photograph beside the
+number on the practitioner's page and confirms what they see:
+
+- `POST /api/v1/practitioners/verification/confirm` records the identity or the
+  registration **from the submission** and decides the submission in the same
+  act. The number is read on the server and never re-entered, so it cannot
+  differ from what was sent. The officer supplies only their reading — whether
+  the name matches, what the licence shows.
+- **The officer still decides.** Nothing approves on its own. A name mismatch is
+  recorded as a fact and the practitioner is asked to correct it; a licence that
+  is not active is recorded as it is and the submission rejected with the reason.
+- **The NIN is kept out of the audit trail and is masked after use.** The
+  credential audit rows carry only the last four digits, and once an identity
+  is recorded the stored number is reduced to its tail, matching what the
+  identity record itself keeps.
+- **Viewing the photograph is a deliberate act.** It loads when the officer asks,
+  so the access event (`credential.document_accessed`) records who chose to look.
+- **The plain "Verify" no longer applies to these two.** `POST
+  /credentials/:id/review` refuses to approve a number-checked credential
+  (`confirm_through_practitioner`), because a bare approval would leave the
+  practitioner blocked on an identity nobody recorded. Rejecting and asking for
+  more still go through it.
+- The by-hand forms remain, under "Record by hand", for somebody who has
+  submitted nothing to confirm (verified in person or by telephone).
+
+Switching a provider on later changes who answers the officer's two questions,
+not this flow: `recordIdentityVerification` and `recordProfessionalRegistration`
+already branch on `enabled`, so the confirm endpoint asks the provider instead of
+the officer and the form stops asking for a photograph.
+
 ## The switches
 
 | Variable | Values | Default |
