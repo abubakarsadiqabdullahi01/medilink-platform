@@ -32,6 +32,13 @@ export const AuthErrors = {
   otpThrottled: (retryAfterSeconds: number) =>
     new AuthError('otp_throttled', 'Wait a moment before requesting another code.', 429, retryAfterSeconds),
 
+  setupTokenInvalid: () =>
+    new AuthError(
+      'setup_token_invalid',
+      'Your verification has expired or does not match. Verify your phone again to continue.',
+      403,
+    ),
+
   smsUnavailable: () =>
     new AuthError(
       'sms_unavailable',

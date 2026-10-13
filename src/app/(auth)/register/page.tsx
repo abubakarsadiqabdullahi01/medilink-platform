@@ -134,10 +134,20 @@ function RegisterForm() {
     onSuccess: () => setStep(1),
   });
 
+  // Handed back by verifying the phone and required to set the password: it is
+  // what ties the last step to the code that was just entered.
+  const [setupToken, setSetupToken] = useState('');
+
   const verify = useMutation({
     mutationFn: (values: z.infer<typeof codeSchema>) =>
-      api.post('/api/v1/auth/verify-phone', { phone, code: values.code }),
-    onSuccess: () => setStep(2),
+      api.post<{ setupToken: string | null }>('/api/v1/auth/verify-phone', {
+        phone,
+        code: values.code,
+      }),
+    onSuccess: (result) => {
+      setSetupToken(result.setupToken ?? '');
+      setStep(2);
+    },
   });
 
   const resend = useMutation({
@@ -152,6 +162,7 @@ function RegisterForm() {
       await api.post('/api/v1/auth/set-password', {
         phone,
         password,
+        setupToken,
         accountType: forStaff ? 'staff' : 'practitioner',
         consentToSharing: forStaff ? undefined : sharing,
       });

@@ -103,22 +103,24 @@ Check "verify-phone rejects a wrong code (400)" ($r.Status -eq 400 -and $r.Body 
 
 $r = Call Post "verify-phone" @{ phone = $phone; code = $code }
 Check "verify-phone accepts the real code (200)" ($r.Status -eq 200) $r.Body
+# What the password step has to present: it ties set-password to this code.
+$setupToken = ($r.Body | ConvertFrom-Json).setupToken
 
 $r = Call Post "verify-phone" @{ phone = $phone; code = $code }
 Check "the code cannot be replayed" ($r.Status -eq 400) $r.Body
 
 # --- password ---------------------------------------------------------------
-$r = Call Post "set-password" @{ phone = $phone; password = "short" }
+$r = Call Post "set-password" @{ phone = $phone; password = "short"; setupToken = $setupToken }
 Check "set-password rejects a weak password (422)" ($r.Status -eq 422) $r.Body
 
-$r = Call Post "set-password" @{ phone = $phone; password = $phone + "aaaa" }
+$r = Call Post "set-password" @{ phone = $phone; password = $phone + "aaaa"; setupToken = $setupToken }
 Check "set-password rejects a password containing the phone number" ($r.Status -in 400, 422) $r.Body
 
-$r = Call Post "set-password" @{ phone = $phone; password = $password }
+$r = Call Post "set-password" @{ phone = $phone; password = $password; setupToken = $setupToken }
 Check "set-password succeeds (200)" ($r.Status -eq 200) $r.Body
 Check "set-password does not issue a session" ($r.Body -notmatch "session") $r.Body
 
-$r = Call Post "set-password" @{ phone = $phone; password = $password }
+$r = Call Post "set-password" @{ phone = $phone; password = $password; setupToken = $setupToken }
 Check "set-password refuses to overwrite an existing password" ($r.Status -ge 400) $r.Body
 
 # --- login and session ------------------------------------------------------
@@ -130,7 +132,7 @@ Check "login rejects a wrong password (401)" ($r.Status -eq 401) $r.Body
 $r = Call Post "login" @{ phone = "08039999999"; password = $password } $null
 Check "login on an unknown number gives the same 401" ($r.Status -eq 401 -and $r.Body -match "invalid_credentials") $r.Body
 
-$r = Call Post "login" @{ phone = $phone; password = $password } $s
+$r = Call Post "login" @{ phone = $phone; password = $password; setupToken = $setupToken } $s
 Check "login succeeds (200)" ($r.Status -eq 200) $r.Body
 
 $cookie = $s.Cookies.GetCookies($BaseUrl) | Where-Object { $_.Name -eq "medilink_session" }
@@ -160,7 +162,7 @@ $r = Call Post "login" @{ phone = $phone; password = "Wrong-Password-5" } $null
 Check "the fifth failure is still a plain 401" ($r.Status -eq 401) $r.Body
 
 # The correct password: proves the refusal is the lock, not the password.
-$r = Call Post "login" @{ phone = $phone; password = $password } $null
+$r = Call Post "login" @{ phone = $phone; password = $password; setupToken = $setupToken } $null
 Check "a locked account refuses the correct password (429)" ($r.Status -eq 429 -and $r.Body -match "account_locked") $r.Body
 Check "lockout tells the caller when to retry" ($r.Body -match "retryAfterSeconds") $r.Body
 

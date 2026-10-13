@@ -175,10 +175,12 @@ def main():
     code = otp_from_logs(prac_phone)
     check("the one-time code reaches the console adapter", code is not None)
     if code:
-        status, _ = prac.call("POST", "/api/v1/auth/verify-phone", {"phone": prac_phone, "code": code})
+        status, verified = prac.call("POST", "/api/v1/auth/verify-phone", {"phone": prac_phone, "code": code})
         check("the phone verifies", status == 200, f"got {status}")
         status, _ = prac.call(
-            "POST", "/api/v1/auth/set-password", {"phone": prac_phone, "password": PASSWORD}
+            "POST",
+            "/api/v1/auth/set-password",
+            {"phone": prac_phone, "password": PASSWORD, "setupToken": verified.get("setupToken", "")},
         )
         check("a password is set", status == 200, f"got {status}")
         status, _ = prac.login(prac_phone)

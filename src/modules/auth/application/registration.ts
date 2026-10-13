@@ -1,11 +1,13 @@
 import { prisma, type Tx } from '@/lib/db';
 import { recordAudit } from '@/lib/audit';
+import { env } from '@/lib/env';
 import { publishEvent } from '@/lib/outbox';
 import { EVENTS } from '@/lib/events';
 import { hashPassword, passwordProblems } from '@/lib/password';
 import { maskPhone, normalizeNigerianPhone } from '@/lib/phone';
 import { consumeOtp, issueOtp, verifyOtp } from './otp-service';
 import { AuthErrors } from '../domain/errors';
+import { issueSetupToken, verifySetupToken } from '../domain/setup-token';
 import { grantConsentsInTx } from '@/modules/audit-compliance/application/consent';
 import { CONSENT_AT_REGISTRATION } from '@/modules/audit-compliance/domain/consent';
 
@@ -101,7 +103,7 @@ export async function verifyRegistrationPhone(input: {
   code: string;
   ipAddress?: string;
   now?: Date;
-}): Promise<{ userId: string; passwordSet: boolean }> {
+}): Promise<{ userId: string; passwordSet: boolean; setupToken: string | null }> {
   const now = input.now ?? new Date();
   const phone = normalizeNigerianPhone(input.phone);
 
@@ -136,7 +138,12 @@ export async function verifyRegistrationPhone(input: {
     });
   });
 
-  return { userId: user.id, passwordSet: user.passwordHash !== null };
+  // Handed back so the next step can prove it follows this one. An account
+  // that already has a password has no next step, so there is nothing to bind.
+  const setupToken =
+    user.passwordHash === null ? issueSetupToken(user.id, now, env.SESSION_SECRET) : null;
+
+  return { userId: user.id, passwordSet: user.passwordHash !== null, setupToken };
 }
 
 /**
@@ -147,6 +154,8 @@ export async function verifyRegistrationPhone(input: {
 export async function setInitialPassword(input: {
   phone: string;
   password: string;
+  /** From verifying the phone. Without it, knowing a verified number would be enough. */
+  setupToken: string;
   /** Defaults to practitioner; see setPasswordSchema for what staff means. */
   accountType?: 'practitioner' | 'staff';
   /** The practitioner ticked the box agreeing to be shown to facilities. */
@@ -155,6 +164,7 @@ export async function setInitialPassword(input: {
   userAgent?: string;
   now?: Date;
 }): Promise<{ userId: string; accountStatus: 'UNDER_REVIEW' | 'ACTIVE' }> {
+  const now = input.now ?? new Date();
   const phone = normalizeNigerianPhone(input.phone);
 
   const user = await prisma.user.findUnique({
@@ -175,6 +185,13 @@ export async function setInitialPassword(input: {
   if (user.passwordHash) throw AuthErrors.passwordAlreadySet();
   if (user.status === 'SUSPENDED' || user.status === 'DEACTIVATED') {
     throw AuthErrors.accountNotUsable();
+  }
+  // Whoever verified the code is who sets the password. Without this, a number
+  // that verified and never set one — an abandoned sign-up stays that way for
+  // ever — could be claimed by anybody who knew it, who would also choose what
+  // the account was.
+  if (!verifySetupToken(input.setupToken, user.id, now, env.SESSION_SECRET)) {
+    throw AuthErrors.setupTokenInvalid();
   }
 
   const problems = passwordProblems(input.password, {

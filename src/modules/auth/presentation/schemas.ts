@@ -36,6 +36,8 @@ export const verifyPhoneSchema = z.object({ phone, code });
 export const setPasswordSchema = z.object({
   phone,
   password,
+  /** What verifying the phone returned; proves this step follows that one. */
+  setupToken: z.string().min(1).max(200),
   accountType: z.enum(['practitioner', 'staff']).default('practitioner'),
   consentToSharing: z.boolean().optional(),
 });

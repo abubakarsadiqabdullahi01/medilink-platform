@@ -16,8 +16,11 @@ SMS gateway outage does not lock the whole platform out.
 1. `POST /api/v1/auth/register` — claims the number, creates a
    `PENDING_VERIFICATION` user, sends a code.
 2. `POST /api/v1/auth/verify-phone` — consumes the code, sets
-   `phone_verified_at`.
-3. `POST /api/v1/auth/set-password` — sets the password, moves the account to
+   `phone_verified_at`, and returns a `setupToken` (signed, valid for 30
+   minutes) when the account has no password yet.
+3. `POST /api/v1/auth/set-password` — requires that `setupToken`, so the step
+   is tied to the code that was just entered and knowing a verified number is
+   not enough to claim it. Sets the password, moves the account to
    `UNDER_REVIEW`, publishes `practitioner.registered`.
 4. `POST /api/v1/auth/login` — password login, issues a session cookie.
 5. `GET /api/v1/auth/session` — the caller's identity and permissions.

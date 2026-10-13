@@ -241,10 +241,12 @@ def main():
     check("a one-time code is sent", code is not None, "nothing in the console adapter's output")
 
     if code:
-        status, _ = prac.call("POST", "/api/v1/auth/verify-phone", {"phone": phone, "code": code})
+        status, verified = prac.call("POST", "/api/v1/auth/verify-phone", {"phone": phone, "code": code})
         check("the phone verifies", status == 200, f"got {status}")
         status, _ = prac.call(
-            "POST", "/api/v1/auth/set-password", {"phone": phone, "password": NEW_PASSWORD}
+            "POST",
+            "/api/v1/auth/set-password",
+            {"phone": phone, "password": NEW_PASSWORD, "setupToken": verified.get("setupToken", "")},
         )
         check("a password is set", status == 200, f"got {status}")
         status, _ = prac.login(phone, NEW_PASSWORD)
@@ -631,8 +633,12 @@ def main():
     ward.call("POST", "/api/v1/auth/register", {"phone": ward_phone, "fullName": "Simulated Ward Manager"})
     ward_code = otp_from_logs(ward_phone)
     if ward_code:
-        ward.call("POST", "/api/v1/auth/verify-phone", {"phone": ward_phone, "code": ward_code})
-        ward.call("POST", "/api/v1/auth/set-password", {"phone": ward_phone, "password": NEW_PASSWORD})
+        _, ward_verified = ward.call("POST", "/api/v1/auth/verify-phone", {"phone": ward_phone, "code": ward_code})
+        ward.call(
+            "POST",
+            "/api/v1/auth/set-password",
+            {"phone": ward_phone, "password": NEW_PASSWORD, "setupToken": ward_verified.get("setupToken", "")},
+        )
         ward.login(ward_phone, NEW_PASSWORD)
     status, body = ward.call("GET", "/api/v1/auth/session")
     ward_id = body.get("user", {}).get("id")
