@@ -32,6 +32,13 @@ export const AuthErrors = {
   otpThrottled: (retryAfterSeconds: number) =>
     new AuthError('otp_throttled', 'Wait a moment before requesting another code.', 429, retryAfterSeconds),
 
+  smsUnavailable: () =>
+    new AuthError(
+      'sms_unavailable',
+      'We could not send the code to your phone just now. Try again in a minute.',
+      503,
+    ),
+
   otpInvalid: () => new AuthError('otp_invalid', 'That code is not correct.', 400),
 
   otpExpired: () => new AuthError('otp_expired', 'That code has expired. Request a new one.', 400),

@@ -84,11 +84,35 @@ export async function issueOtp(input: {
     });
   });
 
-  await trySendSms({
+  const sent = await trySendSms({
     to: input.phone,
     body: otpMessageBody(code, input.purpose),
     transactional: true,
   });
+
+  // Said, not hidden. The result was ignored and the caller answered "code
+  // sent", so somebody waited for a text that was never sent. The code that
+  // went nowhere is not left outstanding, and the failure is on the record.
+  if (!sent?.accepted) {
+    await prisma.$transaction(async (tx: Tx) => {
+      await tx.otpCode.updateMany({
+        where: { userId: input.userId, purpose, codeHash, consumedAt: null },
+        data: { consumedAt: new Date() },
+      });
+      await recordAudit(tx, {
+        action: 'auth.otp_delivery_failed',
+        entityType: 'identity.otp_codes',
+        entityId: input.userId,
+        actorId: input.actorId ?? input.userId,
+        actorType: input.actorId ? 'user' : 'system',
+        scopeType: 'SELF',
+        scopeId: input.userId,
+        after: { purpose: input.purpose, phone: maskPhone(input.phone) },
+        ipAddress: input.ipAddress,
+      });
+    });
+    throw AuthErrors.smsUnavailable();
+  }
 
   return {
     expiresAt,
