@@ -11,6 +11,7 @@ import {
   hashOtpCode,
   otpExpiry,
   otpMessageBody,
+  OTP_MAX_ATTEMPTS,
   OTP_MAX_SENDS_PER_HOUR,
   type OtpPurposeKey,
 } from '../domain/otp';
@@ -128,13 +129,12 @@ export interface VerifiedOtp {
  * Verifies a submitted code without consuming it. Throws on any invalid
  * state: wrong, expired, exhausted, already used, or none outstanding.
  *
- * A wrong guess still increments the code's attempt counter, and that
- * increment is committed — with its own audit row — immediately, in its own
- * transaction, rather than deferred to whatever the caller does next.
- * Deferring it would let an abandoned or crashed request buy a free guess,
- * which is exactly what the counter exists to prevent. The audit row is what
- * closes the gap table-level coverage matching would otherwise paper over:
- * without it, this write is only "covered" because some unrelated
+ * Every verification takes one of the code's five attempts, atomically and
+ * before the guess is judged, so the limit holds under concurrent guessing and
+ * a request abandoned mid-flight has still been counted. A wrong guess also
+ * writes its own audit row, immediately, in its own transaction — which is also
+ * what closes the gap table-level coverage matching would otherwise paper over:
+ * without it, the counter write is only "covered" because some unrelated
  * auth.otp_issued row happens to land in the same test window.
  */
 export async function verifyOtp(input: {
@@ -151,17 +151,32 @@ export async function verifyOtp(input: {
     orderBy: { createdAt: 'desc' },
   });
 
+  // The attempt is taken *before* the guess is judged, in one conditional
+  // statement. The counter used to be read, judged and then incremented in a
+  // separate step, so guesses arriving together all read the old count and all
+  // were compared: the five-try limit could be exceeded by as many requests as
+  // fit in one round trip. Here the database hands out at most five attempts
+  // per code, and a request that does not get one is refused without its guess
+  // being looked at — so the number of codes tried can never exceed the limit.
+  // It also means a guess abandoned mid-flight has still been counted.
+  if (record) {
+    const taken = await prisma.otpCode.updateMany({
+      where: { id: record.id, consumedAt: null, attempts: { lt: OTP_MAX_ATTEMPTS } },
+      data: { attempts: { increment: 1 } },
+    });
+    if (taken.count === 0) {
+      logger.warn('otp verification failed', { userId: input.userId, reason: 'too_many_attempts' });
+      throw AuthErrors.otpExhausted();
+    }
+  }
+
   const submittedHash = hashOtpCode(input.code, input.userId, input.purpose, env.SESSION_SECRET);
+  // Judged against the row as read, which is the count *before* this attempt.
   const verdict = evaluateOtp(record, submittedHash, now);
 
   if (!verdict.ok) {
     if (record && verdict.reason === 'mismatch') {
       await prisma.$transaction(async (tx) => {
-        await tx.otpCode.update({
-          where: { id: record.id },
-          data: { attempts: { increment: 1 } },
-        });
-
         await recordAudit(tx, {
           action: 'auth.otp_attempt_failed',
           entityType: 'identity.otp_codes',
