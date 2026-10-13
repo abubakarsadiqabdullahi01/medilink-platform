@@ -4,8 +4,8 @@ import {
   preparePayoutSchema,
 } from '@/modules/billing-settlement/presentation/schemas';
 import {
-  amountOwed,
   listPayouts,
+  payoutPosition,
   preparePayout,
 } from '@/modules/billing-settlement/application/payout';
 
@@ -43,11 +43,13 @@ export async function GET(request: Request) {
       // What is credited and not yet paid out, from the ledger — the number a
       // practitioner opens the page to read, and the one no list of payouts
       // can give them.
-      const [payouts, owedKobo] = await Promise.all([
+      // `heldKobo` is the part of it that is on a shift in dispute and will not
+      // be paid until the case ends.
+      const [payouts, position] = await Promise.all([
         listPayouts(practitionerId),
-        amountOwed(practitionerId),
+        payoutPosition(practitionerId),
       ]);
-      return { payouts, owedKobo };
+      return { payouts, ...position };
     },
   });
 }

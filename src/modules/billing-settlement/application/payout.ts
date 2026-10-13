@@ -4,7 +4,9 @@ import { recordAudit } from '@/lib/audit';
 import { publishEvent } from '@/lib/outbox';
 import { EVENTS } from '@/lib/events';
 import { HttpError } from '@/lib/http/errors';
+import { assignmentsUnderDispute } from '@/modules/disputes/application/dispute';
 import { entriesForPayout } from '../domain/ledger';
+import { heldForDisputes, netOfLine } from '../domain/holds';
 import { PaymentGatewayUnavailable, sendPayout } from '../infrastructure/gateway';
 
 /**
@@ -25,6 +27,12 @@ export const PayoutErrors = {
     new HttpError(
       'payout_exceeds_balance',
       'This payout is larger than what the practitioner is owed now. Prepare a new one.',
+      409,
+    ),
+  held: () =>
+    new HttpError(
+      'payout_held',
+      'What this practitioner is owed is on a shift that is in dispute, so it is held until the case is decided or withdrawn.',
       409,
     ),
   wrongStatus: (from: string, to: string) =>
@@ -74,6 +82,57 @@ export async function amountOwed(
 }
 
 /**
+ * How much of `unpaidKobo` is on shifts a dispute is open over (BIL-10).
+ *
+ * Only what was credited for the disputed shift is held; see ./domain/holds.ts
+ * for why that is the unpaid part of it and not the practitioner's whole
+ * balance. Read at the moment a payout is prepared and again when it is
+ * released, so a case raised in between stops it. A case raised in the instants
+ * between that second check and the gateway taking the payout is not stopped:
+ * the money has gone by then.
+ */
+async function heldFor(
+  db: Pick<Tx, 'invoiceLine'>,
+  practitionerId: string,
+  unpaidKobo: number,
+): Promise<number> {
+  if (unpaidKobo <= 0) return 0;
+
+  const lines = await db.invoiceLine.findMany({
+    where: { practitionerId, invoice: { status: { not: 'VOID' } } },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    include: { invoice: { select: { grossKobo: true, platformFeeKobo: true } } },
+  });
+  if (lines.length === 0) return 0;
+
+  const disputed = await assignmentsUnderDispute(lines.map((line) => line.assignmentId));
+  return heldForDisputes(
+    lines.map((line) => ({
+      assignmentId: line.assignmentId,
+      netKobo: netOfLine(line, line.invoice),
+    })),
+    disputed,
+    unpaidKobo,
+  );
+}
+
+/**
+ * What a practitioner is owed and how much of it is held for a dispute, for
+ * somebody reading their payouts.
+ */
+export async function payoutPosition(
+  practitionerId: string,
+): Promise<{ owedKobo: number; heldKobo: number }> {
+  const owedKobo = await amountOwed(practitionerId);
+  const inFlight = await prisma.payout.aggregate({
+    where: { practitionerId, status: { in: ['PREPARED', 'RELEASED'] } },
+    _sum: { amountKobo: true },
+  });
+  const heldKobo = await heldFor(prisma, practitionerId, owedKobo - (inFlight._sum.amountKobo ?? 0));
+  return { owedKobo, heldKobo };
+}
+
+/**
  * Serialises everything that decides how much a practitioner may be paid.
  *
  * Preparing reads the balance and the money already in flight and then writes
@@ -112,8 +171,13 @@ export async function preparePayout(input: {
       where: { practitionerId: input.practitionerId, status: { in: ['PREPARED', 'RELEASED'] } },
       _sum: { amountKobo: true },
     });
-    const amountKobo = owed - (inFlight._sum.amountKobo ?? 0);
-    if (amountKobo <= 0) throw PayoutErrors.nothingOwed();
+    const unpaid = owed - (inFlight._sum.amountKobo ?? 0);
+    if (unpaid <= 0) throw PayoutErrors.nothingOwed();
+
+    // What a dispute holds is not paid. Whatever is left is.
+    const held = await heldFor(tx, input.practitionerId, unpaid);
+    const amountKobo = unpaid - held;
+    if (amountKobo <= 0) throw PayoutErrors.held();
 
     const payout = await tx.payout.create({
       data: { practitionerId: input.practitionerId, amountKobo },
@@ -163,9 +227,12 @@ export async function releasePayout(input: {
       where: { practitionerId: existing.practitionerId, status: 'RELEASED', id: { not: existing.id } },
       _sum: { amountKobo: true },
     });
-    if (existing.amountKobo > owed - (alreadyOut._sum.amountKobo ?? 0)) {
-      throw PayoutErrors.exceedsBalance();
-    }
+    const unpaid = owed - (alreadyOut._sum.amountKobo ?? 0);
+    if (existing.amountKobo > unpaid) throw PayoutErrors.exceedsBalance();
+
+    // A case may have been raised since this was prepared.
+    const held = await heldFor(tx, existing.practitionerId, unpaid);
+    if (existing.amountKobo > unpaid - held) throw PayoutErrors.held();
 
     const claimed = await tx.payout.updateMany({
       where: { id: input.payoutId, status: 'PREPARED' },

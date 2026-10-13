@@ -65,7 +65,7 @@ export default function PayoutsPage() {
   const payouts = useQuery({
     queryKey: ['payouts', selected?.userId],
     queryFn: () =>
-      api.get<{ payouts: Payout[] }>(
+      api.get<{ payouts: Payout[]; owedKobo: number; heldKobo: number }>(
         `/api/v1/payouts?scopeType=PLATFORM&scopeId=${selected!.userId}`,
       ),
     enabled: Boolean(selected),
@@ -203,8 +203,19 @@ export default function PayoutsPage() {
         </CardHeader>
         <CardContent>
           <p className="mb-3 text-xs text-muted-foreground">
-            For everything currently outstanding, less anything already in flight.
+            For everything currently outstanding, less anything already in flight and anything
+            held for a dispute.
           </p>
+          {payouts.data && payouts.data.heldKobo > 0 ? (
+            <Alert variant="warning" className="mb-3">
+              <TriangleAlert />
+              <AlertDescription>
+                <strong>{formatNaira(payouts.data.heldKobo)}</strong> of the{' '}
+                {formatNaira(payouts.data.owedKobo)} owed is on a shift that is in dispute. It is
+                not paid until the case is decided or withdrawn; the rest can be.
+              </AlertDescription>
+            </Alert>
+          ) : null}
           <Button loading={prepare.isPending} onClick={() => prepare.mutate()}>
             <HandCoins />
             Prepare

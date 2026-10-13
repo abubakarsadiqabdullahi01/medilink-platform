@@ -479,6 +479,22 @@ export async function getDispute(disputeId: string): Promise<DisputeView> {
 }
 
 /**
+ * Which of these shifts have a case open or being worked on them.
+ *
+ * For billing, which holds back what was credited for a shift in dispute and
+ * may not read this module's tables. A resolved or withdrawn case is not
+ * live: the hold lifts the moment the case ends.
+ */
+export async function assignmentsUnderDispute(assignmentIds: string[]): Promise<Set<string>> {
+  if (assignmentIds.length === 0) return new Set();
+  const rows = await prisma.dispute.findMany({
+    where: { assignmentId: { in: assignmentIds }, status: { in: LIVE } },
+    select: { assignmentId: true },
+  });
+  return new Set(rows.map((row) => row.assignmentId));
+}
+
+/**
  * Every case over this shift, oldest first — withdrawn and dismissed included.
  *
  * Only for the two sides of the shift and the adjudicator. The route's scope

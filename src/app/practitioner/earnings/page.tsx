@@ -38,7 +38,9 @@ export default function EarningsPage() {
   const earnings = useQuery({
     queryKey: ['my-earnings'],
     queryFn: () =>
-      api.get<{ payouts: Payout[]; owedKobo: number }>('/api/v1/payouts?scopeType=SELF'),
+      api.get<{ payouts: Payout[]; owedKobo: number; heldKobo: number }>(
+        '/api/v1/payouts?scopeType=SELF',
+      ),
   });
 
   const payouts = earnings.data?.payouts ?? [];
@@ -59,7 +61,11 @@ export default function EarningsPage() {
         <AmountFigure
           label="Owed to you"
           amountKobo={earnings.data?.owedKobo ?? 0}
-          hint="Approved, invoiced and not yet paid out."
+          hint={
+            (earnings.data?.heldKobo ?? 0) > 0
+              ? `${formatNaira(earnings.data!.heldKobo)} of this is held while a dispute is decided.`
+              : 'Approved, invoiced and not yet paid out.'
+          }
           isPending={earnings.isPending}
           isError={earnings.isError}
           emphasise

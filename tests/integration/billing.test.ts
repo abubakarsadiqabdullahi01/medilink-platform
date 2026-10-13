@@ -28,6 +28,7 @@ import {
   timesheetsForAssignments,
 } from '@/modules/timesheets/application/timesheet';
 import { createRateCard } from '@/modules/rates-contracts/application/rate-card';
+import { raiseDispute, withdrawDispute } from '@/modules/disputes/application/dispute';
 import {
   accountBalance,
   generateInvoice,
@@ -99,6 +100,11 @@ async function buildWorld(
    * booking, so a card has to exist before the booking to apply to it.
    */
   card?: { name?: string; nightMultiplierBp?: number; holidayMultiplierBp?: number },
+  /**
+   * For a practitioner who works for more than one facility: the same person, on
+   * a shift that does not overlap the first.
+   */
+  again?: { practitionerId: string; shiftOffsetDays: number },
 ): Promise<World> {
   await ensureRole('facility_owner', ROLE_PERMISSIONS.facility_owner ?? []);
 
@@ -162,8 +168,8 @@ async function buildWorld(
     facilityId: facility.id,
     professionalCategoryId: category.id,
     shiftType: 'DAY',
-    startsAt: SHIFT_START,
-    endsAt: SHIFT_END,
+    startsAt: new Date(SHIFT_START.getTime() + (again?.shiftOffsetDays ?? 0) * 24 * 60 * 60 * 1000),
+    endsAt: new Date(SHIFT_END.getTime() + (again?.shiftOffsetDays ?? 0) * 24 * 60 * 60 * 1000),
     headcount: 1,
     hourlyRateKobo: HOURLY_RATE_KOBO,
     urgency: 'ROUTINE',
@@ -176,7 +182,9 @@ async function buildWorld(
     actorId: scheduler.id,
   });
 
-  const practitioner = await createUser({ fullName: 'Aisha Bello' });
+  const practitioner = again
+    ? { id: again.practitionerId }
+    : await createUser({ fullName: 'Aisha Bello' });
   const [invitation] = await invitePractitioners({
     requestId: request.id,
     facilityId: facility.id,
@@ -781,7 +789,7 @@ describe('paying a practitioner', () => {
     };
 
     // Credited when the work was invoiced, and nothing paid out yet.
-    expect(await read()).toEqual({ payouts: [], owedKobo: 4_000_000 });
+    expect(await read()).toEqual({ payouts: [], owedKobo: 4_000_000, heldKobo: 0 });
 
     const payout = await preparePayout({
       practitionerId: world.practitionerId,
@@ -846,6 +854,128 @@ describe('money acts need a fresh password', () => {
 
     expect(response.status).toBe(401);
     expect((await prisma.payout.findUniqueOrThrow({ where: { id: payout.id } })).status).toBe('PREPARED');
+  });
+});
+
+describe('payouts and disputes', () => {
+  /**
+   * BIL-10. A payout paid a practitioner everything the ledger said they were
+   * owed, including the shift a dispute was open over. A dispute holds what was
+   * credited for that shift and nothing else.
+   */
+  const FOUR_HOURS = {
+    from: new Date('2026-09-10T07:00:00.000Z'),
+    to: new Date('2026-09-10T11:00:00.000Z'),
+  };
+  const EIGHT_HOUR_PAY = 4_000_000;
+  const FOUR_HOUR_PAY = 2_000_000;
+
+  /** Two shifts for one practitioner at two facilities, each invoiced: ₦40,000 then ₦20,000. */
+  async function twoInvoicedShifts() {
+    const first = await buildWorld();
+    await generateInvoice(period(first));
+    const second = await buildWorld(FOUR_HOURS, undefined, {
+      practitionerId: first.practitionerId,
+      shiftOffsetDays: 2,
+    });
+    await generateInvoice(period(second));
+    return { first, second };
+  }
+
+  const dispute = (assignmentId: string, actorId: string) =>
+    raiseDispute({
+      assignmentId,
+      actorId,
+      category: 'PAY',
+      reason: 'The rate on the timesheet is lower than the one on the offer I accepted.',
+    });
+
+  it('pays what is not in dispute and holds the shift that is', async () => {
+    const { first, second } = await twoInvoicedShifts();
+    await dispute(first.assignmentId, first.practitionerId);
+
+    const payout = await preparePayout({ practitionerId: first.practitionerId, actorId: second.financeId });
+
+    expect(payout.amountKobo).toBe(FOUR_HOUR_PAY);
+  });
+
+  it('says what is held, next to what is owed', async () => {
+    const { first, second } = await twoInvoicedShifts();
+    await dispute(first.assignmentId, first.practitionerId);
+    await issueSession({ userId: second.financeId });
+
+    const response = await getPayoutsRoute(
+      new Request(
+        `http://localhost/api/v1/payouts?scopeType=PLATFORM&scopeId=${first.practitionerId}`,
+      ),
+    );
+    const body = (await response.json()) as { owedKobo: number; heldKobo: number };
+    expect(body.owedKobo).toBe(EIGHT_HOUR_PAY + FOUR_HOUR_PAY);
+    expect(body.heldKobo).toBe(EIGHT_HOUR_PAY);
+  });
+
+  it('refuses to prepare a payout when everything owed is in dispute, and creates nothing', async () => {
+    const world = await buildWorld();
+    await generateInvoice(period(world));
+    await dispute(world.assignmentId, world.practitionerId);
+
+    await expect(
+      preparePayout({ practitionerId: world.practitionerId, actorId: world.financeId }),
+    ).rejects.toMatchObject({ code: 'payout_held', status: 409 });
+    expect(await prisma.payout.count()).toBe(0);
+  });
+
+  it('will not release a payout prepared before the dispute was raised', async () => {
+    const world = await buildWorld();
+    await generateInvoice(period(world));
+    const payout = await preparePayout({ practitionerId: world.practitionerId, actorId: world.financeId });
+
+    await dispute(world.assignmentId, world.practitionerId);
+
+    await expect(
+      releasePayout({ payoutId: payout.id, actorId: world.financeId }),
+    ).rejects.toMatchObject({ code: 'payout_held' });
+    expect((await prisma.payout.findUniqueOrThrow({ where: { id: payout.id } })).status).toBe('PREPARED');
+  });
+
+  it('releases what is not in dispute even when something else is', async () => {
+    const { first, second } = await twoInvoicedShifts();
+    await dispute(first.assignmentId, first.practitionerId);
+    const payout = await preparePayout({ practitionerId: first.practitionerId, actorId: second.financeId });
+
+    const released = await releasePayout({ payoutId: payout.id, actorId: second.financeId });
+
+    expect(released.amountKobo).toBe(FOUR_HOUR_PAY);
+    expect(released.status).toMatch(/RELEASED|SETTLED/);
+  });
+
+  it('lets go once the dispute is withdrawn', async () => {
+    const world = await buildWorld();
+    await generateInvoice(period(world));
+    const raised = await dispute(world.assignmentId, world.practitionerId);
+    await withdrawDispute({ disputeId: raised.id, actorId: world.practitionerId });
+
+    const payout = await preparePayout({ practitionerId: world.practitionerId, actorId: world.financeId });
+    expect(payout.amountKobo).toBe(EIGHT_HOUR_PAY);
+  });
+
+  it('does not hold this month\'s earnings for a shift that was paid for last month', async () => {
+    // The first shift is paid out in full; it is then disputed. Money already
+    // sent cannot be held, and the practitioner's later work is not its hostage.
+    const first = await buildWorld();
+    await generateInvoice(period(first));
+    const paid = await preparePayout({ practitionerId: first.practitionerId, actorId: first.financeId });
+    await releasePayout({ payoutId: paid.id, actorId: first.financeId });
+
+    const second = await buildWorld(FOUR_HOURS, undefined, {
+      practitionerId: first.practitionerId,
+      shiftOffsetDays: 2,
+    });
+    await generateInvoice(period(second));
+    await dispute(first.assignmentId, first.practitionerId);
+
+    const payout = await preparePayout({ practitionerId: first.practitionerId, actorId: second.financeId });
+    expect(payout.amountKobo).toBe(FOUR_HOUR_PAY);
   });
 });
 
