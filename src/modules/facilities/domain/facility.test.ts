@@ -64,6 +64,13 @@ describe('normaliseCacNumber', () => {
     expect(normaliseCacNumber('RC123456')).toBe('RC123456');
   });
 
+  it('treats the punctuation people type inside a number as nothing', () => {
+    // Somebody squatting another hospital's registration only has to spell it differently.
+    for (const variant of ['RC-123456', 'rc/123456', 'R.C. 123456', 'RC 123 456']) {
+      expect(normaliseCacNumber(variant)).toBe('RC123456');
+    }
+  });
+
   it('leaves an already-normal number alone', () => {
     expect(normaliseCacNumber('BN0099887')).toBe('BN0099887');
   });

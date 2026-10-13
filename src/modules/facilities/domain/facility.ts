@@ -61,10 +61,14 @@ export function canPublish(facility: PublishCandidate, now: Date = new Date()): 
 }
 
 /**
- * Uppercased and stripped of internal whitespace before storage, so the
- * unique constraint means what it says: `rc 123456` and `RC123456` are the
- * same registration and the second one must be refused.
+ * Uppercased and stripped of whitespace and the punctuation people put inside
+ * a registration number before storage, so the unique constraint means what it
+ * says: `rc 123456`, `RC-123456`, `RC/123456` and `RC123456` are the same
+ * registration and the second one must be refused.
+ *
+ * Leading zeros are left alone. `BN0099887` is a real number, and stripping a
+ * zero would be a guess about what the register means.
  */
 export function normaliseCacNumber(raw: string): string {
-  return raw.replace(/\s+/g, '').toUpperCase();
+  return raw.replace(/[\s\-/.]+/g, '').toUpperCase();
 }

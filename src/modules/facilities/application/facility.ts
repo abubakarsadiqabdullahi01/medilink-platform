@@ -7,6 +7,7 @@ import { EVENTS } from '@/lib/events';
 import { createDownloadUrl, createUploadUrl, headObject } from '@/lib/storage/tigris';
 import {
   canPublish,
+  normaliseCacNumber,
   publishBlockers,
   type FacilityStatusValue,
   type PublishBlocker,
@@ -199,7 +200,8 @@ export async function createFacility(input: CreateFacilityParams): Promise<Facil
         data: {
           name: input.name,
           facilityTypeId: input.facilityTypeId,
-          cacNumber: input.cacNumber,
+          // Whoever calls this gets the same normalisation, not only the callers that went through a schema.
+          cacNumber: normaliseCacNumber(input.cacNumber),
           stateId: input.stateId,
           lgaId: input.lgaId,
           addressLine: input.addressLine,

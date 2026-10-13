@@ -88,7 +88,10 @@ export type CreateFacilityInput = z.infer<typeof createFacilitySchema>;
 export const registerFacilitySchema = z.object({
   name: z.string().trim().min(3).max(200),
   facilityTypeId: z.string().uuid(),
-  cacNumber: z.string().trim().min(3).max(40),
+  // Normalised exactly as the operations route does. This used to take the
+  // raw string, so anybody could register another hospital's number in a
+  // different spelling and slip past the duplicate check.
+  cacNumber,
   stateId: z.string().uuid(),
   lgaId: z.string().uuid().optional(),
   addressLine: z.string().trim().min(5).max(300),
