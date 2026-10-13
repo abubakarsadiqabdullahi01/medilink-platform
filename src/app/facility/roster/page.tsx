@@ -5,13 +5,24 @@ import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, Search, TriangleAlert, Users } from 'lucide-react';
 import { api } from '@/lib/ui/api';
 import { useFacilityId } from '@/lib/ui/facility';
+import { useQueueAction } from '@/lib/ui/queue';
+import { useSession } from '@/lib/ui/session';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Table,
   TableBody,
@@ -54,6 +65,10 @@ const PAGE_SIZE = 20;
  */
 export default function RosterPage() {
   const facilityId = useFacilityId();
+  const session = useSession();
+  const canCancel = session.permissions.includes('assignment.cancel');
+  const [cancelling, setCancelling] = useState<Assignment | null>(null);
+  const [reason, setReason] = useState('');
   const [status, setStatus] = useState<string>('CONFIRMED');
   const [search, setSearch] = useState('');
   const [applied, setApplied] = useState('');
@@ -89,6 +104,16 @@ export default function RosterPage() {
       );
     },
     placeholderData: (previous) => previous,
+  });
+
+  // Releasing one practitioner from a shift. The server tells them; this is
+  // the only place a facility can do it, and without it the only way to
+  // un-book somebody was to cancel the whole shift.
+  const cancel = useQueueAction<{ id: string }>({
+    queueKey: ['roster', facilityId],
+    run: ({ id }) =>
+      api.post(`/api/v1/assignments/${id}/cancel`, { facilityId, reason: reason.trim() }),
+    success: 'Booking cancelled',
   });
 
   const rows = [...(queue.data?.assignments ?? [])].sort(
@@ -231,6 +256,7 @@ export default function RosterPage() {
                 <TableHead className="w-[150px]">Ends</TableHead>
                 <TableHead className="w-[110px]">Status</TableHead>
                 {showsAttendance ? <TableHead>Attendance</TableHead> : null}
+                {showsAttendance && canCancel ? <TableHead className="w-[90px]" /> : null}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -267,6 +293,23 @@ export default function RosterPage() {
                       <TableCell className="min-w-[260px]">
                         {facilityId ? (
                           <AttendancePanel assignmentId={row.id} facilityId={facilityId} attendance={row.attendance} />
+                        ) : null}
+                      </TableCell>
+                    ) : null}
+                    {showsAttendance && canCancel ? (
+                      <TableCell>
+                        {new Date(row.endsAt) > new Date() ? (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                            onClick={() => {
+                              setCancelling(row);
+                              setReason('');
+                            }}
+                          >
+                            Cancel
+                          </Button>
                         ) : null}
                       </TableCell>
                     ) : null}
@@ -314,6 +357,47 @@ export default function RosterPage() {
           </Button>
         </div>
       ) : null}
+
+      <Dialog open={cancelling !== null} onOpenChange={(next: boolean) => !next && setCancelling(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Cancel this booking</DialogTitle>
+            <DialogDescription>
+              {cancelling ? `${cancelling.practitionerName} is released from this shift and sent a message saying it is cancelled. ` : ''}
+              The shift opens again for somebody else. Your reason is kept on the record; it is not
+              sent to them.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="cancel-booking-reason">Reason</Label>
+            <Textarea
+              id="cancel-booking-reason"
+              rows={2}
+              placeholder="Why this booking is being cancelled."
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+            />
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCancelling(null)}>
+              Keep it
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={reason.trim().length < 3}
+              loading={cancel.isPending}
+              onClick={() =>
+                cancelling &&
+                cancel.mutate({ id: cancelling.id }, { onSuccess: () => setCancelling(null) })
+              }
+            >
+              Cancel the booking
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

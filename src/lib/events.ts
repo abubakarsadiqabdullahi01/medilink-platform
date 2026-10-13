@@ -12,6 +12,7 @@ export const EVENTS = {
   ShiftInvited: 'shift.invited',
   ShiftAccepted: 'shift.accepted',
   AssignmentConfirmed: 'assignment.confirmed',
+  AssignmentCancelled: 'assignment.cancelled',
   ShiftStarted: 'shift.started',
   ShiftCompleted: 'shift.completed',
   TimesheetSubmitted: 'timesheet.submitted',

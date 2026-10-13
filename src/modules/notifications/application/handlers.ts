@@ -79,3 +79,47 @@ export async function notifyAssignmentConfirmed(payload: Record<string, unknown>
     });
   }
 }
+
+/**
+ * The practitioner is told when a facility cancels a booking they held, one
+ * way or the other: a single release, or the whole shift being cancelled.
+ *
+ * Only the practitioner — the facility did it, and was told by doing it. The
+ * facility's reason stays in the booking's history; it is the facility's own
+ * account of its business and the practitioner is told that it happened, not
+ * why.
+ */
+export async function notifyAssignmentCancelled(payload: Record<string, unknown>): Promise<void> {
+  const assignmentId = String(payload.assignmentId ?? '');
+  const practitionerId = String(payload.userId ?? '');
+  const facilityId = String(payload.facilityId ?? '');
+
+  if (!assignmentId || !practitionerId || !facilityId) {
+    logger.warn('assignment.cancelled event missing ids; skipping notification');
+    return;
+  }
+
+  if (await alreadyNotified(practitionerId, 'assignment.cancelled', assignmentId)) return;
+
+  const [facility, assignment] = await Promise.all([
+    prisma.facility.findUnique({ where: { id: facilityId }, select: { name: true } }),
+    prisma.assignment.findUnique({
+      where: { id: assignmentId },
+      select: { startsAt: true, endsAt: true },
+    }),
+  ]);
+  if (!facility || !assignment) {
+    logger.warn('assignment.cancelled for a record that no longer exists', { assignmentId });
+    return;
+  }
+
+  const when = formatShift(assignment.startsAt.toISOString(), assignment.endsAt.toISOString());
+
+  await notify({
+    userId: practitionerId,
+    kind: 'assignment.cancelled',
+    body: `Your shift at ${facility.name} on ${when} has been cancelled by the facility. You do not need to attend. Medilink.`,
+    relatedType: 'matching.assignments',
+    relatedId: assignmentId,
+  });
+}

@@ -2097,6 +2097,17 @@ async function main(): Promise<void> {
     const blessingStart = watDay(-3, 20);
     await workNamedShift(flagship, FLAGSHIP_NEEDS[5]!, blessing, blessingStart, 12, 'NIGHT', 'submitted');
 
+    // The incident that ends in Kelechi Umeh's suspension has to hang on a
+    // shift he worked here: a facility can only name a practitioner it has
+    // booked, so a report about somebody it never booked would be refused.
+    // The simulation does not always happen to give him one.
+    const kelechiWorked = await prisma.assignment.findFirst({
+      where: { userId: kelechi.id, facilityId: flagship.id, startsAt: { lt: watDay(-11, 0) } },
+    });
+    if (!kelechiWorked) {
+      await workNamedShift(flagship, FLAGSHIP_NEEDS[3]!, kelechi, watDay(-13, 20), 12, 'NIGHT', 'checked_out');
+    }
+
     log('Closing shifts that started with nobody confirmed…');
     const expired = await expireStartedRequests();
     log(`  ${JSON.stringify(expired)}`);
@@ -2420,10 +2431,10 @@ async function main(): Promise<void> {
 
   // Kelechi Umeh by name rather than by whoever happened to work: the login
   // sheet promises a suspended practitioner, and a suspension has to have a
-  // case behind it. Where the simulation gave him no shift to hang it on, the
-  // case is still filed against him as its subject with no assignment — a
-  // shape reportIncident already allows, for a report about a person rather
-  // than about one shift.
+  // case behind it. He is given a shift at the flagship above if the
+  // simulation did not, so the case hangs on one; with no shift it would still
+  // be filed against him as the subject, but only because he has been booked
+  // there.
   {
     const kelechiShift = await prisma.assignment.findFirst({
       where: {

@@ -4,7 +4,10 @@ import { recordAudit } from '@/lib/audit';
 import { publishEvent } from '@/lib/outbox';
 import { EVENTS } from '@/lib/events';
 import { getFacility } from '@/modules/facilities/application/facility';
-import { withdrawOutstandingInvitations } from '@/modules/matching/application/assignment';
+import {
+  cancelBookingsForRequest,
+  withdrawOutstandingInvitations,
+} from '@/modules/matching/application/assignment';
 import {
   canTransition,
   MAX_SHIFT_HOURS,
@@ -303,10 +306,17 @@ export async function cancelServiceRequest(
   const now = new Date();
 
   return prisma.$transaction(async (tx: Tx) => {
-    const updated = await tx.serviceRequest.update({
-      where: { id: request.id },
+    // Conditional on the status just read: two cancellations at once, or a
+    // cancellation racing the expiry sweep, apply once and the other is told
+    // the shift is no longer cancellable.
+    const applied = await tx.serviceRequest.updateMany({
+      where: { id: request.id, status: request.status },
       data: { status: 'CANCELLED', cancelledAt: now, cancellationReason: input.reason },
     });
+    if (applied.count !== 1) {
+      throw ServiceRequestErrors.invalidTransition(request.status, 'CANCELLED');
+    }
+    const updated = await tx.serviceRequest.findUniqueOrThrow({ where: { id: request.id } });
 
     // Nobody should be left holding an offer for a shift that no longer exists.
     const invitationsWithdrawn = await withdrawOutstandingInvitations(tx, {
@@ -314,6 +324,14 @@ export async function cancelServiceRequest(
       actorId: input.actorId,
       reason: `The facility cancelled the shift: ${input.reason}`,
       now,
+    });
+
+    // ...or a booking. People already confirmed are released with the same
+    // reason on their history, and told.
+    const bookingsCancelled = await cancelBookingsForRequest(tx, {
+      requestId: request.id,
+      actorId: input.actorId,
+      reason: `The facility cancelled the shift: ${input.reason}`,
     });
 
     await recordAudit(tx, {
@@ -325,7 +343,7 @@ export async function cancelServiceRequest(
       scopeId: input.facilityId,
       reason: input.reason,
       before: toView(request),
-      after: { ...toView(updated), invitationsWithdrawn },
+      after: { ...toView(updated), invitationsWithdrawn, bookingsCancelled },
     });
 
     return toView(updated);

@@ -405,7 +405,8 @@ export default function ShiftsPage() {
                             View
                           </Link>
                         )}
-                        {(row.status === 'PUBLISHED' || row.status === 'DRAFT') && canPublish ? (
+                        {(row.status === 'PUBLISHED' || row.status === 'DRAFT' || row.status === 'FILLED') &&
+                        canPublish ? (
                           <Button
                             size="sm"
                             variant="ghost"
@@ -470,9 +471,9 @@ export default function ShiftsPage() {
           <DialogHeader>
             <DialogTitle>Cancel this shift</DialogTitle>
             <DialogDescription>
-              Any invitation still waiting for an answer is withdrawn. Anybody already confirmed
-              keeps their assignment — cancel that separately, so nobody loses a shift without
-              being told.
+              Any invitation still waiting for an answer is withdrawn, and anybody already
+              confirmed is released from the shift and sent a message saying so. Your reason is
+              kept on the record; it is not sent to them.
             </DialogDescription>
           </DialogHeader>
 

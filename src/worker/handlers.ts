@@ -2,7 +2,10 @@ import { logger } from '../lib/logger';
 import { EVENTS } from '../lib/events';
 import { grantPractitionerRoleOnRegistration } from '../modules/practitioners/application/role-grants';
 import { screenPractitioner } from '../modules/practitioners/application/screening';
-import { notifyAssignmentConfirmed } from '../modules/notifications/application/handlers';
+import {
+  notifyAssignmentCancelled,
+  notifyAssignmentConfirmed,
+} from '../modules/notifications/application/handlers';
 import { computeAndSaveTimesheet } from '../modules/timesheets/application/timesheet';
 import type { EventHandler } from './processor';
 
@@ -19,6 +22,12 @@ export const handlers: Record<string, EventHandler> = {
   // gateway's latency — the reasoning issueOtp already documents.
   [EVENTS.AssignmentConfirmed]: async (payload) => {
     await notifyAssignmentConfirmed(payload);
+  },
+
+  // The other direction: a facility releasing somebody, or cancelling the
+  // whole shift, has to reach the practitioner who would otherwise turn up.
+  [EVENTS.AssignmentCancelled]: async (payload) => {
+    await notifyAssignmentCancelled(payload);
   },
 
   /**

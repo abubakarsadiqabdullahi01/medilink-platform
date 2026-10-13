@@ -35,6 +35,12 @@ export const AssignmentErrors = {
   assignmentNotFound: () =>
     new HttpError('assignment_not_found', 'That assignment does not exist.', 404),
   shiftStarted: () => new HttpError('shift_started', 'That shift has already started.', 409),
+  shiftEnded: () =>
+    new HttpError(
+      'shift_ended',
+      'That shift is over, so it cannot be cancelled. Record what happened instead.',
+      409,
+    ),
   facilityNotActive: () =>
     new HttpError(
       'facility_not_verified',
@@ -612,32 +618,106 @@ export interface CancelAssignmentParams {
   reason: string;
 }
 
+type AssignmentRow = NonNullable<Awaited<ReturnType<Tx['assignment']['findUnique']>>>;
+
+/**
+ * The one way a booking is cancelled, whether the facility is releasing one
+ * person or cancelling the whole shift.
+ *
+ * Conditional on the status just read, so two cancellations arriving together
+ * leave one history row, one audit row and one event rather than two of each;
+ * the loser is told the booking is already cancelled. Publishes
+ * `assignment.cancelled`, which is how the practitioner finds out — a booking
+ * that vanishes from their schedule with no word is how a practitioner turns
+ * up to a ward that no longer expects them.
+ *
+ * Returns the cancelled row, or null if somebody else got there first.
+ */
+async function cancelConfirmedBooking(
+  tx: Tx,
+  existing: AssignmentRow,
+  input: { actorId: string; reason: string },
+): Promise<AssignmentRow | null> {
+  const applied = await tx.assignment.updateMany({
+    where: { id: existing.id, status: 'CONFIRMED' },
+    data: { status: 'CANCELLED' },
+  });
+  if (applied.count !== 1) return null;
+
+  const updated = await tx.assignment.findUniqueOrThrow({ where: { id: existing.id } });
+
+  await tx.assignmentStatusHistory.create({
+    data: {
+      assignmentId: updated.id,
+      fromStatus: 'CONFIRMED',
+      toStatus: 'CANCELLED',
+      actorId: input.actorId,
+      reason: input.reason,
+    },
+  });
+
+  await recordAudit(tx, {
+    action: 'assignment.cancelled',
+    entityType: 'matching.assignments',
+    entityId: updated.id,
+    actorId: input.actorId,
+    scopeType: 'SELF',
+    scopeId: existing.userId,
+    reason: input.reason,
+    before: toAssignmentView(existing),
+    after: toAssignmentView(updated),
+  });
+
+  // The reason is the facility's own record and stays in the history; the
+  // practitioner is told that it happened, not why.
+  await publishEvent(tx, {
+    eventType: EVENTS.AssignmentCancelled,
+    aggregateType: 'matching.assignments',
+    aggregateId: updated.id,
+    payload: {
+      assignmentId: updated.id,
+      userId: updated.userId,
+      facilityId: updated.facilityId,
+      serviceRequestId: updated.serviceRequestId,
+      startsAt: updated.startsAt.toISOString(),
+      endsAt: updated.endsAt.toISOString(),
+    },
+  });
+
+  return updated;
+}
+
+/**
+ * Takes one practitioner off a shift.
+ *
+ * Refused once the shift is over: at that point the question is what happened
+ * — attended, absent, excused — and that belongs to attendance and the
+ * no-show sweep, not to a cancellation that would rewrite it after the fact.
+ */
 export async function cancelAssignment(
   input: CancelAssignmentParams,
 ): Promise<AssignmentView> {
-  const existing = await prisma.assignment.findFirst({
+  const known = await prisma.assignment.findFirst({
     where: { id: input.assignmentId, facilityId: input.facilityId },
   });
-  if (!existing) throw AssignmentErrors.assignmentNotFound();
-  if (existing.status !== 'CONFIRMED') {
-    throw AssignmentErrors.invalidTransition(existing.status, 'CANCELLED');
+  if (!known) throw AssignmentErrors.assignmentNotFound();
+  if (known.status !== 'CONFIRMED') {
+    throw AssignmentErrors.invalidTransition(known.status, 'CANCELLED');
   }
+  if (known.endsAt.getTime() <= Date.now()) throw AssignmentErrors.shiftEnded();
 
   return prisma.$transaction(async (tx: Tx) => {
-    const updated = await tx.assignment.update({
-      where: { id: existing.id },
-      data: { status: 'CANCELLED' },
-    });
+    // The request row first, so a cancellation and a confirmation on the same
+    // shift queue behind one another — the order every booking write uses.
+    if (known.serviceRequestId) await lockRequest(tx, known.serviceRequestId);
 
-    await tx.assignmentStatusHistory.create({
-      data: {
-        assignmentId: updated.id,
-        fromStatus: 'CONFIRMED',
-        toStatus: 'CANCELLED',
-        actorId: input.actorId,
-        reason: input.reason,
-      },
-    });
+    const existing = await tx.assignment.findUniqueOrThrow({ where: { id: known.id } });
+    if (existing.status !== 'CONFIRMED') {
+      throw AssignmentErrors.invalidTransition(existing.status, 'CANCELLED');
+    }
+
+    const updated = await cancelConfirmedBooking(tx, existing, input);
+    if (!updated) throw AssignmentErrors.invalidTransition('CANCELLED', 'CANCELLED');
 
     // Cancelling frees a place, so a filled request opens again.
     if (existing.serviceRequestId) {
@@ -647,20 +727,33 @@ export async function cancelAssignment(
       });
     }
 
-    await recordAudit(tx, {
-      action: 'assignment.cancelled',
-      entityType: 'matching.assignments',
-      entityId: updated.id,
-      actorId: input.actorId,
-      scopeType: 'SELF',
-      scopeId: existing.userId,
-      reason: input.reason,
-      before: toAssignmentView(existing),
-      after: toAssignmentView(updated),
-    });
-
     return toAssignmentView(updated);
   });
+}
+
+/**
+ * Cancels every confirmed booking on a request, for the request's own
+ * cancellation to call inside its transaction.
+ *
+ * Cancelling a shift that people were confirmed onto used to leave them
+ * confirmed: still on their schedule, still able to check in, and once the
+ * shift had passed, down as an absence an officer was asked to assign blame
+ * for. The request is going away, so nothing is reopened here.
+ */
+export async function cancelBookingsForRequest(
+  tx: Tx,
+  input: { requestId: string; actorId: string; reason: string },
+): Promise<number> {
+  const live = await tx.assignment.findMany({
+    where: { serviceRequestId: input.requestId, status: 'CONFIRMED' },
+  });
+
+  let cancelled = 0;
+  for (const existing of live) {
+    const done = await cancelConfirmedBooking(tx, existing, input);
+    if (done) cancelled += 1;
+  }
+  return cancelled;
 }
 
 /**
