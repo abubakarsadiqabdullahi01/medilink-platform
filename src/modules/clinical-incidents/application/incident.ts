@@ -38,7 +38,10 @@ export const IncidentErrors = {
   cannotReport: (blockers: string[]) =>
     new HttpError(
       'incident_cannot_report',
-      `This report cannot be filed: ${blockers.join(', ')}.`,
+      blockers.includes('contains_patient_identifier')
+        ? // Said in words, because the one thing to do is take it out.
+          'This report cannot be filed with a patient identifier in it: take out any phone numbers, ID or hospital numbers and email addresses, and describe what happened without identifying the patient.'
+        : `This report cannot be filed: ${blockers.join(', ')}.`,
       422,
     ),
 

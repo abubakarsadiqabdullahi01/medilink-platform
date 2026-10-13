@@ -76,7 +76,38 @@ export function isAtLeast(
   return severityRank(severity) >= severityRank(floor);
 }
 
-export type ReportBlocker = 'summary_missing' | 'occurred_in_the_future';
+export type ReportBlocker =
+  | 'summary_missing'
+  | 'occurred_in_the_future'
+  | 'contains_patient_identifier';
+
+/**
+ * What in a free-text summary can be recognised as identifying a patient.
+ *
+ * The specification says a report must not record patient identifiers, and the
+ * form is a text box, so something that looks like one will be typed into it.
+ * Only what is recognisable *with confidence* is refused — a phone number, an
+ * email address, a run of nine or more digits (a NIN, a phone with its spaces
+ * stripped), a labelled hospital, folder or record number. Names are not
+ * screened: there is no way to tell a patient's from a nurse's, and a screen
+ * that guessed would refuse honest reports. Doses, times, dates, bed and ward
+ * numbers are left alone, because a report refused for a false alarm is a report
+ * lost, and the report is the point.
+ */
+const IDENTIFIER_PATTERNS: RegExp[] = [
+  // An email address.
+  /[^\s@]+@[^\s@]+\.[^\s@]{2,}/,
+  // A Nigerian mobile or an international number, with the spaces and dashes people type.
+  /(?:\+?234|\b0)[\s-]?[789][01]\d[\s-]?\d{3}[\s-]?\d{4}\b/,
+  // Nine or more digits in a row, allowing the spaces and dashes inside a long number.
+  /\b\d(?:[\s-]?\d){8,}\b/,
+  // A labelled record: "hospital number HN/…", "folder no: 99812", "MRN 778…", "patient ID".
+  /\b(?:mrn|nin|hospital\s*(?:no|number|id)|folder\s*(?:no|number)|file\s*(?:no|number)|patient\s*(?:no|number|id))\b[\s:#.\-]*[A-Za-z0-9/]{3,}/i,
+];
+
+export function containsPatientIdentifier(text: string): boolean {
+  return IDENTIFIER_PATTERNS.some((pattern) => pattern.test(text));
+}
 
 export function reportBlockers(input: {
   summary: string;
@@ -85,11 +116,14 @@ export function reportBlockers(input: {
 }): ReportBlocker[] {
   const blockers: ReportBlocker[] = [];
 
-  // A minimum length and nothing else. Deliberately the only bar: every extra
-  // mandatory field is a reason somebody closes the form instead.
+  // A minimum length, a time that has happened, and no patient identifiers.
+  // Deliberately the only bars: every extra mandatory field is a reason
+  // somebody closes the form instead.
   if (input.summary.trim().length < INCIDENT_SUMMARY_MIN_LENGTH) blockers.push('summary_missing');
 
   if (input.occurredAt.getTime() > input.now.getTime()) blockers.push('occurred_in_the_future');
+
+  if (containsPatientIdentifier(input.summary)) blockers.push('contains_patient_identifier');
 
   return blockers;
 }

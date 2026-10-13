@@ -282,6 +282,27 @@ describe('reporting', () => {
     ).rejects.toMatchObject({ code: 'incident_subject_mismatch', status: 422 });
   });
 
+  it('refuses a summary that identifies the patient, and says what to do', async () => {
+    // The specification says a report must not record patient identifiers.
+    const world = await buildWorld();
+
+    await expect(
+      reportIncident({
+        facilityId: world.facilityId,
+        actorId: world.reporterId,
+        occurredAt: OCCURRED,
+        severity: 'MODERATE',
+        category: 'MEDICATION',
+        summary: 'Wrong dose given to the patient, whose son can be reached on 0803 123 4567.',
+      }),
+    ).rejects.toMatchObject({
+      code: 'incident_cannot_report',
+      status: 422,
+      message: expect.stringContaining('take out'),
+    });
+    expect(await prisma.clinicalIncident.count()).toBe(0);
+  });
+
   it('publishes the event and writes an audit row', async () => {
     const world = await buildWorld();
     const incident = await reportIncident({
