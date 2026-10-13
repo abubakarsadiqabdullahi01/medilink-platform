@@ -405,3 +405,33 @@ export async function findUserByPhone(phone: string) {
   if (!user) throw GrantErrors.userNotFound();
   return user;
 }
+
+/**
+ * Who holds a permission across the whole platform, for something that has to
+ * reach everybody who can act on it — a severe incident, say — rather than one
+ * person who happened to be named.
+ *
+ * PLATFORM grants only: a facility-scoped holder can act on their own facility
+ * and is not who a platform-wide alert is for. Accounts that cannot sign in
+ * (suspended, deactivated, deleted) are left out, because an alert that goes to
+ * a locked account has been sent to nobody.
+ */
+export async function usersHoldingPlatformPermission(
+  permission: string,
+): Promise<{ id: string; fullName: string }[]> {
+  return prisma.user.findMany({
+    where: {
+      deletedAt: null,
+      status: { in: ['ACTIVE', 'UNDER_REVIEW'] },
+      roles: {
+        some: {
+          revokedAt: null,
+          scopeType: 'PLATFORM',
+          role: { permissions: { some: { permission: { key: permission } } } },
+        },
+      },
+    },
+    select: { id: true, fullName: true },
+    orderBy: { createdAt: 'asc' },
+  });
+}

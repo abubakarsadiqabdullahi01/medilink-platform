@@ -5,6 +5,7 @@ import { screenPractitioner } from '../modules/practitioners/application/screeni
 import {
   notifyAssignmentCancelled,
   notifyAssignmentConfirmed,
+  notifyIncidentReported,
 } from '../modules/notifications/application/handlers';
 import { computeAndSaveTimesheet } from '../modules/timesheets/application/timesheet';
 import type { EventHandler } from './processor';
@@ -46,6 +47,12 @@ export const handlers: Record<string, EventHandler> = {
    */
   [EVENTS.ShiftCompleted]: async (payload) => {
     await computeAndSaveTimesheet(String(payload.assignmentId ?? ''));
+  },
+
+  // Severe and fatal incidents are put in front of the people who can act on
+  // them; the event used to wait in a queue until somebody opened the page.
+  [EVENTS.ClinicalIncidentReported]: async (payload) => {
+    await notifyIncidentReported(payload);
   },
 
   [EVENTS.PractitionerRegistered]: async (payload) => {

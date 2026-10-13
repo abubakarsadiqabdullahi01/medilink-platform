@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/db';
 import { logger } from '@/lib/logger';
 import { WAT_OFFSET_MINUTES } from '@/modules/availability/domain/availability';
+import { usersHoldingPlatformPermission } from '@/modules/auth/application/grants';
 import { notify, type NotifyOutcome } from './notify';
 
 /**
@@ -155,4 +156,57 @@ export async function notifyAssignmentCancelled(payload: Record<string, unknown>
     ],
     'the cancellation',
   );
+}
+
+/**
+ * A severe or fatal clinical incident is put in front of the people who can act
+ * on it, now. It used to wait in a queue until somebody happened to open the
+ * page, and a death is not a thing to find by chance.
+ *
+ * The message names the facility and the severity and nothing else: no summary,
+ * no patient, no practitioner. A text message is not where that belongs.
+ *
+ * With nobody holding `incident.manage` the alert would go nowhere and look
+ * handled, so it fails instead, and the event stays visible as one that did not
+ * get through.
+ */
+const ALERTING_SEVERITIES: Record<string, string> = { SEVERE: 'severe', DEATH: 'death' };
+
+export async function notifyIncidentReported(payload: Record<string, unknown>): Promise<void> {
+  const incidentId = String(payload.incidentId ?? '');
+  const facilityId = String(payload.facilityId ?? '');
+  const severity = ALERTING_SEVERITIES[String(payload.severity ?? '')];
+
+  if (!incidentId || !facilityId) {
+    logger.warn('clinical_incident.reported event missing ids; skipping notification');
+    return;
+  }
+  if (!severity) return;
+
+  const [officers, facility] = await Promise.all([
+    usersHoldingPlatformPermission('incident.manage'),
+    prisma.facility.findUnique({ where: { id: facilityId }, select: { name: true } }),
+  ]);
+  if (officers.length === 0) {
+    throw new Error(
+      `A ${severity} incident was reported and no one holds incident.manage to be told.`,
+    );
+  }
+
+  const where = facility?.name ?? 'a facility';
+  const outcomes: NotifyOutcome[] = [];
+  for (const officer of officers) {
+    if (await alreadyNotified(officer.id, 'incident.severe', incidentId)) continue;
+    outcomes.push(
+      await notify({
+        userId: officer.id,
+        kind: 'incident.severe',
+        body: `A ${severity} clinical incident has been reported at ${where}. Review it in Medilink now.`,
+        relatedType: 'clinical_incidents.clinical_incidents',
+        relatedId: incidentId,
+      }),
+    );
+  }
+
+  failIfAnyFailed(outcomes, 'the incident alert');
 }

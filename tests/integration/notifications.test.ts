@@ -13,6 +13,7 @@ import {
   respondToInvitation,
 } from '@/modules/matching/application/assignment';
 import { startRegistration } from '@/modules/auth/application/registration';
+import { reportIncident } from '@/modules/clinical-incidents/application/incident';
 import { runOnce } from '@/worker/processor';
 import { handlers } from '@/worker/handlers';
 import {
@@ -20,6 +21,7 @@ import {
   eligiblePractitioner,
   type BookingWorld,
 } from './support/booking-world';
+import { createUser, grant } from './support/fixtures';
 
 /**
  * What happens when a text does not go, and what it says when it does.
@@ -191,5 +193,108 @@ describe('a one-time code that does not go', () => {
       startRegistration({ phone: PHONE, fullName: 'Amina Yusuf' }),
     ).resolves.toMatchObject({ existing: false });
     expect(await prisma.otpCode.count({ where: { consumedAt: null } })).toBe(1);
+  });
+});
+
+
+describe('a serious clinical incident', () => {
+  /**
+   * A death waited in a queue until somebody happened to open the page. The
+   * event was published and nothing listened to it.
+   */
+  const SUMMARY = 'A patient on the ward collapsed after a missed dose and could not be revived.';
+
+  async function reported(severity: 'MINOR' | 'SEVERE' | 'DEATH') {
+    const world = await buildBookingWorld();
+    const incident = await reportIncident({
+      facilityId: world.facilityId,
+      actorId: world.schedulerId,
+      occurredAt: new Date(Date.now() - 60 * 60 * 1000),
+      severity,
+      category: 'CLINICAL_PROCEDURE',
+      summary: SUMMARY,
+    });
+    return { world, incident };
+  }
+
+  async function officer(fullName = 'Compliance Officer') {
+    const user = await createUser({ fullName });
+    await grant({
+      userId: user.id,
+      roleKey: 'incident_officer_probe',
+      permissions: ['incident.manage'],
+      scopeType: 'PLATFORM',
+    });
+    return user;
+  }
+
+  it.each(['SEVERE', 'DEATH'] as const)(
+    'tells everybody who can act on it, at once, when it is %s',
+    async (severity) => {
+      const first = await officer('First Officer');
+      const second = await officer('Second Officer');
+      const { incident } = await reported(severity);
+
+      const pass = await runOnce({ handlers });
+      expect(pass.failed).toBe(0);
+
+      const messages = await prisma.notificationMessage.findMany({
+        where: { relatedId: incident.id, kind: 'incident.severe' },
+      });
+      expect(messages.map((m) => m.userId).sort()).toEqual([first.id, second.id].sort());
+      // Names a facility and a severity, never what happened or to whom.
+      expect(messages[0]!.body).toContain('Owerri General Hospital');
+      expect(messages[0]!.body).toContain(severity === 'DEATH' ? 'death' : 'severe');
+      expect(messages[0]!.body).not.toContain('collapsed');
+    },
+  );
+
+  it('does not wake anybody for a minor one', async () => {
+    await officer();
+    const { incident } = await reported('MINOR');
+
+    await runOnce({ handlers });
+
+    expect(
+      await prisma.notificationMessage.count({
+        where: { relatedId: incident.id, kind: 'incident.severe' },
+      }),
+    ).toBe(0);
+  });
+
+  it('is not recorded as handled when there is nobody to tell', async () => {
+    const { incident } = await reported('DEATH');
+
+    const pass = await runOnce({ handlers });
+    expect(pass.failed).toBe(1);
+
+    const event = await prisma.outboxEvent.findFirstOrThrow({
+      where: { eventType: EVENTS.ClinicalIncidentReported, aggregateId: incident.id },
+    });
+    expect(event.status).toBe('FAILED');
+    expect(event.lastError).toMatch(/incident\.manage|nobody|no one/i);
+  });
+
+  it('tells the officers who were missed on the retry, and nobody twice', async () => {
+    const first = await officer('First Officer');
+    const second = await officer('Second Officer');
+    const secondPhone = (await prisma.user.findUniqueOrThrow({ where: { id: second.id } })).phone;
+    const { incident } = await reported('SEVERE');
+    sms.send.mockImplementation(async (message: { to: string }) =>
+      message.to === secondPhone ? null : ACCEPTED,
+    );
+    await runOnce({ handlers });
+
+    sms.send.mockResolvedValue(ACCEPTED);
+    await makeDue();
+    await runOnce({ handlers });
+
+    for (const user of [first, second]) {
+      expect(
+        await prisma.notificationMessage.count({
+          where: { userId: user.id, relatedId: incident.id, sentAt: { not: null } },
+        }),
+      ).toBe(1);
+    }
   });
 });
