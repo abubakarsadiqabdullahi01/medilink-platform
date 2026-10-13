@@ -32,12 +32,12 @@ export async function financeSummary(): Promise<FinanceSummary> {
       SELECT coalesce(sum(i.gross_kobo) FILTER (WHERE i.status = 'ISSUED'), 0)::float8 AS outstanding,
              coalesce(sum(i.gross_kobo) FILTER (WHERE i.status = 'PAID'), 0)::float8 AS paid,
              coalesce(sum(i.gross_kobo) FILTER (WHERE i.status = 'DRAFT'), 0)::float8 AS draft,
-             coalesce(sum(i.platform_fee_kobo), 0)::float8 AS fees
+             coalesce(sum(i.platform_fee_kobo) FILTER (WHERE i.status <> 'VOID'), 0)::float8 AS fees
       FROM billing.invoices i
       JOIN facilities.facilities f ON f.id = i.facility_id AND f.status = 'VERIFIED'`,
     prisma.$queryRaw<{ month: string; invoiced: number; paid: number }[]>`
       SELECT to_char(date_trunc('month', i.period_start AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Lagos'), 'YYYY-MM') AS month,
-             sum(i.gross_kobo)::float8 AS invoiced,
+             coalesce(sum(i.gross_kobo) FILTER (WHERE i.status <> 'VOID'), 0)::float8 AS invoiced,
              coalesce(sum(i.gross_kobo) FILTER (WHERE i.status = 'PAID'), 0)::float8 AS paid
       FROM billing.invoices i
       JOIN facilities.facilities f ON f.id = i.facility_id AND f.status = 'VERIFIED'

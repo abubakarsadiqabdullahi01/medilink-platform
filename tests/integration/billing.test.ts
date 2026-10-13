@@ -35,6 +35,7 @@ import {
   issueInvoice,
   listInvoices,
   recordPayment,
+  voidInvoice,
 } from '@/modules/billing-settlement/application/invoice';
 import {
   amountOwed,
@@ -43,6 +44,8 @@ import {
 } from '@/modules/billing-settlement/application/payout';
 import { GET as getPayoutsRoute } from '@/app/api/v1/payouts/route';
 import { POST as issueInvoiceRoute } from '@/app/api/v1/invoices/[id]/issue/route';
+import { POST as voidInvoiceRoute } from '@/app/api/v1/invoices/[id]/void/route';
+import { financeSummary } from '@/modules/billing-settlement/application/finance-summary';
 import { POST as releasePayoutRoute } from '@/app/api/v1/payouts/[id]/release/route';
 import { issueSession } from '@/modules/auth/application/session-service';
 import { clearCookies } from './support/cookie-jar';
@@ -976,6 +979,200 @@ describe('payouts and disputes', () => {
 
     const payout = await preparePayout({ practitionerId: first.practitionerId, actorId: second.financeId });
     expect(payout.amountKobo).toBe(FOUR_HOUR_PAY);
+  });
+});
+
+describe('voiding a draft invoice', () => {
+  /**
+   * BIL-08. VOID was in the database and nothing set it: a draft raised from the
+   * wrong figures could not be cancelled, because its lines pinned the shifts and
+   * the ledger had already credited the practitioner. A void reverses the
+   * entries rather than deleting them, and frees the shifts to be invoiced again.
+   */
+  const REASON = 'Raised against the wrong period; the timesheet is being corrected first.';
+
+  it('marks it void, reverses what the ledger credited, and keeps both', async () => {
+    const world = await buildWorld();
+    const invoice = await generateInvoice(period(world));
+    expect(await accountBalance('FACILITY_PAYABLE', world.facilityId)).toBe(4_000_000);
+
+    const voided = await voidInvoice({ invoiceId: invoice.id, actorId: world.financeId, reason: REASON });
+
+    expect(voided.status).toBe('VOID');
+    expect(await accountBalance('FACILITY_PAYABLE', world.facilityId)).toBe(0);
+    expect(await amountOwed(world.practitionerId)).toBe(0);
+    // Reversed, not deleted: the original credit and its reversal are both on the ledger.
+    expect(await prisma.ledgerEntry.count({ where: { invoiceId: invoice.id } })).toBe(4);
+    const all = await prisma.ledgerEntry.aggregate({ _sum: { amountKobo: true } });
+    expect(all._sum.amountKobo).toBe(0);
+  });
+
+  it('records who voided it and why', async () => {
+    const world = await buildWorld();
+    const invoice = await generateInvoice(period(world));
+
+    await voidInvoice({ invoiceId: invoice.id, actorId: world.financeId, reason: REASON });
+
+    const audit = await prisma.auditLog.findFirstOrThrow({ where: { action: 'invoice.voided' } });
+    expect(audit.actorId).toBe(world.financeId);
+    expect(audit.entityId).toBe(invoice.id);
+    expect(audit.reason).toBe(REASON);
+    expect(audit.before).toMatchObject({ status: 'DRAFT' });
+    expect(audit.after).toMatchObject({ status: 'VOID' });
+  });
+
+  it('frees the shifts, so they can be invoiced again, once', async () => {
+    const world = await buildWorld();
+    const first = await generateInvoice(period(world));
+    await voidInvoice({ invoiceId: first.id, actorId: world.financeId, reason: REASON });
+
+    const second = await generateInvoice(period(world));
+
+    expect(second.id).not.toBe(first.id);
+    expect(second.grossKobo).toBe(4_000_000);
+    // Credited once net, however many invoices have carried the shift.
+    expect(await amountOwed(world.practitionerId)).toBe(4_000_000);
+    await expect(generateInvoice(period(world))).rejects.toThrow(/No approved shifts/);
+  });
+
+  it('keeps one live invoice line per shift on the database', async () => {
+    const world = await buildWorld();
+    const invoice = await generateInvoice(period(world));
+    const line = invoice.lines[0]!;
+
+    await expect(
+      prisma.invoiceLine.create({
+        data: {
+          invoiceId: invoice.id,
+          assignmentId: line.assignmentId,
+          practitionerId: line.practitionerId,
+          hourlyRateKobo: line.hourlyRateKobo,
+          ordinaryMinutes: 0,
+          nightMinutes: 0,
+          holidayMinutes: 0,
+          overtimeMinutes: 0,
+          onCallMinutes: 0,
+          baseKobo: 0,
+          premiumKobo: 0,
+          amountKobo: 0,
+        },
+      }),
+    ).rejects.toThrow();
+  });
+
+  it('will not void an invoice that has been issued', async () => {
+    const world = await buildWorld();
+    const invoice = await generateInvoice(period(world));
+    await issueInvoice({ invoiceId: invoice.id, actorId: world.financeId });
+
+    await expect(
+      voidInvoice({ invoiceId: invoice.id, actorId: world.financeId, reason: REASON }),
+    ).rejects.toMatchObject({ code: 'invoice_wrong_status' });
+    expect(await accountBalance('FACILITY_PAYABLE', world.facilityId)).toBe(4_000_000);
+  });
+
+  it('will not void it twice', async () => {
+    const world = await buildWorld();
+    const invoice = await generateInvoice(period(world));
+    await voidInvoice({ invoiceId: invoice.id, actorId: world.financeId, reason: REASON });
+
+    await expect(
+      voidInvoice({ invoiceId: invoice.id, actorId: world.financeId, reason: REASON }),
+    ).rejects.toMatchObject({ code: 'invoice_wrong_status' });
+    expect(await prisma.ledgerEntry.count({ where: { invoiceId: invoice.id } })).toBe(4);
+  });
+
+  it('will not void money that has been paid out or is on its way', async () => {
+    const world = await buildWorld();
+    const invoice = await generateInvoice(period(world));
+    await preparePayout({ practitionerId: world.practitionerId, actorId: world.financeId });
+
+    await expect(
+      voidInvoice({ invoiceId: invoice.id, actorId: world.financeId, reason: REASON }),
+    ).rejects.toMatchObject({ code: 'invoice_paid_out', status: 409 });
+    expect((await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).status).toBe('DRAFT');
+    expect(await amountOwed(world.practitionerId)).toBe(4_000_000);
+  });
+
+  it('is not lost to a failed payout, which moved nothing', async () => {
+    const world = await buildWorld();
+    const invoice = await generateInvoice(period(world));
+    const payout = await preparePayout({ practitionerId: world.practitionerId, actorId: world.financeId });
+    await prisma.payout.update({ where: { id: payout.id }, data: { status: 'FAILED' } });
+
+    const voided = await voidInvoice({ invoiceId: invoice.id, actorId: world.financeId, reason: REASON });
+    expect(voided.status).toBe('VOID');
+  });
+
+  it('leaves exactly one of a void and an issue standing when both are pressed at once', async () => {
+    const world = await buildWorld();
+    const invoice = await generateInvoice(period(world));
+
+    const outcomes = await Promise.allSettled([
+      voidInvoice({ invoiceId: invoice.id, actorId: world.financeId, reason: REASON }),
+      issueInvoice({ invoiceId: invoice.id, actorId: world.financeId }),
+    ]);
+
+    expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1);
+    const status = (await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).status;
+    expect(['VOID', 'ISSUED']).toContain(status);
+    // The ledger agrees with whichever won.
+    expect(await accountBalance('FACILITY_PAYABLE', world.facilityId)).toBe(status === 'VOID' ? 0 : 4_000_000);
+  });
+
+  it('is not counted as billed or as a draft once void', async () => {
+    const world = await buildWorld();
+    const invoice = await generateInvoice(period(world));
+    expect((await financeSummary()).totals.draftKobo).toBe(4_000_000);
+
+    await voidInvoice({ invoiceId: invoice.id, actorId: world.financeId, reason: REASON });
+
+    const summary = await financeSummary();
+    expect(summary.totals.draftKobo).toBe(0);
+    expect(summary.byMonth.reduce((sum, month) => sum + month.invoicedKobo, 0)).toBe(0);
+  });
+
+  describe('through the route', () => {
+    const call = (invoiceId: string, facilityId: string, body: object) =>
+      voidInvoiceRoute(
+        new Request(`http://localhost/api/v1/invoices/${invoiceId}/void`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ facilityId, ...body }),
+        }),
+        { params: Promise.resolve({ id: invoiceId }) },
+      );
+
+    it('needs a fresh password', async () => {
+      const world = await buildWorld();
+      const invoice = await generateInvoice(period(world));
+      await issueSession({ userId: world.financeId });
+
+      const response = await call(invoice.id, world.facilityId, { reason: REASON });
+
+      expect(response.status).toBe(401);
+      expect((await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).status).toBe('DRAFT');
+    });
+
+    it('needs a reason somebody could read later', async () => {
+      const world = await buildWorld();
+      const invoice = await generateInvoice(period(world));
+      await issueSession({ userId: world.financeId, stepUp: true });
+
+      expect((await call(invoice.id, world.facilityId, { reason: 'oops' })).status).toBe(422);
+      expect((await call(invoice.id, world.facilityId, {})).status).toBe(422);
+    });
+
+    it('voids it for a finance officer with a fresh session', async () => {
+      const world = await buildWorld();
+      const invoice = await generateInvoice(period(world));
+      await issueSession({ userId: world.financeId, stepUp: true });
+
+      const response = await call(invoice.id, world.facilityId, { reason: REASON });
+
+      expect(response.status).toBe(200);
+      expect((await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).status).toBe('VOID');
+    });
   });
 });
 

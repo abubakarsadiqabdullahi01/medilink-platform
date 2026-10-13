@@ -91,7 +91,7 @@ export async function facilitySummary(
       prisma
         .$queryRaw<{ month: string; invoiced: number; paid: number }[]>`
           SELECT to_char(date_trunc('month', period_start AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Lagos'), 'YYYY-MM') AS month,
-                 sum(gross_kobo)::float8 AS invoiced,
+                 coalesce(sum(gross_kobo) FILTER (WHERE status <> 'VOID'), 0)::float8 AS invoiced,
                  coalesce(sum(gross_kobo) FILTER (WHERE status = 'PAID'), 0)::float8 AS paid
           FROM billing.invoices
           WHERE facility_id = ${facilityId}::uuid

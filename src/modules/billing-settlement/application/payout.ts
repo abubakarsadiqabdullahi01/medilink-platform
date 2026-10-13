@@ -141,7 +141,7 @@ export async function payoutPosition(
  * the practitioner, so different people never wait on each other. The prefix
  * keeps this key apart from the booking locks, which hash a bare user id.
  */
-async function lockPayouts(tx: Tx, practitionerId: string): Promise<void> {
+export async function lockPayouts(tx: Tx, practitionerId: string): Promise<void> {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`payout:${practitionerId}`}, 0))`;
 }
 

@@ -4,12 +4,14 @@ import { recordAudit } from '@/lib/audit';
 import { publishEvent } from '@/lib/outbox';
 import { EVENTS } from '@/lib/events';
 import { HttpError } from '@/lib/http/errors';
+import { lockPayouts } from './payout';
 import { termsOfBooking } from '@/modules/rates-contracts/application/rate-card';
 import { priceStoredTimesheet } from '@/modules/rates-contracts/domain/pricing';
 import {
   PLATFORM_FEE_UNSET_BP,
   entriesForApprovedWork,
   entriesForPayment,
+  entriesForVoidedWork,
   platformFeeKobo,
   type LedgerEntry,
 } from '../domain/ledger';
@@ -37,6 +39,12 @@ export const InvoiceErrors = {
     ),
   wrongStatus: (from: string, to: string) =>
     new HttpError('invoice_wrong_status', `A ${from} invoice cannot become ${to}.`, 409),
+  paidOut: () =>
+    new HttpError(
+      'invoice_paid_out',
+      'A payout has been prepared or made for a practitioner on this invoice since it was raised, so it cannot be voided. Resolve the payout first.',
+      409,
+    ),
 };
 
 /** Read from configuration, so 3.1 is a deployment decision rather than a deploy. */
@@ -137,7 +145,8 @@ export async function generateInvoice(input: GenerateInvoiceParams): Promise<Inv
   const alreadyBilled = new Set(
     (
       await prisma.invoiceLine.findMany({
-        where: { assignmentId: { in: approved.map((row) => row.assignmentId) } },
+        // A voided line no longer counts: its shift can be invoiced again.
+        where: { assignmentId: { in: approved.map((row) => row.assignmentId) }, voidedAt: null },
         select: { assignmentId: true },
       })
     ).map((row) => row.assignmentId),
@@ -234,6 +243,100 @@ export async function generateInvoice(input: GenerateInvoiceParams): Promise<Inv
       payload: { invoiceId: invoice.id, facilityId: input.facilityId, grossKobo },
     });
 
+    return toView(invoice);
+  });
+}
+
+/**
+ * Cancels a draft invoice and reverses what the ledger credited for it (BIL-08).
+ *
+ * Only a draft: an issued invoice has been put to the facility as a bill, and
+ * taking one back is a credit note, which needs the commercial decisions the
+ * money model has not yet made. Nothing is deleted. The original entries stay
+ * and a reversing transaction cancels each one, the lines are marked void so
+ * their shifts can be invoiced again, and the reason is on the audit row.
+ *
+ * Refused once a payout has been prepared or made for any practitioner on it
+ * since it was raised, because the practitioner was credited the moment the
+ * draft was raised and that credit may already have been paid out; reversing it
+ * would take it from a balance that no longer holds it.
+ */
+export async function voidInvoice(input: {
+  invoiceId: string;
+  actorId: string;
+  reason: string;
+}): Promise<InvoiceView> {
+  return prisma.$transaction(async (tx: Tx) => {
+    // Locked first, so a void and an issue pressed together take turns and the
+    // loser sees what the winner did.
+    await tx.$executeRaw`SELECT 1 FROM billing.invoices WHERE id = ${input.invoiceId}::uuid FOR UPDATE`;
+    const existing = await tx.invoice.findUnique({ where: { id: input.invoiceId } });
+    if (!existing) throw InvoiceErrors.notFound();
+    if (existing.status !== 'DRAFT') throw InvoiceErrors.wrongStatus(existing.status, 'VOID');
+
+    const lines = await tx.invoiceLine.findMany({
+      where: { invoiceId: existing.id, voidedAt: null },
+      orderBy: { id: 'asc' },
+    });
+
+    // Payouts are decided under this lock, in a fixed order so two voids over the
+    // same people cannot wait on each other.
+    const practitioners = [...new Set(lines.map((line) => line.practitionerId))].sort();
+    for (const practitionerId of practitioners) await lockPayouts(tx, practitionerId);
+
+    const moved = await tx.payout.count({
+      where: {
+        practitionerId: { in: practitioners },
+        status: { in: ['PREPARED', 'RELEASED', 'SETTLED'] },
+        createdAt: { gte: existing.createdAt },
+      },
+    });
+    if (moved > 0) throw InvoiceErrors.paidOut();
+
+    const applied = await tx.invoice.updateMany({
+      where: { id: existing.id, status: 'DRAFT' },
+      data: { status: 'VOID' },
+    });
+    if (applied.count !== 1) throw InvoiceErrors.wrongStatus(existing.status, 'VOID');
+    await tx.invoiceLine.updateMany({
+      where: { invoiceId: existing.id, voidedAt: null },
+      data: { voidedAt: new Date() },
+    });
+
+    // The same apportionment the credit used, so each reversal is its credit.
+    for (const line of lines) {
+      const share =
+        existing.grossKobo === 0
+          ? 0
+          : Math.floor((existing.platformFeeKobo * line.amountKobo) / existing.grossKobo);
+      await postTransaction(
+        tx,
+        entriesForVoidedWork({
+          facilityId: existing.facilityId,
+          practitionerId: line.practitionerId,
+          grossKobo: line.amountKobo,
+          platformFeeKobo: share,
+        }),
+        { invoiceId: existing.id },
+      );
+    }
+
+    await recordAudit(tx, {
+      action: 'invoice.voided',
+      entityType: 'billing.invoices',
+      entityId: existing.id,
+      actorId: input.actorId,
+      scopeType: 'FACILITY',
+      scopeId: existing.facilityId,
+      reason: input.reason,
+      before: { status: existing.status, grossKobo: existing.grossKobo },
+      after: { status: 'VOID' },
+    });
+
+    const invoice = await tx.invoice.findUniqueOrThrow({
+      where: { id: existing.id },
+      include: { lines: true },
+    });
     return toView(invoice);
   });
 }

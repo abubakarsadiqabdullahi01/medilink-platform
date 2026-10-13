@@ -20,6 +20,7 @@ export const ROUTES: RouteDefinition[] = [
   { method: 'GET', path: '/api/v1/dashboard/finance', permission: 'invoice.read', scopeType: 'PLATFORM' },
   { method: 'GET', path: '/api/v1/finance/invoices', permission: 'invoice.read', scopeType: 'PLATFORM' },
   { method: 'POST', path: '/api/v1/invoices/:id/issue', permission: 'payout.manage', scopeType: 'PLATFORM' },
+  { method: 'POST', path: '/api/v1/invoices/:id/void', permission: 'payout.manage', scopeType: 'PLATFORM' },
   { method: 'POST', path: '/api/v1/invoices/:id/pay', permission: 'payout.manage', scopeType: 'PLATFORM' },
   { method: 'POST', path: '/api/v1/payouts', permission: 'payout.manage', scopeType: 'PLATFORM' },
   { method: 'POST', path: '/api/v1/payouts/:id/release', permission: 'payout.manage', scopeType: 'PLATFORM' },

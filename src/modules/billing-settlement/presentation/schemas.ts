@@ -22,6 +22,10 @@ export const listInvoicesSchema = z.object({
 export const invoiceActionSchema = z.object({ id: uuid, facilityId: uuid });
 export type InvoiceActionInput = z.infer<typeof invoiceActionSchema>;
 
+export const voidInvoiceSchema = invoiceActionSchema.extend({
+  reason: z.string().trim().min(10).max(500),
+});
+
 export const preparePayoutSchema = z.object({ practitionerId: uuid });
 
 export const payoutIdSchema = z.object({ id: uuid });

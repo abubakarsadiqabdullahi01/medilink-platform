@@ -1900,7 +1900,10 @@ enum InvoiceStatus {
 model InvoiceLine {
   id           String @id @default(uuid()) @db.Uuid
   invoiceId    String @map("invoice_id") @db.Uuid
-  assignmentId String @unique @map("assignment_id") @db.Uuid
+  /// One live line per shift: a partial unique index over `voided_at IS NULL`,
+  /// in migrations/20261013160000_invoice_lines_voidable. Prisma cannot express
+  /// it, so there is no `@unique` here.
+  assignmentId String @map("assignment_id") @db.Uuid
 
   /// The rate card that priced it, so the figures can be explained later.
   rateCardId String? @map("rate_card_id") @db.Uuid
@@ -1918,11 +1921,14 @@ model InvoiceLine {
   premiumKobo Int @map("premium_kobo")
   amountKobo  Int @map("amount_kobo")
 
-  createdAt DateTime @default(now()) @map("created_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  /// Set when the invoice is voided. The line is kept; it no longer pins the shift.
+  voidedAt  DateTime? @map("voided_at")
 
   invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
 
   @@index([invoiceId])
+  @@index([assignmentId])
   @@map("invoice_lines")
   @@schema("billing")
 }

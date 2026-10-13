@@ -19,6 +19,15 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Textarea } from '@/components/ui/textarea';
 import { Combobox } from '@/components/app/combobox';
 import { StatusBadge } from '@/components/app/status-badge';
 import { EmptyState, PageHeader, QueueSkeleton } from '@/components/app/page-shell';
@@ -105,6 +114,9 @@ export default function InvoicesPage() {
 
   const stepUp = useStepUp('Issuing, and recording payment of, an invoice moves money.');
 
+  const [voiding, setVoiding] = useState<Invoice | null>(null);
+  const [voidReason, setVoidReason] = useState('');
+
   const generate = useMutation({
     mutationFn: () =>
       api.post('/api/v1/invoices', {
@@ -135,6 +147,26 @@ export default function InvoicesPage() {
     },
   });
 
+  const voidIt = useMutation({
+    mutationFn: (invoice: Invoice) =>
+      api.post(`/api/v1/invoices/${invoice.id}/void`, {
+        facilityId: invoice.facilityId,
+        reason: voidReason.trim(),
+      }),
+    onSuccess: () => {
+      toast.success('Voided', {
+        description: 'What was credited for it is reversed, and its shifts can be invoiced again.',
+      });
+      setVoiding(null);
+      setVoidReason('');
+      refresh();
+    },
+    onError: (error, invoice) => {
+      if (stepUp.handle(error, () => voidIt.mutate(invoice))) return;
+      toast.error('Could not void it', { description: errorMessage(error) });
+    },
+  });
+
   const pay = useMutation({
     mutationFn: (invoice: Invoice) =>
       api.post(`/api/v1/invoices/${invoice.id}/pay`, { facilityId: invoice.facilityId }),
@@ -153,6 +185,51 @@ export default function InvoicesPage() {
   return (
     <>
       {stepUp.dialog}
+      <Dialog
+        open={voiding !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setVoiding(null);
+            setVoidReason('');
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Void {voiding?.number}</DialogTitle>
+            <DialogDescription>
+              Cancels this draft and reverses what the ledger credited for it. Its shifts can then
+              be invoiced again. It cannot be undone, and an invoice that has been issued cannot
+              be voided here.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label htmlFor="void-reason">Why is it being voided?</Label>
+            <Textarea
+              id="void-reason"
+              value={voidReason}
+              maxLength={500}
+              onChange={(event) => setVoidReason(event.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              At least 10 characters. It is kept with your name.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setVoiding(null)}>
+              Keep it
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={voidReason.trim().length < 10}
+              loading={voidIt.isPending}
+              onClick={() => voiding && voidIt.mutate(voiding)}
+            >
+              Void invoice
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <PageHeader
         title="Invoices"
         description="Raised from shifts a facility has already approved, so nothing here can bill for hours they did not accept."
@@ -293,6 +370,11 @@ export default function InvoicesPage() {
                   </p>
 
                   <div className="flex flex-wrap gap-2">
+                    {invoice.status === 'DRAFT' ? (
+                      <Button variant="outline" onClick={() => setVoiding(invoice)}>
+                        Void it
+                      </Button>
+                    ) : null}
                     {invoice.status === 'DRAFT' ? (
                       <Button
                         loading={issue.isPending && issue.variables?.id === invoice.id}

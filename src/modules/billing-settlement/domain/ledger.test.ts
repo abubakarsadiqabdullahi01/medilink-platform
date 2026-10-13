@@ -7,6 +7,7 @@ import {
   entriesForApprovedWork,
   entriesForPayment,
   entriesForPayout,
+  entriesForVoidedWork,
   platformFeeKobo,
   type LedgerEntry,
 } from './ledger';
@@ -108,6 +109,40 @@ describe('approved work', () => {
         platformFeeKobo: -1,
       }),
     ).toThrow(/cannot be negative/);
+  });
+});
+
+describe('voided work', () => {
+  const work = {
+    facilityId: FACILITY,
+    practitionerId: PRACTITIONER,
+    grossKobo: 4_000_000,
+    platformFeeKobo: 400_000,
+  };
+
+  it('is the approved entries with every sign turned over', () => {
+    const approved = entriesForApprovedWork(work);
+    const voided = entriesForVoidedWork(work);
+
+    expect(voided).toHaveLength(approved.length);
+    for (const [index, entry] of voided.entries()) {
+      expect(entry.account).toBe(approved[index]!.account);
+      expect(entry.subjectId).toBe(approved[index]!.subjectId);
+      expect(entry.amountKobo).toBe(-approved[index]!.amountKobo);
+    }
+  });
+
+  it('balances', () => {
+    expect(() => assertBalanced(entriesForVoidedWork(work))).not.toThrow();
+  });
+
+  it('cancels the approved entries exactly, account by account', () => {
+    const entries: LedgerEntry[] = [...entriesForApprovedWork(work), ...entriesForVoidedWork(work)];
+    for (const account of ACCOUNTS) expect(balanceOf(entries, account)).toBe(0);
+  });
+
+  it('says in the memo that it is a reversal', () => {
+    for (const entry of entriesForVoidedWork(work)) expect(entry.memo).toMatch(/^Voided/);
   });
 });
 
