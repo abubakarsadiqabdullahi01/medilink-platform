@@ -134,10 +134,11 @@ export function useStepUp(purpose: string) {
   const dialog = (
     <StepUpDialog
       open={open}
-      onOpenChange={(next) => {
-        if (!next) retry.current = null;
-        setOpen(next);
-      }}
+      // Closing is not cancelling: the dialog closes itself on success and only
+      // then calls `onConfirmed`, so the retry must outlive the close. A retry
+      // left behind by a cancel is harmless; it is overwritten by the next
+      // refusal and runs only after a password has been accepted.
+      onOpenChange={setOpen}
       purpose={purpose}
       onConfirmed={() => {
         const again = retry.current;
