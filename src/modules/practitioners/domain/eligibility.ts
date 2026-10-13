@@ -87,7 +87,10 @@ export function eligibilityBlockers(
   const verified = new Set(input.verifiedCredentialTypeIds);
   const expired = new Set(input.expiredCredentialTypeIds);
 
-  if (input.requiredCredentialTypeIds.some((id) => expired.has(id))) {
+  // An expired row is history once a newer submission of the same type has
+  // been verified: renewing leaves the old row EXPIRED on the record, and
+  // counting it again would block everybody who ever renewed a licence.
+  if (input.requiredCredentialTypeIds.some((id) => expired.has(id) && !verified.has(id))) {
     blockers.push('credential_expired');
   }
   if (input.requiredCredentialTypeIds.some((id) => !verified.has(id))) {

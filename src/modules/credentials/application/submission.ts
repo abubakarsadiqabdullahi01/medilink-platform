@@ -362,6 +362,15 @@ export async function reviewCredential(
   const nextStatus = DECISION_STATUS[input.decision];
   const expiresAt = approved ? computeExpiresAt(existing.credentialType, now) : null;
 
+  // A NIN is not kept whole once anybody has decided anything about it. It was
+  // masked only on the confirmed path, so a rejected, queried or mismatched
+  // submission kept the whole number for good; a practitioner who has to send
+  // it again is asked for it again.
+  const maskedReference =
+    holdsNin(existing.credentialType.verificationMethod) && existing.referenceNumber
+      ? maskReference(existing.referenceNumber)
+      : null;
+
   return prisma.$transaction(async (tx) => {
     const review = await tx.credentialSubmission.updateMany({
       where: { id: input.submissionId, status: 'PENDING' },
@@ -371,6 +380,7 @@ export async function reviewCredential(
         reviewedAt: now,
         reviewNotes: input.reviewNotes,
         expiresAt,
+        ...(maskedReference ? { referenceNumber: maskedReference } : {}),
       },
     });
     if (review.count !== 1) throw CredentialErrors.alreadyReviewed();
@@ -456,7 +466,12 @@ export async function resupplyCredential(
   if (!existing) throw CredentialErrors.submissionNotFound();
   if (existing.status !== 'MORE_INFO_REQUESTED') throw CredentialErrors.notAwaitingInformation();
 
-  const referenceNumber = input.referenceNumber ?? existing.referenceNumber;
+  // A NIN was masked when it was decided on, so what is stored is not a number
+  // anybody can use: they have to type it again.
+  const keptReference = holdsNin(existing.credentialType.verificationMethod)
+    ? null
+    : existing.referenceNumber;
+  const referenceNumber = input.referenceNumber ?? keptReference;
   const documentObjectKey = input.documentObjectKey ?? existing.documentObjectKey;
 
   // The same evidence rule as the original submission: what the credential

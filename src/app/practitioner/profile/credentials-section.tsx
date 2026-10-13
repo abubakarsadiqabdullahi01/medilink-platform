@@ -322,7 +322,12 @@ function ResupplyForm({
   // Anything that answers the question will do — a clearer photograph, or a
   // corrected number — so neither is required on its own. What was already
   // sent stays unless it is replaced.
-  const answers = Boolean(document) || Boolean(referenceNumber.trim());
+  //
+  // Except a NIN: it is masked as soon as anybody decides on it, so what is
+  // stored cannot be reused and the number has to be typed again.
+  const answers = rule.isNin
+    ? Boolean(referenceNumber.trim())
+    : Boolean(document) || Boolean(referenceNumber.trim());
   const ready = answers && !referenceProblem(rule, referenceNumber);
 
   return (
@@ -335,7 +340,7 @@ function ResupplyForm({
         onReferenceNumber={setReferenceNumber}
         document={document}
         onDocument={setDocument}
-        referenceOptionalNote="only if it was wrong"
+        referenceOptionalNote={rule.isNin ? undefined : 'only if it was wrong'}
       />
       <Button
         size="sm"

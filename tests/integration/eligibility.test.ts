@@ -160,6 +160,36 @@ describe('getEligibility', () => {
     expect(await getEligibility(userId)).toEqual({ eligible: true, blockers: [] });
   });
 
+  it('is eligible again once an expired licence has been renewed', async () => {
+    // The expiry sweep marks the old submission EXPIRED and leaves the row. The
+    // practitioner renews, a newer submission of the same type is verified, and
+    // the old row must stop counting — or every doctor whose first licence ran
+    // out stays blocked for good, whatever they submit.
+    const { userId } = await setupPractitioner();
+    const old = await prisma.credentialSubmission.findFirstOrThrow({ where: { userId } });
+    await prisma.credentialSubmission.update({ where: { id: old.id }, data: { status: 'EXPIRED' } });
+
+    const lapsed = await getEligibility(userId);
+    expect(lapsed.blockers).toContain('credential_expired');
+
+    const renewed = await submitCredential({
+      userId,
+      credentialTypeId: old.credentialTypeId,
+      referenceNumber: 'B987654321',
+    });
+    await reviewCredential({
+      submissionId: renewed.id,
+      reviewerId: FAKE_REVIEWER_ID,
+      decision: 'approve',
+    });
+
+    const now = await getEligibility(userId);
+    expect(now.blockers).toEqual([]);
+    expect(now.eligible).toBe(true);
+    // The old row is still there, for the record.
+    expect(await prisma.credentialSubmission.count({ where: { userId, status: 'EXPIRED' } })).toBe(1);
+  });
+
   it('reports a missing profile', async () => {
     const { userId } = await setupPractitioner({ withProfile: false });
     const result = await getEligibility(userId);

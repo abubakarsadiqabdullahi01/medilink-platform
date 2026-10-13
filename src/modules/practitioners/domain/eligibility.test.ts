@@ -134,6 +134,26 @@ describe('each blocker on its own', () => {
     expect(eligibilityBlockers(input, NOW)).toContain('credential_expired');
   });
 
+  it('clears the expiry once a newer submission of the same type is verified', () => {
+    // Renewal: the old row stays EXPIRED for the record, and a fresh one is
+    // VERIFIED. Counting the old row as a current expiry would leave every
+    // practitioner who ever renewed a licence blocked for good.
+    const input = eligible({
+      verifiedCredentialTypeIds: [NIN_TYPE, LICENCE_TYPE],
+      expiredCredentialTypeIds: [LICENCE_TYPE],
+    });
+    expect(eligibilityBlockers(input, NOW)).not.toContain('credential_expired');
+    expect(isEligibleForMatching(input, NOW)).toBe(true);
+  });
+
+  it('still blocks when a different required type is the one that expired', () => {
+    const input = eligible({
+      verifiedCredentialTypeIds: [LICENCE_TYPE],
+      expiredCredentialTypeIds: [NIN_TYPE, LICENCE_TYPE],
+    });
+    expect(eligibilityBlockers(input, NOW)).toContain('credential_expired');
+  });
+
   it('ignores an expired credential the category does not require', () => {
     const input = eligible({ expiredCredentialTypeIds: ['type-something-optional'] });
     expect(isEligibleForMatching(input, NOW)).toBe(true);
@@ -255,8 +275,9 @@ describe('the invariant, over generated profiles', () => {
       expect(input.screening?.status, JSON.stringify(input)).toBe('CLEAR');
       expect(input.hasProfile, JSON.stringify(input)).toBe(true);
       for (const id of input.requiredCredentialTypeIds) {
+        // Verified is what counts. An EXPIRED row alongside a VERIFIED one of
+        // the same type is a renewal, with the old row kept for the record.
         expect(input.verifiedCredentialTypeIds, JSON.stringify(input)).toContain(id);
-        expect(input.expiredCredentialTypeIds, JSON.stringify(input)).not.toContain(id);
       }
     }
 

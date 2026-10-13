@@ -10,7 +10,11 @@ import { POST as confirm } from '@/app/api/v1/practitioners/verification/confirm
 import { POST as review } from '@/app/api/v1/credentials/[id]/review/route';
 import { issueSession } from '@/modules/auth/application/session-service';
 import { createProfile } from '@/modules/practitioners/application/profile';
-import { submitCredential } from '@/modules/credentials/application/submission';
+import {
+  resupplyCredential,
+  reviewCredential,
+  submitCredential,
+} from '@/modules/credentials/application/submission';
 import { clearCookies } from './support/cookie-jar';
 import {
   createCredentialType,
@@ -209,8 +213,63 @@ describe('confirming an identity', () => {
     const row = await rowOf(submitted.id);
     expect(row.status).toBe('MORE_INFO_REQUESTED');
     expect(row.reviewNotes).toMatch(/does not match/i);
-    // Left whole: they will resupply against it.
-    expect(row.referenceNumber).toBe(NIN);
+    // Not left whole. They will send a corrected number, so there is nothing to
+    // keep the old one for, and a mismatched submission that sat here in full
+    // would be the one place a NIN stayed readable for good.
+    expect(row.referenceNumber).toBe('*******0022');
+  });
+
+  it('asks for the number again rather than resupplying against a masked one', async () => {
+    const { practitioner, submitted } = await submission({
+      method: 'nimc_verification',
+      reference: NIN,
+    });
+    await signInAsOfficer();
+    await confirmIdentity({ submissionId: submitted.id, nameMatch: false });
+
+    await expect(
+      resupplyCredential({ submissionId: submitted.id, userId: practitioner.id }),
+    ).rejects.toMatchObject({ code: 'reference_number_required' });
+
+    const corrected = await resupplyCredential({
+      submissionId: submitted.id,
+      userId: practitioner.id,
+      referenceNumber: '99000000033',
+    });
+    expect(corrected.status).toBe('PENDING');
+    expect(corrected.referenceNumber).toBe('99000000033');
+  });
+
+  it.each(['reject', 'request_info'] as const)(
+    'masks the number when an officer decides %s on a NIN, wherever the decision comes from',
+    async (decision) => {
+      const { submitted } = await submission({ method: 'nimc_verification', reference: NIN });
+      const officer = await signInAsOfficer();
+
+      await reviewCredential({
+        submissionId: submitted.id,
+        reviewerId: officer.id,
+        decision,
+        reviewNotes: 'The slip is unreadable; please send it again.',
+      });
+
+      expect((await rowOf(submitted.id)).referenceNumber).toBe('*******0022');
+      expect(JSON.stringify(await prisma.auditLog.findMany())).not.toContain(NIN);
+    },
+  );
+
+  it('leaves a registration number whole: it is public, and the officer re-reads it', async () => {
+    const { submitted } = await submission({ method: 'mdcn_status_check', reference: 'MDCN/R/12345' });
+    const officer = await signInAsOfficer();
+
+    await reviewCredential({
+      submissionId: submitted.id,
+      reviewerId: officer.id,
+      decision: 'request_info',
+      reviewNotes: 'Which register is this on?',
+    });
+
+    expect((await rowOf(submitted.id)).referenceNumber).toBe('MDCN/R/12345');
   });
 
   it('refuses when the officer has not said whether the name matched, and changes nothing', async () => {
