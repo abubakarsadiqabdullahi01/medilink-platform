@@ -323,7 +323,7 @@ Unit: `src/modules/facilities/domain/facility.test.ts`; `src/modules/service-req
 ---
 
 ## 15. v2.9 spec vs code
-Spec file: `/tmp/claude-0/-home-user-medilink-platform/b230a556-c6b8-540a-a669-4d8b20a4f1a2/scratchpad/v29/v29.md` (cited as `spec:LINE`). Verdicts: IMPLEMENTED / PARTLY / MISSING / DIVERGES.
+Spec file: the v2.9 specification (kept outside the repository) (cited as `spec:LINE`). Verdicts: IMPLEMENTED / PARTLY / MISSING / DIVERGES.
 
 ### Module 4 — Healthcare Facility Management (spec:420-444)
 | Spec requirement | Verdict | Evidence |

@@ -452,7 +452,7 @@ All by reading; none reproduced.
 
 ## 9. v2.9 spec vs code
 
-Source: `/tmp/claude-0/.../scratchpad/v29/v29.md` (read as data). Numbering note: v2.9 numbers modules 9 attendance, 12 cancellation/fault/sanctions, 13 disputes, 14 clinical incidents, 18 suggestions; the code and its docs use an older scheme (14 disputes, 15 incidents, 13 cancellations). Figure 4 is an image (`media/image4.png`) not present in the supplied text; it was compared against the nine named states and the stated correction rule only.
+Source: the v2.9 specification (kept outside the repository) (read as data). Numbering note: v2.9 numbers modules 9 attendance, 12 cancellation/fault/sanctions, 13 disputes, 14 clinical incidents, 18 suggestions; the code and its docs use an older scheme (14 disputes, 15 incidents, 13 cancellations). Figure 4 is an image (`media/image4.png`) not present in the supplied text; it was compared against the nine named states and the stated correction rule only.
 Marks: IMPLEMENTED / PARTLY / MISSING / DIVERGES.
 
 ### 9.1 Module 9 - Attendance and timesheets (spec lines 510-522, 728)

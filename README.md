@@ -2,6 +2,8 @@
 
 Verified healthcare workforce and locum management for the Nigerian market.
 Companion documents: **System Documentation v2.9** and **Implementation Plan v1.2**.
+The current blueprint — what exists, what is missing against v2.9, what is being added and the recommended flows — is
+in [docs/blueprint/](docs/blueprint/README.md).
 
 Every module in the specification now has an implementation and an interface:
 eighteen modules under `src/modules/`, three consoles under `src/app/`, and
