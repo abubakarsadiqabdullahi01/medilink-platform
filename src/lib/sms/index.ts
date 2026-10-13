@@ -109,17 +109,51 @@ export function smsAdapter(): SmsAdapter {
   }
 }
 
-/** Never throws: a delivery failure must not roll back a committed write. */
-export async function trySendSms(message: SmsMessage): Promise<SmsResult | null> {
-  const adapter = smsAdapter();
+export interface SmsAttempt {
+  /** True only when the gateway accepted the message. */
+  delivered: boolean;
+  result: SmsResult | null;
+  /** Why not, in words an operator can read; never the message body. */
+  reason: string | null;
+}
+
+/**
+ * Tries to send, and says what happened. Never throws: a delivery failure must
+ * not roll back a committed write. A gateway that answers "not accepted" is a
+ * failure just as a thrown error is — the old shape handed back the result
+ * either way and callers treated any result as sent.
+ */
+export async function attemptSms(message: SmsMessage): Promise<SmsAttempt> {
+  let adapter: SmsAdapter;
   try {
-    return await adapter.send(message);
+    adapter = smsAdapter();
+  } catch (error) {
+    logger.error('sms adapter unavailable', { to: maskPhone(message.to), error: String(error) });
+    return { delivered: false, result: null, reason: String(error).slice(0, 300) };
+  }
+  try {
+    const result = await adapter.send(message);
+    if (!result.accepted) {
+      logger.error('sms not accepted', { provider: adapter.name, to: maskPhone(message.to) });
+      return {
+        delivered: false,
+        result,
+        reason: `The ${adapter.name} gateway did not accept the message.`,
+      };
+    }
+    return { delivered: true, result, reason: null };
   } catch (error) {
     logger.error('sms delivery failed', {
       provider: adapter.name,
       to: maskPhone(message.to),
       error: String(error),
     });
-    return null;
+    return { delivered: false, result: null, reason: String(error).slice(0, 300) };
   }
+}
+
+/** Never throws. For callers that only want the result, or nothing. */
+export async function trySendSms(message: SmsMessage): Promise<SmsResult | null> {
+  const attempt = await attemptSms(message);
+  return attempt.delivered ? attempt.result : null;
 }

@@ -20,6 +20,16 @@ export interface DeploymentSettings {
 }
 
 /**
+ * SMS providers that have a working adapter behind `smsAdapter()`.
+ *
+ * `termii` and `africastalking` are accepted by the schema but their adapters
+ * only throw, so a deploy that selected either booted cleanly and then failed
+ * every one-time code and confirmation at runtime (NOT-06). Adding a real
+ * adapter means adding its name here, in the same change.
+ */
+export const IMPLEMENTED_SMS_PROVIDERS: readonly string[] = ['console'];
+
+/**
  * Secrets that are published in this repository: the example file, CI, and
  * the integration suite's default. Long enough to pass the length check, and
  * known to anybody who has read the code.
@@ -39,8 +49,21 @@ export const PUBLISHED_SECRETS: ReadonlySet<string> = new Set([
  * otherwise boot as a laptop — one-time codes in the log, session cookies
  * without `Secure`, the scripts that create administrators allowed to run.
  */
-export function deploymentProblems(env: DeploymentSettings, appEnvWasSet: boolean): string[] {
+export function deploymentProblems(
+  env: DeploymentSettings,
+  appEnvWasSet: boolean,
+  implementedSmsProviders: readonly string[] = IMPLEMENTED_SMS_PROVIDERS,
+): string[] {
   const problems: string[] = [];
+
+  // Checked in every environment, local included: selecting an adapter that
+  // only throws is never what anybody meant, and finding out from the first
+  // person who tries to sign up is the failure this list exists to prevent.
+  if (!implementedSmsProviders.includes(env.SMS_PROVIDER)) {
+    problems.push(
+      `SMS_PROVIDER=${env.SMS_PROVIDER} has no working adapter yet, so no one-time code or confirmation could be sent. Implemented: ${implementedSmsProviders.join(', ')}.`,
+    );
+  }
 
   if (env.NODE_ENV === 'production' && !appEnvWasSet) {
     problems.push(

@@ -1,29 +1,36 @@
 import { prisma } from '@/lib/db';
 import { logger } from '@/lib/logger';
-import { notify } from './notify';
+import { watWindow } from '@/lib/wat';
+import { notify, requireDelivered, type NotifyOutcome } from './notify';
 
 /**
  * What a domain event turns into, for the people it concerns.
  *
  * Handlers must be idempotent: the outbox delivers at least once, and a
  * retried delivery must not send a second message. Each checks for a message
- * it has already recorded against the same assignment before sending.
+ * it has already *delivered* against the same assignment before sending.
+ *
+ * Handlers must also be honest about failure: if a text did not go they throw,
+ * after trying everyone, so the outbox retries the event with backoff and, in
+ * the end, parks it as a dead letter an operator can see (NOT-03).
  */
 
+/**
+ * Whether this person has already received this message. A row that failed
+ * does not count: counting it meant a failed text blocked its own retry, and
+ * a manual re-run sent nothing either.
+ */
 async function alreadyNotified(userId: string, kind: string, relatedId: string): Promise<boolean> {
   const existing = await prisma.notificationMessage.findFirst({
-    where: { userId, kind, relatedId },
+    where: { userId, kind, relatedId, sentAt: { not: null } },
     select: { id: true },
   });
   return existing !== null;
 }
 
-function formatShift(startsAt: string, endsAt: string): string {
-  const start = new Date(startsAt);
-  const end = new Date(endsAt);
-  return `${start.toISOString().slice(0, 16).replace('T', ' ')} to ${end
-    .toISOString()
-    .slice(11, 16)} UTC`;
+/** In West Africa Time, the clock on the ward and the one every screen uses. */
+function formatShift(startsAt: Date, endsAt: Date): string {
+  return watWindow(startsAt, endsAt);
 }
 
 /**
@@ -55,29 +62,36 @@ export async function notifyAssignmentConfirmed(payload: Record<string, unknown>
     return;
   }
 
-  const when = formatShift(assignment.startsAt.toISOString(), assignment.endsAt.toISOString());
+  const when = formatShift(assignment.startsAt, assignment.endsAt);
+  const outcomes: NotifyOutcome[] = [];
 
   if (!(await alreadyNotified(practitionerId, 'assignment.confirmed', assignmentId))) {
-    await notify({
-      userId: practitionerId,
-      kind: 'assignment.confirmed',
-      body: `Your shift at ${facility.name} is confirmed: ${when}. Medilink.`,
-      relatedType: 'matching.assignments',
-      relatedId: assignmentId,
-    });
+    outcomes.push(
+      await notify({
+        userId: practitionerId,
+        kind: 'assignment.confirmed',
+        body: `Your shift at ${facility.name} is confirmed: ${when}. Medilink.`,
+        relatedType: 'matching.assignments',
+        relatedId: assignmentId,
+      }),
+    );
   }
 
   // The representative stands for the facility. Once staff management lands,
   // this becomes whoever the facility has asked to be told.
   if (!(await alreadyNotified(facility.representativeUserId, 'assignment.confirmed', assignmentId))) {
-    await notify({
-      userId: facility.representativeUserId,
-      kind: 'assignment.confirmed',
-      body: `A practitioner is confirmed for your shift on ${when}. Medilink.`,
-      relatedType: 'matching.assignments',
-      relatedId: assignmentId,
-    });
+    outcomes.push(
+      await notify({
+        userId: facility.representativeUserId,
+        kind: 'assignment.confirmed',
+        body: `A practitioner is confirmed for your shift on ${when}. Medilink.`,
+        relatedType: 'matching.assignments',
+        relatedId: assignmentId,
+      }),
+    );
   }
+
+  requireDelivered(outcomes);
 }
 
 /**
@@ -113,13 +127,15 @@ export async function notifyAssignmentCancelled(payload: Record<string, unknown>
     return;
   }
 
-  const when = formatShift(assignment.startsAt.toISOString(), assignment.endsAt.toISOString());
+  const when = formatShift(assignment.startsAt, assignment.endsAt);
 
-  await notify({
-    userId: practitionerId,
-    kind: 'assignment.cancelled',
-    body: `Your shift at ${facility.name} on ${when} has been cancelled by the facility. You do not need to attend. Medilink.`,
-    relatedType: 'matching.assignments',
-    relatedId: assignmentId,
-  });
+  requireDelivered([
+    await notify({
+      userId: practitionerId,
+      kind: 'assignment.cancelled',
+      body: `Your shift at ${facility.name} on ${when} has been cancelled by the facility. You do not need to attend. Medilink.`,
+      relatedType: 'matching.assignments',
+      relatedId: assignmentId,
+    }),
+  ]);
 }

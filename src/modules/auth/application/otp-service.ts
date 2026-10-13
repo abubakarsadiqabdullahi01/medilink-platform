@@ -1,7 +1,7 @@
 import { prisma, type Tx } from '@/lib/db';
 import { env } from '@/lib/env';
 import { recordAudit } from '@/lib/audit';
-import { trySendSms } from '@/lib/sms';
+import { attemptSms } from '@/lib/sms';
 import { maskPhone } from '@/lib/phone';
 import { logger } from '@/lib/logger';
 import {
@@ -34,7 +34,7 @@ export async function issueOtp(input: {
   actorId?: string;
   ipAddress?: string;
   now?: Date;
-}): Promise<{ expiresAt: Date; sendsRemainingThisHour: number }> {
+}): Promise<{ expiresAt: Date; sendsRemainingThisHour: number; delivered: boolean }> {
   const now = input.now ?? new Date();
   const purpose = input.purpose;
 
@@ -84,7 +84,7 @@ export async function issueOtp(input: {
     });
   });
 
-  await trySendSms({
+  const attempt = await attemptSms({
     to: input.phone,
     body: otpMessageBody(code, input.purpose),
     transactional: true,
@@ -93,6 +93,9 @@ export async function issueOtp(input: {
   return {
     expiresAt,
     sendsRemainingThisHour: Math.max(0, OTP_MAX_SENDS_PER_HOUR - (recent.length + 1)),
+    // The caller decides what to say. This used to be thrown away, and the API
+    // answered "code sent" to somebody waiting for a text that was never sent.
+    delivered: attempt.delivered,
   };
 }
 
