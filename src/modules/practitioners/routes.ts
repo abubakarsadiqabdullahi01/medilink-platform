@@ -83,6 +83,14 @@ export const ROUTES: RouteDefinition[] = [
     permission: 'credential.review',
     scopeType: 'PLATFORM',
   },
+  { method: 'GET', path: '/api/v1/sanctions', permission: 'credential.review', scopeType: 'PLATFORM' },
+  { method: 'POST', path: '/api/v1/sanctions', permission: 'credential.review', scopeType: 'PLATFORM' },
+  {
+    method: 'POST',
+    path: '/api/v1/sanctions/:id/remove',
+    permission: 'credential.review',
+    scopeType: 'PLATFORM',
+  },
   {
     method: 'POST',
     path: '/api/v1/practitioners/me/photo-upload-url',

@@ -19,6 +19,7 @@ import {
   Gauge,
   CalendarDays,
   Activity,
+  ShieldAlert,
 } from 'lucide-react';
 import { SessionProvider, type SessionState } from '@/lib/ui/session';
 import { ConsoleShell, type NavSection } from '@/components/app/console-shell';
@@ -46,6 +47,13 @@ const SECTIONS: NavSection[] = [
         prefetch: '/api/v1/practitioners?scopeType=PLATFORM&limit=20',
         label: 'Practitioners',
         icon: UserRoundCheck,
+        permission: 'credential.review',
+      },
+      {
+        href: '/admin/sanctions',
+        prefetch: '/api/v1/sanctions',
+        label: 'Sanctions list',
+        icon: ShieldAlert,
         permission: 'credential.review',
       },
       {
