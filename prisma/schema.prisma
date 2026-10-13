@@ -126,13 +126,12 @@ model UserRole {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
 
-  // Does less than it looks like: PostgreSQL treats NULLs as distinct, and a
-  // PLATFORM grant's scope_id is NULL, so this never constrained the widest
-  // scope. The real guard is a partial unique index over
+  // One live grant per person, role and scope is a partial unique index over
   // COALESCE(scope_id, ...) WHERE revoked_at IS NULL, added in
   // migrations/20261004170000_one_live_grant. Prisma cannot express it, so it
-  // lives in SQL and this stays for the scopes it does cover.
-  @@unique([userId, roleId, scopeType, scopeId])
+  // lives in SQL. The table-wide unique that used to sit here also counted
+  // revoked rows, so a revoked grant could never be given again; it was
+  // dropped in 20261012120000_regrant_after_revoke.
   @@index([userId, revokedAt])
   @@map("user_roles")
   @@schema("identity")
@@ -250,6 +249,8 @@ model AuditLog {
   @@index([entityType, entityId])
   @@index([actorId, createdAt])
   @@index([correlationId])
+  @@index([createdAt, id])
+  @@index([scopeType, scopeId, createdAt, id])
   @@map("audit_log")
   @@schema("audit")
 }
@@ -476,6 +477,11 @@ model PractitionerProfile {
   // proximity is scored in. Nothing here holds coordinates, so tiers are
   // the honest unit until something does.
   travelPreference       TravelPreference @default(SAME_STATE) @map("travel_preference")
+  // When the practitioner said "this is complete, review it". Null until they
+  // do. It orders the compliance queue — an officer works the people who have
+  // asked, not everybody who has half-filled a form — and is deliberately NOT
+  // an eligibility blocker: only an officer's verification gates matching.
+  submittedForReviewAt   DateTime? @map("submitted_for_review_at")
   createdAt              DateTime  @default(now()) @map("created_at")
   updatedAt              DateTime  @updatedAt @map("updated_at")
   deletedAt              DateTime? @map("deleted_at")
@@ -954,7 +960,8 @@ model ServiceRequest {
   specialty            Specialty?           @relation(fields: [specialtyId], references: [id])
 
   @@index([status, startsAt])
-  @@index([facilityId, status])
+  // A facility's shifts by status in start order, a page at a time.
+  @@index([facilityId, status, startsAt, id])
   @@map("service_requests")
   @@schema("service_requests")
 }
@@ -1096,6 +1103,13 @@ model Assignment {
   // to, by time.
   @@index([userId, startsAt, endsAt])
   @@index([facilityId, startsAt])
+  // A roster or a schedule filtered by status ("confirmed", "completed") and
+  // read in start order. The two above cannot serve that without reading and
+  // discarding every other status, and `facilityId, startsAt` is kept because
+  // the unfiltered roster, the default, would otherwise sort a whole facility's
+  // history to return one page.
+  @@index([facilityId, status, startsAt, id])
+  @@index([userId, status, startsAt, id])
   @@map("assignments")
   @@schema("matching")
 }
@@ -1151,6 +1165,7 @@ model NotificationMessage {
 
   @@index([userId, createdAt])
   @@index([relatedType, relatedId])
+  @@index([userId, kind, relatedId])
   @@map("messages")
   @@schema("notifications")
 }
@@ -1840,7 +1855,9 @@ model Invoice {
   facility Facility      @relation(fields: [facilityId], references: [id])
   lines    InvoiceLine[]
 
-  @@index([facilityId, status])
+  // Statements and spend by period, for one facility; status is the last column
+  // so it narrows within a period rather than before it.
+  @@index([facilityId, periodStart, status])
   @@map("invoices")
   @@schema("billing")
 }

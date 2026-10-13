@@ -1,0 +1,11 @@
+-- A grant that was revoked could never be given again.
+--
+-- Revoking keeps the row and stamps revoked_at, so "they had access in March
+-- and it was taken away in June" stays answerable. The table-wide unique
+-- index on (user_id, role_id, scope_type, scope_id) then refused a second row
+-- for the same person, role and facility: an owner who removed a colleague
+-- and later re-hired them got a 500. The partial index
+-- user_roles_one_live_grant (20261004170000) already enforces the rule that
+-- matters, one live grant per person, role and scope, and covers PLATFORM
+-- grants this one never did.
+DROP INDEX IF EXISTS "identity"."user_roles_user_id_role_id_scope_type_scope_id_key";
