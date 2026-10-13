@@ -20,7 +20,7 @@ import { notify, requireDelivered, type NotifyOutcome } from './notify';
  * does not count: counting it meant a failed text blocked its own retry, and
  * a manual re-run sent nothing either.
  */
-async function alreadyNotified(userId: string, kind: string, relatedId: string): Promise<boolean> {
+export async function alreadyNotified(userId: string, kind: string, relatedId: string): Promise<boolean> {
   const existing = await prisma.notificationMessage.findFirst({
     where: { userId, kind, relatedId, sentAt: { not: null } },
     select: { id: true },

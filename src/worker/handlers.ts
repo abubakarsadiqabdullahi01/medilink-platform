@@ -6,6 +6,18 @@ import {
   notifyAssignmentCancelled,
   notifyAssignmentConfirmed,
 } from '../modules/notifications/application/handlers';
+import {
+  notifyCredentialExpired,
+  notifyCredentialInfoRequested,
+  notifyCredentialRejected,
+  notifyCredentialVerified,
+  notifyDisputeOpened,
+  notifyFacilityVerified,
+  notifyShiftAccepted,
+  notifyShiftInvited,
+  notifyTimesheetApproved,
+  notifyTimesheetSubmitted,
+} from '../modules/notifications/application/event-handlers';
 import { computeAndSaveTimesheet } from '../modules/timesheets/application/timesheet';
 import type { EventHandler } from './processor';
 
@@ -29,6 +41,19 @@ export const handlers: Record<string, EventHandler> = {
   [EVENTS.AssignmentCancelled]: async (payload) => {
     await notifyAssignmentCancelled(payload);
   },
+
+  // NOT-01: the messages people were never sent. Each throws if the text did
+  // not go, so the outbox retries it; see notifications/application/notify.ts.
+  [EVENTS.ShiftInvited]: async (payload) => notifyShiftInvited(payload),
+  [EVENTS.ShiftAccepted]: async (payload) => notifyShiftAccepted(payload),
+  [EVENTS.CredentialVerified]: async (payload) => notifyCredentialVerified(payload),
+  [EVENTS.CredentialRejected]: async (payload) => notifyCredentialRejected(payload),
+  [EVENTS.CredentialInfoRequested]: async (payload) => notifyCredentialInfoRequested(payload),
+  [EVENTS.CredentialExpired]: async (payload) => notifyCredentialExpired(payload),
+  [EVENTS.FacilityVerified]: async (payload) => notifyFacilityVerified(payload),
+  [EVENTS.TimesheetSubmitted]: async (payload) => notifyTimesheetSubmitted(payload),
+  [EVENTS.TimesheetApproved]: async (payload) => notifyTimesheetApproved(payload),
+  [EVENTS.DisputeOpened]: async (payload) => notifyDisputeOpened(payload),
 
   /**
    * Step 7.4, the half that was missing: the timesheet is worked out when the

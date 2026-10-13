@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma, type Tx } from '@/lib/db';
 import { recordAudit } from '@/lib/audit';
+import { randomUUID } from 'node:crypto';
 import { publishEvent } from '@/lib/outbox';
 import { EVENTS } from '@/lib/events';
 import {
@@ -221,6 +222,10 @@ export async function submitTimesheet(input: SubmitParams): Promise<TimesheetVie
       aggregateId: timesheet.id,
       payload: {
         assignmentId: input.assignmentId,
+        timesheetId: timesheet.id,
+        // One per submission, so a sheet sent back and submitted again tells
+        // the facility again instead of being taken for a repeat delivery.
+        submissionKey: randomUUID(),
         userId: assignment.userId,
         facilityId: assignment.facilityId,
       },

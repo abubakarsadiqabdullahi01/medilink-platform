@@ -416,20 +416,23 @@ export async function reviewCredential(
       });
     }
 
-    // No event on reject or on an information request — neither exists in
-    // the vocabulary, and the audit row above is the record.
-    if (approved) {
-      await publishEvent(tx, {
-        eventType: EVENTS.CredentialVerified,
-        aggregateType: 'credentials.credential_submissions',
-        aggregateId: updated.id,
-        payload: {
-          submissionId: updated.id,
-          userId: updated.userId,
-          credentialTypeId: updated.credentialTypeId,
-        },
-      });
-    }
+    // Every decision is an event, so the practitioner is told what an officer
+    // decided about their document (CRE-07). The audit row above is the record;
+    // the event is what reaches a person.
+    await publishEvent(tx, {
+      eventType: {
+        approve: EVENTS.CredentialVerified,
+        reject: EVENTS.CredentialRejected,
+        request_info: EVENTS.CredentialInfoRequested,
+      }[input.decision],
+      aggregateType: 'credentials.credential_submissions',
+      aggregateId: updated.id,
+      payload: {
+        submissionId: updated.id,
+        userId: updated.userId,
+        credentialTypeId: updated.credentialTypeId,
+      },
+    });
 
     return toView(updated);
   });
