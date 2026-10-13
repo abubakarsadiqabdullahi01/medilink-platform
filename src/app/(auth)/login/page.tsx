@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMutation } from '@tanstack/react-query';
 import { ShieldCheck, TriangleAlert } from 'lucide-react';
-import { api, errorMessage } from '@/lib/ui/api';
+import { api, ApiError, errorMessage } from '@/lib/ui/api';
 import { consoleFor, type SessionState } from '@/lib/ui/session';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -57,7 +57,17 @@ export default function LoginPage() {
                 {signIn.isError ? (
                   <Alert variant="destructive">
                     <TriangleAlert />
-                    <AlertDescription>{errorMessage(signIn.error)}</AlertDescription>
+                    <AlertDescription>
+                      {errorMessage(signIn.error)}
+                      {signIn.error instanceof ApiError && signIn.error.failure.code === 'account_locked' ? (
+                        <>
+                          {' '}
+                          <Link href="/forgot-password" className="font-medium underline underline-offset-4">
+                            Reset your password
+                          </Link>
+                        </>
+                      ) : null}
+                    </AlertDescription>
                   </Alert>
                 ) : null}
 
@@ -74,7 +84,15 @@ export default function LoginPage() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <Label htmlFor="password">Password</Label>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="password">Password</Label>
+                    <Link
+                      href="/forgot-password"
+                      className="text-xs font-medium text-primary underline-offset-4 hover:underline"
+                    >
+                      Forgot your password?
+                    </Link>
+                  </div>
                   <Input
                     id="password"
                     type="password"
@@ -116,11 +134,6 @@ export default function LoginPage() {
             </Link>
           </p>
 
-          <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
-            Locally, <code className="rounded bg-muted px-1 py-0.5">seed-demo.ts</code> creates
-            every demo account and prints the login sheet. See{' '}
-            <code className="rounded bg-muted px-1 py-0.5">docs/interfaces.md</code>.
-          </p>
         </div>
       </div>
 
