@@ -4,7 +4,7 @@
 
 The blueprint lists 119 P0 gaps, 14 of which block a pilot. This note says which ones have been fixed in code, how each was shown to be fixed, and — as importantly — which have **not** been, and why. A gap appears under "fixed" only if a test that failed before the change passes after it. Where a fix is partial the remainder is stated.
 
-**Verification.** Every fix below was written test-first: the new test was run and seen to fail for the reason the gap predicts before the code changed. Final state: 638 unit tests and 627 integration tests (37 files, against a real PostgreSQL) all pass; type-check and lint are clean. Before this work the suites held 600 and 563.
+**Verification.** Every fix below was written test-first: the new test was run and seen to fail for the reason the gap predicts before the code changed. Final state: 638 unit tests and 666 integration tests (38 files, against a real PostgreSQL) all pass; type-check and lint are clean. Before this work the suites held 600 and 563.
 
 ## Fixed
 
@@ -32,6 +32,12 @@ The blueprint lists 119 P0 gaps, 14 of which block a pilot. This note says which
 | AUT-04 | The password step was not bound to the code step: anyone who knew a verified-but-passwordless number could claim it. | Verifying the phone returns a 30-minute signed token and set-password requires it. | `52353b6` |
 | AUT-05 | The five-guess limit could be exceeded by parallel guesses (40 of 40 were judged). | The attempt is taken in one conditional UPDATE before the guess is judged. | `515f2f3` |
 | AUT-09 | No Content-Security-Policy and no HSTS. | Both added and unit-tested; a production build loaded 16 pages across four consoles in headless Chromium with no CSP violation. | `a4bd229` |
+| AUT-06 | No forgot-password screen; the lockout message told people to reset and there was nowhere to do it. | `/forgot-password` (number, code, new password), linked from the login page and from the lockout message. Verified in headless Chromium: lock an account, reset through the screen, sign in while the old lock would still be running. | `8f1c972` |
+| UXW-05 | The public login page told every visitor about `seed-demo.ts`. | Removed. | `8f1c972` |
+| INC-03 | A severe or fatal incident raised no alert. | The worker texts everybody holding `incident.manage` for SEVERE and DEATH — facility and severity only, never what happened. With nobody to tell, the event fails visibly instead of looking handled. | `0421b43` |
+| DSP-03 | Nobody was told when a dispute was opened, picked up, decided or withdrawn. | Three new events published in the same transaction; each side is texted what concerns it, never the argument or the officer's notes. | `56fe6ed` |
+| SCH-02, SAN-01 (first half) | No reminder; an absence was noticed only after the shift ended. | Two scheduled jobs: a reminder three hours before, and an alert to practitioner and facility thirty minutes after the start if nobody has checked in. Neither decides anything. | `ed67c35` |
+| UXA-02, UXA-06 | 1px focus ring, 36px controls, 28px tabs, no skip link, and a "modal" drawer that did not trap focus. | 2px ring with offset, 40px controls and 36px tabs, a skip link, and a drawer that traps focus, restores it and locks background scroll. Fourteen pages checked at 390px for overflow. | `7f83e8e` |
 
 ## Fixed in part — the remainder is stated
 
@@ -41,15 +47,17 @@ The blueprint lists 119 P0 gaps, 14 of which block a pilot. This note says which
 | AUT-07, FAC-03 | The staff lookup by phone number refuses a facility that is not VERIFIED. | An unverified facility's owner can still create drafts and grant roles to people whose ids they already hold. Gating facility permissions on verification changes the onboarding flow and wants a decision. |
 | PLT-01 | The image is corrected and CI builds it. | **The image has not been built here** — there is no Docker daemon in this environment. The worker was started from a scratch directory holding exactly the runner's files and ran. PLT-02 (nothing deploys) is untouched. |
 | NOT-03/04 | Failures are retried and visible. | Nothing reaches a real phone: there is still no SMS gateway (NOT-02). Password reset and resend keep the generic answer on a gateway failure, deliberately, so a 503 does not reveal which numbers have accounts. |
+| NOT-01, CRE-07 | Offers, acceptances, cancellations, disputes, severe incidents, shift reminders and every credential decision now send a text. | Timesheet and invoice decisions, payouts, and expiry warnings (CRE-08) still send nothing, and nothing reaches a real phone until a gateway exists (NOT-02). |
+| SAN-01 | The practitioner and facility are told thirty minutes into a shift with no check-in. | The replacement search the blueprint recommends opening from an absence is not built. |
 
 ## Not done, and why
 
 **Needs an outside party or a signed decision — cannot be closed in code alone.**
 NOT-02 and NOT-06 (an SMS gateway needs an account, a sender ID and credentials; the boot guardrails still accept two provider names that have no adapter). BIL-03, BIL-05, BIL-13 and the money model (fee model, legal role and provider-held payments are all "not started"; BIL-03 — a payout that does not require its invoice to have been paid — belongs to that decision, not to a patch). AUD-03, AUD-05 (agreement content, regulator registration, DPO and counsel's opinion). CRE-01, CRE-02, CFG-01, CFG-02, QAL-06 (the credential types and pay floors for nurses, pharmacists, laboratory scientists and radiographers need the regulators' actual requirements and an owner's decision; inventing them would be a regulatory claim). PRA-14, CFG-03 (the sanctions and "quack" lists need a real source). PLT-05 (backups need an environment).
 
-**Large features, not started.** The level/cadre/registration-category model (PRA-01, PRA-02, REQ-01, CFG-04), one Booking entity (the v3 core), erasure (AUD-01), facility onboarding and profile screens (FAC-01, FAC-02, UXF-01, UXO-01), dispute notifications and facility participation (DSP-03, DSP-04), the money flows (BIL-02, BIL-06 to BIL-12), forgot-password screen (AUT-06), first super-administrator (AUT-08), reminders and early no-show detection (SCH-02, SAN-01), accessibility work (UXA-*).
+**Large features, not started.** The level/cadre/registration-category model (PRA-01, PRA-02, REQ-01, CFG-04), one Booking entity (the v3 core), erasure (AUD-01), facility onboarding and profile screens (FAC-01, FAC-02, UXF-01, UXO-01), facility participation in disputes (DSP-04), the money flows (BIL-02, BIL-06 to BIL-12), first super-administrator (AUT-08), type size, contrast, a larger-text switch and manifest icons (UXA-01, UXA-03, UXA-04, UXA-08).
 
-**Small items not yet attempted.** AUD-02 (personal data in audit rows), INC-03 (a severe incident raises no alert), PLT-04 (alerts), AUT-10/QAL-01 (a suite that proves every id-taking route refuses another tenant — the fixes above each have their own route-level test, but there is no sweep over all routes yet).
+**Small items not yet attempted.** AUD-02 (personal data in audit rows), PLT-04 (alerts — nothing yet watches a failed event, a dead-lettered one, or a spent send budget), AUT-10/QAL-01 (a suite that proves every id-taking route refuses another tenant — the fixes above each have their own route-level test, but there is no sweep over all routes yet).
 
 ## Things to know when you pick this up
 
