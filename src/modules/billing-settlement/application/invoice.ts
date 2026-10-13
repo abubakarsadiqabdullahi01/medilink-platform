@@ -373,6 +373,20 @@ export async function issueInvoice(input: {
       after: { status: invoice.status },
     });
 
+    // The facility is told when the bill is ready, which is now and not when the
+    // draft was raised: a draft is still being checked.
+    await publishEvent(tx, {
+      eventType: EVENTS.InvoiceIssued,
+      aggregateType: 'billing.invoices',
+      aggregateId: invoice.id,
+      payload: {
+        invoiceId: invoice.id,
+        facilityId: invoice.facilityId,
+        number: invoice.number,
+        grossKobo: invoice.grossKobo,
+      },
+    });
+
     return toView(invoice);
   });
 }

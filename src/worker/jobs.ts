@@ -8,6 +8,10 @@ import {
   alertShiftsNotCheckedIn,
   sendShiftReminders,
 } from '../modules/notifications/application/shift-alerts';
+import {
+  remindUnapprovedTimesheets,
+  warnExpiringCredentials,
+} from '../modules/notifications/application/sweeps';
 import type { JobHandler } from './scheduler';
 
 /**
@@ -83,9 +87,27 @@ export const JOB_DEFINITIONS: JobDefinition[] = [
       'Tell the practitioner and the facility when nobody has checked in thirty minutes after a shift started, while it can still be saved. Every five minutes so thirty minutes means about thirty minutes. Decides nothing: the sweep after the shift, and a person, own the question of an absence.',
     intervalSeconds: MINUTES_5,
   },
+  {
+    key: 'credential.expiry_warning_sweep',
+    description:
+      'Warn a practitioner a month before a verified credential expires, and again in the last week, so a licence does not lapse unnoticed and take their shifts with it. Daily; one message per stage, and anybody who could not be reached is tried again.',
+    intervalSeconds: DAILY,
+  },
+  {
+    key: 'timesheet.approval_reminder_sweep',
+    description:
+      'Remind a facility about hours waiting for approval after a day and again after three, and tell the practitioner at three days that they are being chased. Hourly. Decides nothing: whether hours are approved, and any deadline after which they are approved for the facility, are not this job\'s to settle.',
+    intervalSeconds: HOURLY,
+  },
 ];
 
 export const jobs: Record<string, JobHandler> = {
+  'credential.expiry_warning_sweep': async () => {
+    await warnExpiringCredentials();
+  },
+  'timesheet.approval_reminder_sweep': async () => {
+    await remindUnapprovedTimesheets();
+  },
   'shift.reminder_sweep': async () => {
     await sendShiftReminders();
   },

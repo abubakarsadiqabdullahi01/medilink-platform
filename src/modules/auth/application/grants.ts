@@ -407,6 +407,34 @@ export async function findUserByPhone(phone: string) {
 }
 
 /**
+ * Everybody holding a permission at one facility, for alerts that have to reach
+ * the people who can act on them there rather than the one person who happened to
+ * be named. Accounts that cannot sign in (suspended, deactivated, deleted) are
+ * left out: an alert sent to one has been sent to nobody.
+ */
+export async function usersHoldingFacilityPermission(
+  facilityId: string,
+  permission: string,
+): Promise<{ id: string; fullName: string }[]> {
+  return prisma.user.findMany({
+    where: {
+      deletedAt: null,
+      status: { in: ['ACTIVE', 'UNDER_REVIEW'] },
+      roles: {
+        some: {
+          revokedAt: null,
+          scopeType: 'FACILITY',
+          scopeId: facilityId,
+          role: { permissions: { some: { permission: { key: permission } } } },
+        },
+      },
+    },
+    select: { id: true, fullName: true },
+    orderBy: { createdAt: 'asc' },
+  });
+}
+
+/**
  * Who holds a permission across the whole platform, for something that has to
  * reach everybody who can act on it — a severe incident, say — rather than one
  * person who happened to be named.

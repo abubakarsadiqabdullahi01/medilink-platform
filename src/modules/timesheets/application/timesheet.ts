@@ -285,6 +285,19 @@ export async function reviewTimesheet(input: ReviewParams): Promise<TimesheetVie
       after: { status: approved ? 'APPROVED' : 'REJECTED', amountKobo: timesheet.amountKobo },
     });
 
+    if (!approved) {
+      await publishEvent(tx, {
+        eventType: EVENTS.TimesheetRejected,
+        aggregateType: 'timesheets.timesheets',
+        aggregateId: timesheet.id,
+        payload: {
+          assignmentId: input.assignmentId,
+          userId: assignment.userId,
+          facilityId: assignment.facilityId,
+        },
+      });
+    }
+
     if (approved) {
       await publishEvent(tx, {
         eventType: EVENTS.TimesheetApproved,

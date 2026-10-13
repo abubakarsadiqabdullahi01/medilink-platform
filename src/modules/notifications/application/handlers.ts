@@ -1,7 +1,11 @@
 import { prisma } from '@/lib/db';
 import { logger } from '@/lib/logger';
 import { WAT_OFFSET_MINUTES } from '@/modules/availability/domain/availability';
-import { usersHoldingPlatformPermission } from '@/modules/auth/application/grants';
+import { initialsOf } from '@/lib/names';
+import {
+  usersHoldingFacilityPermission,
+  usersHoldingPlatformPermission,
+} from '@/modules/auth/application/grants';
 import { alreadyNotified, notify, type NotifyOutcome } from './notify';
 
 /**
@@ -472,5 +476,180 @@ export async function notifyCredentialDecision(
       }),
     ],
     'the credential decision',
+  );
+}
+
+/** What a text carries of a reason somebody wrote, so one long note cannot become six messages. */
+const REASON_MAX = 140;
+function brief(text: string): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length > REASON_MAX ? `${flat.slice(0, REASON_MAX - 1)}…` : flat;
+}
+
+/**
+ * Hours submitted by a practitioner, told to the people who can approve them
+ * (UXF-05). The facility saw them only by opening the timesheets page, so a
+ * practitioner's pay waited on somebody remembering to look.
+ *
+ * The practitioner is named by initials: a text goes to a phone anybody may pick
+ * up, and the screen it points to has the name.
+ */
+export async function notifyTimesheetSubmitted(payload: Record<string, unknown>): Promise<void> {
+  const assignmentId = String(payload.assignmentId ?? '');
+  const facilityId = String(payload.facilityId ?? '');
+  const practitionerId = String(payload.userId ?? '');
+  if (!assignmentId || !facilityId || !practitionerId) {
+    logger.warn('timesheet.submitted event missing ids; skipping notification');
+    return;
+  }
+
+  const [facility, assignment, practitioner, approvers] = await Promise.all([
+    prisma.facility.findUnique({ where: { id: facilityId }, select: { name: true } }),
+    prisma.assignment.findUnique({ where: { id: assignmentId }, select: { startsAt: true, endsAt: true } }),
+    prisma.user.findUnique({ where: { id: practitionerId }, select: { fullName: true } }),
+    usersHoldingFacilityPermission(facilityId, 'timesheet.approve'),
+  ]);
+  if (!facility || !assignment) {
+    logger.warn('timesheet.submitted for a record that no longer exists', { assignmentId });
+    return;
+  }
+
+  const when = formatShift(assignment.startsAt.toISOString(), assignment.endsAt.toISOString());
+  const who = initialsOf(practitioner?.fullName ?? '');
+  const outcomes: NotifyOutcome[] = [];
+  for (const approver of approvers) {
+    if (await alreadyNotified(approver.id, 'timesheet.submitted', assignmentId)) continue;
+    outcomes.push(
+      await notify({
+        userId: approver.id,
+        kind: 'timesheet.submitted',
+        body: `Hours from ${who} for the shift at ${facility.name} (${when}) are waiting for your approval. Open Medilink to approve or correct them. Medilink.`,
+        relatedType: 'matching.assignments',
+        relatedId: assignmentId,
+      }),
+    );
+  }
+  failIfAnyFailed(outcomes, 'the submitted hours');
+}
+
+/**
+ * The facility's decision on hours, told to the practitioner: approved, or not
+ * approved and why, which is the part they need to act on.
+ */
+export async function notifyTimesheetDecision(
+  decision: 'approved' | 'rejected',
+  payload: Record<string, unknown>,
+): Promise<void> {
+  const assignmentId = String(payload.assignmentId ?? '');
+  const facilityId = String(payload.facilityId ?? '');
+  const practitionerId = String(payload.userId ?? '');
+  if (!assignmentId || !facilityId || !practitionerId) {
+    logger.warn('timesheet decision event missing ids; skipping notification', { decision });
+    return;
+  }
+
+  const kind = `timesheet.${decision}`;
+  const [facility, assignment, record] = await Promise.all([
+    prisma.facility.findUnique({ where: { id: facilityId }, select: { name: true } }),
+    prisma.assignment.findUnique({ where: { id: assignmentId }, select: { startsAt: true, endsAt: true } }),
+    prisma.attendanceRecord.findUnique({ where: { assignmentId }, select: { reviewedAt: true, reviewNotes: true } }),
+  ]);
+  if (!facility || !assignment) {
+    logger.warn('timesheet decision for a record that no longer exists', { assignmentId });
+    return;
+  }
+
+  // One text per decision: a rejection, a correction and an approval are three
+  // separate things to be told about the same shift.
+  if (await alreadyNotified(practitionerId, kind, assignmentId, record?.reviewedAt ?? undefined)) return;
+
+  const when = formatShift(assignment.startsAt.toISOString(), assignment.endsAt.toISOString());
+  const body =
+    decision === 'approved'
+      ? `Your hours for the shift at ${facility.name} (${when}) were approved. Medilink.`
+      : `Your hours for the shift at ${facility.name} (${when}) were not approved: ${brief(record?.reviewNotes ?? 'see the app')}. Open Medilink to correct and send them again. Medilink.`;
+
+  failIfAnyFailed(
+    [
+      await notify({
+        userId: practitionerId,
+        kind,
+        body,
+        relatedType: 'matching.assignments',
+        relatedId: assignmentId,
+      }),
+    ],
+    'the decision on hours',
+  );
+}
+
+/**
+ * An invoice that is ready, told to the people at the facility who can read it.
+ * Sent when it is issued, not when the draft is raised: a draft is still being
+ * checked and is not yet a bill.
+ */
+export async function notifyInvoiceIssued(payload: Record<string, unknown>): Promise<void> {
+  const invoiceId = String(payload.invoiceId ?? '');
+  const facilityId = String(payload.facilityId ?? '');
+  const number = String(payload.number ?? '');
+  const grossKobo = Number(payload.grossKobo ?? 0);
+  if (!invoiceId || !facilityId) {
+    logger.warn('invoice.issued event missing ids; skipping notification');
+    return;
+  }
+
+  const [facility, readers] = await Promise.all([
+    prisma.facility.findUnique({ where: { id: facilityId }, select: { name: true } }),
+    usersHoldingFacilityPermission(facilityId, 'invoice.read'),
+  ]);
+  if (!facility) return;
+
+  const outcomes: NotifyOutcome[] = [];
+  for (const reader of readers) {
+    if (await alreadyNotified(reader.id, 'invoice.issued', invoiceId)) continue;
+    outcomes.push(
+      await notify({
+        userId: reader.id,
+        kind: 'invoice.issued',
+        body: `Invoice ${number} for ${naira(grossKobo)} is ready for ${facility.name}. Open Medilink to see the shifts on it. Medilink.`,
+        relatedType: 'billing.invoices',
+        relatedId: invoiceId,
+      }),
+    );
+  }
+  failIfAnyFailed(outcomes, 'the invoice');
+}
+
+/**
+ * A payment to a practitioner, told to them when money has actually gone.
+ *
+ * Nothing is said for a payout that ran only against the stub gateway: its
+ * reference begins `stub-` precisely so that nobody mistakes it for a bank one,
+ * and a text saying "you have been paid" about money that did not move is worse
+ * than silence.
+ */
+export async function notifyPayoutSettled(payload: Record<string, unknown>): Promise<void> {
+  const payoutId = String(payload.payoutId ?? '');
+  const practitionerId = String(payload.userId ?? '');
+  const amountKobo = Number(payload.amountKobo ?? 0);
+  const reference = String(payload.reference ?? '');
+  if (!payoutId || !practitionerId) {
+    logger.warn('payout.settled event missing ids; skipping notification');
+    return;
+  }
+  if (reference.startsWith('stub-')) return;
+  if (await alreadyNotified(practitionerId, 'payout.settled', payoutId)) return;
+
+  failIfAnyFailed(
+    [
+      await notify({
+        userId: practitionerId,
+        kind: 'payout.settled',
+        body: `A payment of ${naira(amountKobo)} has been sent to you${reference ? ` (reference ${reference})` : ''}. Medilink.`,
+        relatedType: 'billing.payouts',
+        relatedId: payoutId,
+      }),
+    ],
+    'the payment',
   );
 }

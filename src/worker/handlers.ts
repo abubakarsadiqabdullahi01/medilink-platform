@@ -8,8 +8,12 @@ import {
   notifyCredentialDecision,
   notifyDisputeEvent,
   notifyIncidentReported,
+  notifyInvoiceIssued,
+  notifyPayoutSettled,
   notifyShiftAccepted,
   notifyShiftInvited,
+  notifyTimesheetDecision,
+  notifyTimesheetSubmitted,
 } from '../modules/notifications/application/handlers';
 import { computeAndSaveTimesheet } from '../modules/timesheets/application/timesheet';
 import type { EventHandler } from './processor';
@@ -79,6 +83,13 @@ export const handlers: Record<string, EventHandler> = {
   [EVENTS.DisputeUnderReview]: (payload) => notifyDisputeEvent('dispute.under_review', payload),
   [EVENTS.DisputeResolved]: (payload) => notifyDisputeEvent('dispute.resolved', payload),
   [EVENTS.DisputeWithdrawn]: (payload) => notifyDisputeEvent('dispute.withdrawn', payload),
+
+  // Hours, bills and payments: told to whoever has to act on them or is owed them.
+  [EVENTS.TimesheetSubmitted]: (payload) => notifyTimesheetSubmitted(payload),
+  [EVENTS.TimesheetApproved]: (payload) => notifyTimesheetDecision('approved', payload),
+  [EVENTS.TimesheetRejected]: (payload) => notifyTimesheetDecision('rejected', payload),
+  [EVENTS.InvoiceIssued]: (payload) => notifyInvoiceIssued(payload),
+  [EVENTS.PayoutSettled]: (payload) => notifyPayoutSettled(payload),
 
   [EVENTS.PractitionerRegistered]: async (payload) => {
     // Stage 4.7: send the welcome message through the notification adapter.

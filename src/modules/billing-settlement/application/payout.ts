@@ -320,6 +320,8 @@ export async function releasePayout(input: {
           payoutId: payout.id,
           userId: existing.practitionerId,
           amountKobo: existing.amountKobo,
+          // So whoever tells the practitioner can tell a payment from a rehearsal.
+          reference: result.reference,
         },
       });
     }
