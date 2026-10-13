@@ -21,7 +21,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { SeverityBadge, StatusBadge, humanise } from '@/components/app/status-badge';
 import { Detail, DetailGrid, PageHeader } from '@/components/app/page-shell';
-import { formatAgo, formatWhen, shortId } from '@/components/app/format';
+import { actionLabel, formatAgo, formatWhen, shortId } from '@/components/app/format';
 
 /**
  * One incident, in full, with what has happened to it.
@@ -79,9 +79,12 @@ export function IncidentDetail({ incident, onBack }: { incident: Incident; onBac
   const fresh = useQuery({
     queryKey: ['incident', incident.id],
     queryFn: () =>
-      api.get<{ incident: Incident; subjectHistory: Incident[] }>(
-        `/api/v1/incidents/${incident.id}`,
-      ),
+      api.get<{
+        incident: Incident;
+        subject: { fullName: string; phone: string; status: string } | null;
+        shift: { startsAt: string; endsAt: string } | null;
+        subjectHistory: Incident[];
+      }>(`/api/v1/incidents/${incident.id}`),
     retry: false,
   });
 
@@ -173,15 +176,27 @@ export function IncidentDetail({ incident, onBack }: { incident: Incident; onBac
                   <Detail label="Reported">{formatWhen(row.reportedAt)}</Detail>
                   <Detail label="Facility">{row.facilityName}</Detail>
                   <Detail label="Shift">
-                    {row.assignmentId ? shortId(row.assignmentId) : 'Not tied to one'}
+                    {fresh.data?.shift
+                      ? formatWhen(fresh.data.shift.startsAt)
+                      : row.assignmentId
+                        ? shortId(row.assignmentId)
+                        : 'Not tied to one'}
                   </Detail>
+                  {fresh.data?.subject ? (
+                    <Detail label="Practitioner">
+                      {fresh.data.subject.fullName}{' '}
+                      <span className="font-mono text-xs text-muted-foreground">
+                        {fresh.data.subject.phone}
+                      </span>
+                    </Detail>
+                  ) : null}
                 </DetailGrid>
 
                 {/* Said plainly because the absence is meaningful: an incident
                     naming nobody is the normal case, not an incomplete one. */}
                 <p className="text-xs leading-relaxed text-muted-foreground">
                   {row.subjectUserId
-                    ? `This report names a practitioner (${shortId(row.subjectUserId)}). Naming somebody is not an accusation — most incidents close as a system issue.`
+                    ? `This report names ${fresh.data?.subject?.fullName ?? 'a practitioner'}. Naming somebody is not an accusation — most incidents close as a system issue.`
                     : 'This report names no practitioner, which is ordinary. An incident traceable to no one person is still worth having.'}
                 </p>
               </CardContent>
@@ -234,8 +249,19 @@ export function IncidentDetail({ incident, onBack }: { incident: Incident; onBac
                       </SelectTrigger>
                       <SelectContent>
                         {OUTCOMES.map(([value, label]) => (
-                          <SelectItem key={value} value={value}>
-                            {label}
+                          // Suspending needs somebody to suspend; the server
+                          // refuses it on a report naming nobody, so the
+                          // option says why rather than failing on click.
+                          <SelectItem
+                            key={value}
+                            value={value}
+                            disabled={value === 'PRACTITIONER_SUSPENDED' && !row.subjectUserId}
+                          >
+                            {value === 'PRACTITIONER_SUSPENDED'
+                              ? row.subjectUserId
+                                ? `Suspend ${fresh.data?.subject?.fullName ?? 'the practitioner'}`
+                                : 'Suspend the practitioner (this report names nobody)'
+                              : label}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -308,7 +334,7 @@ export function IncidentDetail({ incident, onBack }: { incident: Incident; onBac
                     {history.data.map((entry) => (
                       <li key={entry.id} className="border-l-2 border-border pl-4">
                         <p className="text-sm font-medium">
-                          {humanise(entry.action.replace(/\./g, ' '))}
+                          {actionLabel(entry.action)}
                         </p>
                         <p className="mt-0.5 text-xs text-muted-foreground">
                           {formatWhen(entry.createdAt)} · {formatAgo(entry.createdAt)}

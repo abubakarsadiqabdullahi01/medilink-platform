@@ -23,7 +23,7 @@ import {
 import { StatusBadge, humanise } from '@/components/app/status-badge';
 import { EmptyState, PageHeader } from '@/components/app/page-shell';
 import { formatAgo, formatWhen } from '@/components/app/format';
-import { AttendancePanel } from './attendance-panel';
+import { AttendancePanel, type Attendance } from './attendance-panel';
 
 interface Assignment {
   id: string;
@@ -35,6 +35,7 @@ interface Assignment {
   endsAt: string;
   practitionerName: string;
   practitionerPhone: string;
+  attendance?: Attendance | null;
 }
 
 const STATUSES = ['CONFIRMED', 'COMPLETED', 'NO_SHOW', 'CANCELLED'] as const;
@@ -75,6 +76,8 @@ export default function RosterPage() {
         'scopeType=FACILITY',
         `scopeId=${facilityId}`,
         `status=${status}`,
+        // Each row's attendance arrives with it, so the panels need no request of their own.
+        'include=attendance',
         `limit=${PAGE_SIZE}`,
         applied ? `search=${encodeURIComponent(applied)}` : '',
         from ? `from=${from}` : '',
@@ -121,7 +124,7 @@ export default function RosterPage() {
         <TabsList>
           {STATUSES.map((value) => (
             <TabsTrigger key={value} value={value}>
-              {value.toLowerCase().replace('_', ' ')}
+              {humanise(value)}
             </TabsTrigger>
           ))}
         </TabsList>
@@ -257,7 +260,7 @@ export default function RosterPage() {
                     {showsAttendance ? (
                       <TableCell className="min-w-[260px]">
                         {facilityId ? (
-                          <AttendancePanel assignmentId={row.id} facilityId={facilityId} />
+                          <AttendancePanel assignmentId={row.id} facilityId={facilityId} attendance={row.attendance} />
                         ) : null}
                       </TableCell>
                     ) : null}

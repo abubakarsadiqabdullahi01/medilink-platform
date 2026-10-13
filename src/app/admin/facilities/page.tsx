@@ -20,7 +20,7 @@ import {
 } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { StatusBadge } from '@/components/app/status-badge';
+import { StatusBadge, humanise } from '@/components/app/status-badge';
 import { EmptyState, PageHeader } from '@/components/app/page-shell';
 import { ScreenTransition } from '@/components/app/motion';
 import { formatAgo } from '@/components/app/format';
@@ -107,7 +107,7 @@ export default function FacilitiesPage() {
         <TabsList>
           {STATUSES.map((value) => (
             <TabsTrigger key={value} value={value}>
-              {value.toLowerCase()}
+              {humanise(value)}
             </TabsTrigger>
           ))}
         </TabsList>

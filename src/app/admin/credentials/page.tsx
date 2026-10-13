@@ -1,13 +1,21 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, FileCheck2, Search, TriangleAlert, UserRound } from 'lucide-react';
+import {
+  ChevronLeft,
+  ChevronRight,
+  FileCheck2,
+  Search,
+  TriangleAlert,
+  UserRound,
+} from 'lucide-react';
 import { api } from '@/lib/ui/api';
 import { useQueueAction } from '@/lib/ui/queue';
 import { useReference } from '@/lib/ui/reference';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -37,7 +45,7 @@ interface Submission {
   userId: string;
   credentialTypeId: string;
   status: string;
-  reference: string | null;
+  referenceNumber: string | null;
   expiresAt: string | null;
   createdAt: string;
   reviewNotes: string | null;
@@ -46,6 +54,8 @@ interface Submission {
   practitionerPhotoUrl: string | null;
   credentialTypeName: string;
   documentObjectKey: string | null;
+  /** How it is checked: a NIN or licence number is confirmed from the practitioner's page. */
+  verificationMethod: string;
 }
 
 // [value, label] rather than a derived label: MORE_INFO_REQUESTED reads badly
@@ -291,7 +301,7 @@ export default function CredentialsPage() {
                   <p className="text-sm font-medium">{row.credentialTypeName}</p>
 
                   <DetailGrid>
-                    <Detail label="Reference">{row.reference ?? 'None given'}</Detail>
+                    <Detail label="Reference">{row.referenceNumber ?? 'None given'}</Detail>
                     <Detail label="Document">
                       {row.documentObjectKey ? 'Attached' : 'None attached'}
                     </Detail>
@@ -349,13 +359,26 @@ export default function CredentialsPage() {
                       </div>
 
                       <div className="flex flex-wrap gap-2">
-                        <Button
-                          variant="success"
-                          loading={review.isPending && review.variables?.id === row.id}
-                          onClick={() => review.mutate({ id: row.id, decision: 'approve' })}
-                        >
-                          Verify
-                        </Button>
+                        {row.verificationMethod === 'nimc_verification' ||
+                        row.verificationMethod === 'mdcn_status_check' ? (
+                          // Approving a NIN or a licence has to record the identity or
+                          // registration too, so it is confirmed on the practitioner's
+                          // page, beside the photograph and the rest of their record.
+                          <Link
+                            href={`/admin/practitioners?user=${row.userId}`}
+                            className={buttonVariants({ variant: 'success' })}
+                          >
+                            Review and confirm
+                          </Link>
+                        ) : (
+                          <Button
+                            variant="success"
+                            loading={review.isPending && review.variables?.id === row.id}
+                            onClick={() => review.mutate({ id: row.id, decision: 'approve' })}
+                          >
+                            Verify
+                          </Button>
+                        )}
                         <Button
                           variant="outline"
                           disabled={!note || review.isPending}

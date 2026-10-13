@@ -38,13 +38,21 @@ export function EmptyState({
   icon,
   title,
   description,
+  compact = false,
 }: {
   icon?: ReactNode;
   title: string;
   description?: string;
+  /** For a list that sits under a form on the same page, where a tall empty box pushes the next step off screen. */
+  compact?: boolean;
 }) {
   return (
-    <Card className="flex flex-col items-center justify-center gap-3 border-dashed py-16 text-center shadow-none">
+    <Card
+      className={cn(
+        'flex flex-col items-center justify-center gap-3 border-dashed text-center shadow-none',
+        compact ? 'py-8' : 'py-16',
+      )}
+    >
       {icon ? <div className="text-muted-foreground [&_svg]:size-8">{icon}</div> : null}
       <div>
         <p className="font-medium">{title}</p>
@@ -95,5 +103,13 @@ export function Detail({
 }
 
 export function DetailGrid({ children }: { children: ReactNode }) {
-  return <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">{children}</dl>;
+  // Sized by the card it is in, not by the screen: `lg:grid-cols-4` counted
+  // the viewport, so a card that shares a row with another (half the width)
+  // was still cut into four columns and cramped. Auto-fit asks each column for
+  // at least 9rem and lets the card decide how many fit.
+  return (
+    <dl className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(9rem,1fr))]">
+      {children}
+    </dl>
+  );
 }

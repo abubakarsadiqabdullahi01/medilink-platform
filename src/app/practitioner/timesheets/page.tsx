@@ -1,9 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { useMutation, useQueries, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Gavel, History, Receipt, TriangleAlert } from 'lucide-react';
+import { Gavel, History, ReceiptText, TriangleAlert } from 'lucide-react';
 import { api, errorMessage } from '@/lib/ui/api';
 import { useQueue } from '@/lib/ui/queue';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -44,6 +44,8 @@ interface Assignment {
   status: string;
   startsAt: string;
   endsAt: string;
+  /** Joined by `include=timesheet`; null for a shift with nothing worked yet. */
+  sheet?: { timesheet: Timesheet; revisions: Revision[] } | null;
 }
 
 interface Timesheet {
@@ -90,21 +92,11 @@ export default function MyTimesheetsPage() {
 
   const shifts = useQueue<Assignment>(
     ['my-assignments-for-timesheets'],
-    '/api/v1/assignments?scopeType=SELF',
+    // The timesheet and its revisions arrive with each shift: one request for the
+    // page, where it used to be one more for every shift ever worked.
+    '/api/v1/assignments?scopeType=SELF&include=timesheet',
     (body) => (body as { assignments?: Assignment[] }).assignments ?? [],
   );
-
-  const sheets = useQueries({
-    queries: (shifts.data ?? []).map((row) => ({
-      queryKey: ['my-timesheet', row.id],
-      queryFn: () =>
-        api.get<{ timesheet: Timesheet; revisions: Revision[] }>(
-          `/api/v1/assignments/${row.id}/timesheet?scopeType=SELF`,
-        ),
-      // No timesheet yet is ordinary for a shift not worked, not an error.
-      retry: false,
-    })),
-  });
 
   const [disputing, setDisputing] = useState<Assignment | null>(null);
   const [category, setCategory] = useState('HOURS');
@@ -113,9 +105,9 @@ export default function MyTimesheetsPage() {
   const submit = useMutation({
     mutationFn: (assignmentId: string) =>
       api.post(`/api/v1/assignments/${assignmentId}/timesheet/submit`),
-    onSuccess: (_data, assignmentId) => {
+    onSuccess: () => {
       toast.success('Submitted', { description: 'The facility decides next.' });
-      void queryClient.invalidateQueries({ queryKey: ['my-timesheet', assignmentId] });
+      void queryClient.invalidateQueries({ queryKey: ['my-assignments-for-timesheets'] });
     },
     onError: (error) => toast.error('Could not submit', { description: errorMessage(error) }),
   });
@@ -126,11 +118,11 @@ export default function MyTimesheetsPage() {
         category,
         reason: reason.trim(),
       }),
-    onSuccess: (_data, assignment) => {
+    onSuccess: () => {
       toast.success('Dispute opened', {
         description: 'An officer will look at it. The shift is on hold until they decide.',
       });
-      void queryClient.invalidateQueries({ queryKey: ['my-timesheet', assignment.id] });
+      void queryClient.invalidateQueries({ queryKey: ['my-assignments-for-timesheets'] });
       setDisputing(null);
       setReason('');
     },
@@ -138,11 +130,11 @@ export default function MyTimesheetsPage() {
   });
 
   const withSheets = (shifts.data ?? [])
-    .map((row, index) => ({ assignment: row, data: sheets[index]?.data }))
-    .filter((entry) => entry.data);
+    .filter((row) => row.sheet)
+    .map((row) => ({ assignment: row, data: row.sheet! }));
 
-  const checkedOut = (shifts.data ?? []).filter((_row, index) => {
-    const status = sheets[index]?.data?.timesheet.attendanceStatus;
+  const checkedOut = (shifts.data ?? []).filter((row) => {
+    const status = row.sheet?.timesheet.attendanceStatus;
     return status === 'CHECKED_OUT' || status === 'MANUALLY_CORRECTED';
   });
 
@@ -155,7 +147,7 @@ export default function MyTimesheetsPage() {
 
       {checkedOut.length > 0 ? (
         <Alert className="mb-6" variant="info">
-          <Receipt />
+          <ReceiptText />
           <AlertDescription>
             {checkedOut.length} shift{checkedOut.length === 1 ? '' : 's'} ready to submit. Nothing
             is paid until you do.
@@ -172,12 +164,12 @@ export default function MyTimesheetsPage() {
         </Alert>
       ) : withSheets.length === 0 ? (
         <EmptyState
-          icon={<Receipt />}
+          icon={<ReceiptText />}
           title="No timesheets yet"
           description="One is worked out for you as soon as you check out of a shift."
         />
       ) : (
-        <div className="space-y-4">
+        <div className="grid items-start gap-4 lg:grid-cols-2 2xl:grid-cols-3">
           {withSheets.map(({ assignment, data }) => {
             const sheet = data!.timesheet;
             const revisions = data!.revisions;
@@ -191,7 +183,9 @@ export default function MyTimesheetsPage() {
                 <CardHeader className="flex-row items-start justify-between gap-4 space-y-0 pb-4">
                   <div className="min-w-0">
                     <p className="font-medium">{formatWhen(assignment.startsAt)}</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">{assignment.facilityName}</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {assignment.facilityName}
+                    </p>
                     {sheet.revision > 1 ? (
                       <p className="mt-0.5 text-xs text-muted-foreground">
                         revision {sheet.revision}

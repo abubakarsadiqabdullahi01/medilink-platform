@@ -44,6 +44,7 @@ const VARIANTS: Record<string, BadgeVariant> = {
   SUBMITTED: 'warning',
   REQUESTED: 'warning',
   INFO_REQUESTED: 'warning',
+  MORE_INFO_REQUESTED: 'warning',
   TRIAGED: 'info',
   PLANNED: 'info',
   INVITED: 'info',

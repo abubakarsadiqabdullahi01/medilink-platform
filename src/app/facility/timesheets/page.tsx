@@ -1,9 +1,9 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { useQueries, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ChevronLeft, ChevronRight, History, Receipt, TriangleAlert } from 'lucide-react';
+import { ChevronLeft, ChevronRight, History, ReceiptText, TriangleAlert } from 'lucide-react';
 import { api, errorMessage } from '@/lib/ui/api';
 import { useFacilityId } from '@/lib/ui/facility';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -37,7 +37,7 @@ import {
   PageHeader,
   QueueSkeleton,
 } from '@/components/app/page-shell';
-import { formatMinutes, formatNaira, formatWhen } from '@/components/app/format';
+import { formatMinutes, formatNaira, formatWhen, toLocalInput } from '@/components/app/format';
 
 interface Assignment {
   id: string;
@@ -47,13 +47,15 @@ interface Assignment {
   endsAt: string;
   practitionerName: string;
   practitionerPhone: string;
+  /** Joined by `include=timesheet`; null for a shift with nothing worked yet. */
+  sheet?: { timesheet: Timesheet; revisions: Revision[] } | null;
 }
 
 const PAGE_SIZE = 50;
 
 const TABS = [
-  { key: 'CONFIRMED', label: 'awaiting decision' },
-  { key: 'COMPLETED', label: 'approved' },
+  { key: 'CONFIRMED', label: 'Awaiting decision' },
+  { key: 'COMPLETED', label: 'Approved' },
 ] as const;
 
 interface Timesheet {
@@ -131,6 +133,9 @@ export default function TimesheetsPage() {
         'scopeType=FACILITY',
         `scopeId=${facilityId}`,
         `status=${tab}`,
+        // The timesheet and its revisions arrive with each row: one request for
+        // the page, not one per shift.
+        'include=timesheet',
         `limit=${PAGE_SIZE}`,
         from ? `from=${from}` : '',
         to ? `to=${to}` : '',
@@ -146,27 +151,45 @@ export default function TimesheetsPage() {
   const rosterRows = roster.data?.rows ?? [];
   const nextCursor = roster.data?.nextCursor ?? null;
 
-  const sheets = useQueries({
-    queries: rosterRows.map((row) => ({
-      queryKey: ['timesheet', row.id],
-      queryFn: () =>
-        api.get<{ timesheet: Timesheet; revisions: Revision[] }>(
-          `/api/v1/assignments/${row.id}/timesheet?scopeType=FACILITY&scopeId=${facilityId}`,
-        ),
-      // A confirmed shift with no timesheet yet is the normal case, not an
-      // error worth retrying three times per row.
-      retry: false,
-    })),
-  });
-
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [correcting, setCorrecting] = useState<string | null>(null);
   const [breakMinutes, setBreakMinutes] = useState('0');
   const [onCallMinutes, setOnCallMinutes] = useState('0');
   const [correctionReason, setCorrectionReason] = useState('');
+  // The times as recorded, so only a time somebody actually changed is sent.
+  // The dialog used to offer break and on-call only, so a check-out recorded
+  // an hour early could be disputed and upheld and still not be corrected.
+  const [checkedIn, setCheckedIn] = useState('');
+  const [checkedOut, setCheckedOut] = useState('');
+  const [recordedTimes, setRecordedTimes] = useState({ in: '', out: '' });
 
-  function refresh(assignmentId: string) {
-    void queryClient.invalidateQueries({ queryKey: ['timesheet', assignmentId] });
+  async function openCorrection(assignmentId: string, sheet: { breakMinutes: number; onCallMinutes: number }) {
+    setCorrecting(assignmentId);
+    setBreakMinutes(String(sheet.breakMinutes));
+    setOnCallMinutes(String(sheet.onCallMinutes));
+    setCorrectionReason('');
+    setCheckedIn('');
+    setCheckedOut('');
+    setRecordedTimes({ in: '', out: '' });
+    try {
+      const body = await api.get<{ attendance: { checkedInAt: string | null; checkedOutAt: string | null } }>(
+        `/api/v1/assignments/${assignmentId}/attendance?scopeType=FACILITY&scopeId=${facilityId}`,
+      );
+      const times = {
+        in: toLocalInput(body.attendance.checkedInAt),
+        out: toLocalInput(body.attendance.checkedOutAt),
+      };
+      setRecordedTimes(times);
+      setCheckedIn(times.in);
+      setCheckedOut(times.out);
+    } catch {
+      // Without the recorded times the fields stay empty and nothing is sent
+      // for them; break and on call still correct as before.
+    }
+  }
+
+  function refresh() {
+    void queryClient.invalidateQueries({ queryKey: ['roster-for-timesheets'] });
     void queryClient.invalidateQueries({ queryKey: ['tile'] });
   }
 
@@ -189,7 +212,7 @@ export default function TimesheetsPage() {
           ? 'Approved — the shift is now completed'
           : 'Rejected, with your reason on the record',
       );
-      refresh(variables.assignmentId);
+      refresh();
       void queryClient.invalidateQueries({ queryKey: ['roster-for-timesheets'] });
     },
     onError: (error) => toast.error('That did not work', { description: errorMessage(error) }),
@@ -201,30 +224,30 @@ export default function TimesheetsPage() {
         facilityId,
         breakMinutes: Number(breakMinutes || '0'),
         onCallMinutes: Number(onCallMinutes || '0'),
+        checkedInAt:
+          checkedIn && checkedIn !== recordedTimes.in ? new Date(checkedIn).toISOString() : undefined,
+        checkedOutAt:
+          checkedOut && checkedOut !== recordedTimes.out ? new Date(checkedOut).toISOString() : undefined,
         reason: correctionReason.trim(),
       }),
-    onSuccess: (_data, assignmentId) => {
+    onSuccess: () => {
       toast.success('Corrected', { description: 'The previous figures are kept as a revision.' });
-      refresh(assignmentId);
+      refresh();
       setCorrecting(null);
       setCorrectionReason('');
     },
     onError: (error) => toast.error('Could not correct it', { description: errorMessage(error) }),
   });
 
+  // A shift with no timesheet yet is the normal case for a confirmed one, and is
+  // simply left out; the rest already carry theirs.
   const withSheets = rosterRows
-    .map((row, index) => ({ assignment: row, result: sheets[index] }))
-    .filter((entry) => entry.result?.data);
+    .filter((row) => row.sheet)
+    .map((row) => ({ assignment: row, result: { data: row.sheet! } }));
 
-  /**
-   * The roster arrives in one request; the timesheet behind each row arrives
-   * in its own. Between the two, `withSheets` is legitimately empty, and the
-   * page used to read that as "no timesheets" and say so — an accounts officer
-   * with eight shifts waiting was told there was nothing to do, for as long as
-   * the fan-out took. Only the first pass counts: once anything has resolved,
-   * a row refetching in the background must not blank the queue again.
-   */
-  const settling = withSheets.length === 0 && sheets.some((result) => result.isPending);
+  // Only the first request: the rows arrive with their timesheets, so there is no
+  // second wave to wait for and "no timesheets" can be said as soon as it is known.
+  const settling = roster.isPending;
 
   // Built from whoever is actually on this tab's page, not typed — a
   // facility's roster is small enough to pick from rather than search.
@@ -348,7 +371,7 @@ export default function TimesheetsPage() {
         </Alert>
       ) : visible.length === 0 ? (
         <EmptyState
-          icon={<Receipt />}
+          icon={<ReceiptText />}
           title={
             filtered
               ? 'Nothing matches that'
@@ -479,12 +502,7 @@ export default function TimesheetsPage() {
                         </Button>
                         <Button
                           variant="outline"
-                          onClick={() => {
-                            setCorrecting(assignment.id);
-                            setBreakMinutes(String(sheet.breakMinutes));
-                            setOnCallMinutes(String(sheet.onCallMinutes));
-                            setCorrectionReason('');
-                          }}
+                          onClick={() => void openCorrection(assignment.id, sheet)}
                         >
                           Correct the hours
                         </Button>
@@ -550,6 +568,24 @@ export default function TimesheetsPage() {
           </DialogHeader>
 
           <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="correct-in">Checked in</Label>
+              <Input
+                id="correct-in"
+                type="datetime-local"
+                value={checkedIn}
+                onChange={(event) => setCheckedIn(event.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="correct-out">Checked out</Label>
+              <Input
+                id="correct-out"
+                type="datetime-local"
+                value={checkedOut}
+                onChange={(event) => setCheckedOut(event.target.value)}
+              />
+            </div>
             <div className="space-y-1.5">
               <Label htmlFor="correct-break">Unpaid break (minutes)</Label>
               <Input

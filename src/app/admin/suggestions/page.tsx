@@ -160,7 +160,7 @@ export default function SuggestionsPage() {
         <TabsList>
           {STATUSES.map((value) => (
             <TabsTrigger key={value} value={value}>
-              {value.toLowerCase()}
+              {humanise(value)}
             </TabsTrigger>
           ))}
         </TabsList>

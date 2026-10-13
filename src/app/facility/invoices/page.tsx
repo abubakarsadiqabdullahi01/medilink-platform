@@ -1,10 +1,11 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
-import { Receipt, TriangleAlert } from 'lucide-react';
+import { useInfiniteQuery } from '@tanstack/react-query';
+import { ReceiptText, TriangleAlert } from 'lucide-react';
 import { api } from '@/lib/ui/api';
 import { useFacilityId } from '@/lib/ui/facility';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import {
   Table,
@@ -42,6 +43,12 @@ interface Invoice {
   lines: InvoiceLine[];
 }
 
+interface InvoicePage {
+  invoices: Invoice[];
+  nextCursor: string | null;
+  totals: { outstandingKobo: number; outstandingCount: number; paidKobo: number };
+}
+
 /**
  * What this facility has been billed, and what it still owes.
  *
@@ -57,18 +64,24 @@ interface Invoice {
 export default function FacilityInvoicesPage() {
   const facilityId = useFacilityId();
 
-  const invoices = useQuery({
+  // A page at a time, with the totals from the server: a sum over the rows on
+  // screen would change as somebody paged, and this is the figure read as a debt.
+  const invoices = useInfiniteQuery({
     queryKey: ['facility-invoices', facilityId],
-    queryFn: () => api.get<{ invoices: Invoice[] }>(`/api/v1/invoices?facilityId=${facilityId}`),
+    queryFn: ({ pageParam }) =>
+      api.get<InvoicePage>(
+        `/api/v1/invoices?facilityId=${facilityId}&billedOnly=true&limit=25${pageParam ? `&cursor=${pageParam}` : ''}`,
+      ),
+    initialPageParam: '',
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
     enabled: Boolean(facilityId),
   });
 
-  const billed = (invoices.data?.invoices ?? []).filter((row) => row.status !== 'DRAFT');
-  const outstanding = billed.filter((row) => row.status === 'ISSUED');
-  const owed = outstanding.reduce((sum, row) => sum + row.grossKobo, 0);
-  const paid = billed
-    .filter((row) => row.status === 'PAID')
-    .reduce((sum, row) => sum + row.grossKobo, 0);
+  const billed = invoices.data?.pages.flatMap((page) => page.invoices) ?? [];
+  const totals = invoices.data?.pages[0]?.totals;
+  const owed = totals?.outstandingKobo ?? 0;
+  const outstandingCount = totals?.outstandingCount ?? 0;
+  const paid = totals?.paidKobo ?? 0;
 
   return (
     <>
@@ -82,9 +95,9 @@ export default function FacilityInvoicesPage() {
           label="Outstanding"
           amountKobo={owed}
           hint={
-            outstanding.length === 0
+            outstandingCount === 0
               ? 'Nothing waiting to be paid.'
-              : `${outstanding.length} issued invoice${outstanding.length === 1 ? '' : 's'} not yet paid.`
+              : `${outstandingCount} issued invoice${outstandingCount === 1 ? '' : 's'} not yet paid.`
           }
           isPending={invoices.isPending}
           isError={invoices.isError}
@@ -108,7 +121,7 @@ export default function FacilityInvoicesPage() {
         </Alert>
       ) : billed.length === 0 ? (
         <EmptyState
-          icon={<Receipt />}
+          icon={<ReceiptText />}
           title="Nothing billed yet"
           description="An invoice covers approved shifts over a period. It appears here once Medilink issues it."
         />
@@ -176,6 +189,17 @@ export default function FacilityInvoicesPage() {
               </CardContent>
             </Card>
           ))}
+          {invoices.hasNextPage ? (
+            <div className="flex justify-center pt-2">
+              <Button
+                variant="outline"
+                onClick={() => void invoices.fetchNextPage()}
+                loading={invoices.isFetchingNextPage}
+              >
+                Show older invoices
+              </Button>
+            </div>
+          ) : null}
         </div>
       )}
     </>

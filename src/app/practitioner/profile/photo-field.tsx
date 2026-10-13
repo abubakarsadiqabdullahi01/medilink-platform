@@ -1,11 +1,14 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Trash2, UserRound } from 'lucide-react';
+import { Trash2 } from 'lucide-react';
 import { api, errorMessage } from '@/lib/ui/api';
+import { usePhoto } from '@/lib/ui/practitioner';
+import { useSession } from '@/lib/ui/session';
 import { Button } from '@/components/ui/button';
+import { Avatar } from '@/components/app/avatar';
 
 /**
  * The profile photograph.
@@ -43,15 +46,10 @@ export function PhotoField({
   const fileInput = useRef<HTMLInputElement>(null);
   const [problem, setProblem] = useState<string | null>(null);
 
-  const photo = useQuery({
-    queryKey: ['photo-url'],
-    queryFn: () => api.post<{ url: string }>('/api/v1/practitioners/me/photo-url'),
-    enabled: hasPhoto,
-    retry: false,
-    // The URL is signed and short-lived; refetching on focus keeps a face
-    // that has been on screen a while from quietly turning into a broken image.
-    staleTime: 60_000,
-  });
+  // The same photograph the top bar and the profile header show, from one
+  // query, so a change here changes all three.
+  const photo = usePhoto();
+  const session = useSession();
 
   const upload = useMutation({
     mutationFn: async (file: File) => {
@@ -110,21 +108,7 @@ export function PhotoField({
 
   return (
     <div className="flex flex-wrap items-start gap-5">
-      <div className="flex size-24 shrink-0 items-center justify-center overflow-hidden rounded-full border bg-muted">
-        {hasPhoto && photo.data ? (
-          // A short-lived signed storage URL, not an asset next/image can
-          // optimise without a loader. The disable has to be the line
-          // immediately before the element, so the reason sits above it.
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={photo.data.url}
-            alt="Your profile photograph"
-            className="size-full object-cover"
-          />
-        ) : (
-          <UserRound className="size-9 text-muted-foreground" aria-hidden="true" />
-        )}
-      </div>
+      <Avatar name={session.user.fullName} src={photo.url} size="xl" />
 
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium">Photograph</p>

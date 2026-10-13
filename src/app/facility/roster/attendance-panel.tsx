@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { KeyRound, PencilLine, Timer } from 'lucide-react';
 import { api, errorMessage } from '@/lib/ui/api';
@@ -21,7 +21,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { StatusBadge } from '@/components/app/status-badge';
 import { formatWhen } from '@/components/app/format';
 
-interface Attendance {
+export interface Attendance {
   id: string;
   assignmentId: string;
   status: string;
@@ -46,9 +46,16 @@ interface IssuedToken {
 export function AttendancePanel({
   assignmentId,
   facilityId,
+  attendance: record,
 }: {
   assignmentId: string;
   facilityId: string;
+  /**
+   * What the roster list already joined onto this row (`include=attendance`);
+   * null or absent when nobody has issued a code yet. This panel used to fetch
+   * it itself, so a page of fifty shifts made fifty extra requests.
+   */
+  attendance?: Attendance | null;
 }) {
   const queryClient = useQueryClient();
   const [issued, setIssued] = useState<{ purpose: string; token: IssuedToken } | null>(null);
@@ -58,14 +65,7 @@ export function AttendancePanel({
   const [breakMinutes, setBreakMinutes] = useState('0');
   const [reason, setReason] = useState('');
 
-  const attendance = useQuery({
-    queryKey: ['attendance', assignmentId],
-    queryFn: () =>
-      api.get<{ attendance: Attendance }>(
-        `/api/v1/assignments/${assignmentId}/attendance?scopeType=FACILITY&scopeId=${facilityId}`,
-      ),
-    retry: false,
-  });
+  const attendance = { data: record ? { attendance: record } : undefined };
 
   const issue = useMutation({
     mutationFn: (purpose: 'CHECK_IN' | 'CHECK_OUT') =>
@@ -77,7 +77,7 @@ export function AttendancePanel({
         .then((token) => ({ purpose, token })),
     onSuccess: (result) => {
       setIssued(result);
-      void queryClient.invalidateQueries({ queryKey: ['attendance', assignmentId] });
+      void queryClient.invalidateQueries({ queryKey: ['roster'] });
     },
     onError: (error) => toast.error('Could not issue a code', { description: errorMessage(error) }),
   });
@@ -95,7 +95,7 @@ export function AttendancePanel({
       toast.success('Recorded by hand', {
         description: 'Marked as a manual correction, with your reason against it.',
       });
-      void queryClient.invalidateQueries({ queryKey: ['attendance', assignmentId] });
+      void queryClient.invalidateQueries({ queryKey: ['roster'] });
       setManualOpen(false);
       setReason('');
     },
@@ -105,6 +105,16 @@ export function AttendancePanel({
   const status = attendance.data?.attendance.status ?? 'NOT_STARTED';
   const canCheckIn = ['NOT_STARTED', 'CHECK_IN_PENDING'].includes(status);
   const canCheckOut = status === 'CHECKED_IN';
+  // The states the attendance machine lets become MANUALLY_CORRECTED. Offered
+  // on an approved or disputed shift, the button could only ever fail.
+  const canRecordByHand = [
+    'NOT_STARTED',
+    'CHECK_IN_PENDING',
+    'CHECKED_IN',
+    'CHECKED_OUT',
+    'SUBMITTED',
+    'REJECTED',
+  ].includes(status);
 
   return (
     <div className="space-y-3">
@@ -145,10 +155,12 @@ export function AttendancePanel({
             Code to check out
           </Button>
         ) : null}
-        <Button size="sm" variant="ghost" onClick={() => setManualOpen(true)}>
-          <PencilLine />
-          Record by hand
-        </Button>
+        {canRecordByHand ? (
+          <Button size="sm" variant="ghost" onClick={() => setManualOpen(true)}>
+            <PencilLine />
+            Record by hand
+          </Button>
+        ) : null}
       </div>
 
       {/* Shown once and never stored. It is a live credential for five

@@ -39,8 +39,13 @@ export function DocumentDialog({
 }: {
   title: string;
   description?: string;
-  /** Returns a short-lived signed URL. Called once per open. */
-  fetchUrl: () => Promise<{ url: string }>;
+  /**
+   * Returns a short-lived signed URL. Called once per open. The credentials and
+   * facility-licence endpoints name it `downloadUrl` and the photograph endpoint
+   * names it `url`; both are accepted, because reading only one left the other's
+   * dialog open and empty — a title, and no document.
+   */
+  fetchUrl: () => Promise<{ url?: string; downloadUrl?: string }>;
 }) {
   const [open, setOpen] = useState(false);
   const [url, setUrl] = useState<string | null>(null);
@@ -48,7 +53,12 @@ export function DocumentDialog({
   const load = useMutation({
     mutationFn: fetchUrl,
     onSuccess: (result) => {
-      setUrl(result.url);
+      const link = result.url ?? result.downloadUrl;
+      if (!link) {
+        toast.error('Could not open the document', { description: 'No link came back.' });
+        return;
+      }
+      setUrl(link);
       setOpen(true);
     },
     onError: (error) =>

@@ -15,7 +15,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
 import { Detail, DetailGrid, PageHeader } from '@/components/app/page-shell';
-import { formatAgo, formatWhen } from '@/components/app/format';
+import { actionLabel, formatAgo, formatWhen } from '@/components/app/format';
 
 /**
  * One suggestion, answered.
@@ -296,7 +296,7 @@ export function SuggestionDetail({
                     {history.data.map((entry) => (
                       <li key={entry.id} className="border-l-2 border-border pl-4">
                         <p className="text-sm font-medium">
-                          {humanise(entry.action.replace(/\./g, ' '))}
+                          {actionLabel(entry.action)}
                         </p>
                         <p className="mt-0.5 text-xs text-muted-foreground">
                           {formatWhen(entry.createdAt)} · {formatAgo(entry.createdAt)}

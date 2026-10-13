@@ -16,7 +16,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
 import { Detail, DetailGrid, PageHeader } from '@/components/app/page-shell';
 import { DocumentDialog } from '@/components/app/document-dialog';
-import { formatAgo, formatDate, formatWhen } from '@/components/app/format';
+import { actionLabel, formatAgo, formatDate, formatWhen } from '@/components/app/format';
 
 /**
  * One facility, everything about it, and what has happened to it.
@@ -308,7 +308,7 @@ export function FacilityDetail({ facility, onBack }: { facility: Facility; onBac
                     {history.data.map((entry) => (
                       <li key={entry.id} className="border-l-2 border-border pl-4">
                         <p className="text-sm font-medium">
-                          {humanise(entry.action.replace(/\./g, ' '))}
+                          {actionLabel(entry.action)}
                         </p>
                         <p className="mt-0.5 text-xs text-muted-foreground">
                           {formatWhen(entry.createdAt)} · {formatAgo(entry.createdAt)}

@@ -1,9 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { FileText, Receipt, Send, TriangleAlert, Wallet } from 'lucide-react';
+import { FileText, ReceiptText, Send, TriangleAlert, Wallet } from 'lucide-react';
 import { api, errorMessage } from '@/lib/ui/api';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -85,11 +85,17 @@ export default function InvoicesPage() {
       ),
   });
 
-  const invoices = useQuery({
+  const invoices = useInfiniteQuery({
     queryKey: ['invoices', facilityId],
-    queryFn: () => api.get<{ invoices: Invoice[] }>(`/api/v1/invoices?facilityId=${facilityId}`),
+    queryFn: ({ pageParam }) =>
+      api.get<{ invoices: Invoice[]; nextCursor: string | null }>(
+        `/api/v1/invoices?facilityId=${facilityId}&limit=25${pageParam ? `&cursor=${pageParam}` : ''}`,
+      ),
+    initialPageParam: '',
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
     enabled: Boolean(facilityId),
   });
+  const invoiceRows = invoices.data?.pages.flatMap((page) => page.invoices) ?? [];
 
   function refresh() {
     void queryClient.invalidateQueries({ queryKey: ['invoices'] });
@@ -196,7 +202,7 @@ export default function InvoicesPage() {
 
       {!facilityId ? (
         <EmptyState
-          icon={<Receipt />}
+          icon={<ReceiptText />}
           title="Choose a facility"
           description="Invoices are per facility, so pick one to see what it has been billed."
         />
@@ -207,11 +213,11 @@ export default function InvoicesPage() {
           <TriangleAlert />
           <AlertDescription>Invoices could not be loaded.</AlertDescription>
         </Alert>
-      ) : invoices.data.invoices.length === 0 ? (
-        <EmptyState icon={<Receipt />} title="Nothing billed yet" />
+      ) : invoiceRows.length === 0 ? (
+        <EmptyState icon={<ReceiptText />} title="Nothing billed yet" />
       ) : (
         <div className="space-y-4">
-          {invoices.data.invoices.map((invoice) => (
+          {invoiceRows.map((invoice) => (
             <Card key={invoice.id}>
               <CardHeader className="flex-row items-start justify-between gap-4 space-y-0 pb-4">
                 <div className="min-w-0">
@@ -308,6 +314,17 @@ export default function InvoicesPage() {
               </CardContent>
             </Card>
           ))}
+          {invoices.hasNextPage ? (
+            <div className="flex justify-center pt-2">
+              <Button
+                variant="outline"
+                onClick={() => void invoices.fetchNextPage()}
+                loading={invoices.isFetchingNextPage}
+              >
+                Show older invoices
+              </Button>
+            </div>
+          ) : null}
         </div>
       )}
     </>

@@ -99,9 +99,15 @@ function RegisterForm() {
   // so a hospital's first step is this same phone-and-password flow, and the
   // query param is what tells this page — and the redirect at the end —
   // that is what is happening.
-  const forFacility = useSearchParams().get('as') === 'facility';
+  const as = useSearchParams().get('as');
+  const forFacility = as === 'facility';
+  // A colleague joining a hospital that is already on Medilink. Like the
+  // owner, they are staff rather than a practitioner: no practitioner role,
+  // no screening. What they can do comes from the owner's Staff page.
+  const forStaff = forFacility || as === 'staff';
   const [step, setStep] = useState(0);
   const [resent, setResent] = useState(false);
+  const [sharing, setSharing] = useState(false);
 
   const details = useZodForm(detailsSchema, {
     defaultValues: { fullName: '', phone: '', email: '' },
@@ -143,7 +149,12 @@ function RegisterForm() {
   const finish = useMutation({
     mutationFn: async (values: z.infer<typeof passwordSchema>) => {
       const password = values.password;
-      await api.post('/api/v1/auth/set-password', { phone, password });
+      await api.post('/api/v1/auth/set-password', {
+        phone,
+        password,
+        accountType: forStaff ? 'staff' : 'practitioner',
+        consentToSharing: forStaff ? undefined : sharing,
+      });
       await api.post('/api/v1/auth/login', { phone, password });
 
       /**
@@ -155,14 +166,17 @@ function RegisterForm() {
        * comes, the console says so better than a spinner here would.
        */
       let session = await api.get<SessionState>('/api/v1/auth/session');
-      for (let attempt = 0; attempt < 8 && session.grants.length === 0; attempt += 1) {
+      // A staff account has no grant coming until somebody gives it one.
+      for (let attempt = 0; !forStaff && attempt < 8 && session.grants.length === 0; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 1000));
         session = await api.get<SessionState>('/api/v1/auth/session');
       }
       return session;
     },
     onSuccess: (session) => {
-      router.replace(forFacility ? '/facility/register' : consoleFor(session));
+      router.replace(
+        forFacility ? '/facility/register' : forStaff ? '/facility' : consoleFor(session),
+      );
       router.refresh();
     },
   });
@@ -177,12 +191,27 @@ function RegisterForm() {
             Medilink
           </p>
           <h1 className="mt-1 text-2xl font-semibold tracking-tight">
-            {forFacility ? "Register your facility's account" : 'Create an account'}
+            {forFacility
+              ? "Register your facility's account"
+              : forStaff
+                ? 'Create your staff account'
+                : 'Create an account'}
           </h1>
           <p className="mt-1.5 text-sm text-muted-foreground">
             {forFacility
               ? "This is you, not the facility — the person who will manage it. Your hospital's own details come next, once this is done."
-              : 'For practitioners. Facility and operations access is granted by Medilink once your organisation is onboarded.'}
+              : forStaff
+                ? 'For people who work at a hospital, or for Medilink, already using the platform. Once your account exists, whoever manages access adds you from their Staff page.'
+                : (
+                  <>
+                    For doctors, nurses and other practitioners looking for shifts. Representing a
+                    hospital?{' '}
+                    <Link href="/register?as=facility" className="font-medium text-foreground underline underline-offset-4">
+                      Register it here
+                    </Link>
+                    .
+                  </>
+                )}
           </p>
 
           <ol className="mt-6 flex items-center gap-2" aria-label="Progress">
@@ -378,7 +407,33 @@ function RegisterForm() {
                     <FieldError message={passwordForm.formState.errors.confirm?.message} />
                   </div>
 
-                  <Button type="submit" className="w-full" loading={finish.isPending}>
+                  {/* Asked here, with the account, because matching shows a
+                      practitioner to hospitals from the first day. Recorded as
+                      consent, so it can be withdrawn from Privacy, under My profile, later. */}
+                  {!forStaff ? (
+                    <label className="flex items-start gap-3 rounded-md border p-3 text-sm leading-relaxed">
+                      <input
+                        type="checkbox"
+                        className="mt-1 size-4 shrink-0 accent-primary"
+                        checked={sharing}
+                        onChange={(event) => setSharing(event.target.checked)}
+                      />
+                      <span>
+                        Show my verified credentials and profile to hospitals that are considering
+                        me for shifts.{' '}
+                        <span className="text-muted-foreground">
+                          Needed to be offered work. You can withdraw it at any time from Privacy, under My profile.
+                        </span>
+                      </span>
+                    </label>
+                  ) : null}
+
+                  <Button
+                    type="submit"
+                    className="w-full"
+                    disabled={!forStaff && !sharing}
+                    loading={finish.isPending}
+                  >
                     Create my account
                   </Button>
 
@@ -408,14 +463,37 @@ function RegisterForm() {
           than discovered afterwards — a practitioner's eligibility card, or a
           facility's verification queue. */}
       <div className="hidden bg-primary p-12 text-primary-foreground lg:flex lg:flex-col lg:justify-center">
-        {forFacility ? <Building2 className="size-10 opacity-90" /> : <BadgeCheck className="size-10 opacity-90" />}
+        {forStaff ? <Building2 className="size-10 opacity-90" /> : <BadgeCheck className="size-10 opacity-90" />}
         <p className="mt-6 max-w-md text-2xl font-semibold leading-snug tracking-tight">
           {forFacility
             ? 'An account is the start. Your facility is next, and compliance verifies it before it can publish anything.'
-            : 'An account is the start. Verification is what gets you offered work.'}
+            : forStaff
+              ? 'An account is the start. Access comes from the person who manages it where you work.'
+              : 'An account is the start. Verification is what gets you offered work.'}
         </p>
         <div className="mt-8 space-y-4 text-sm leading-relaxed text-primary-foreground/85">
-          {forFacility ? (
+          {forStaff && !forFacility ? (
+            <>
+              <Card className="border-white/15 bg-white/10 text-primary-foreground shadow-none">
+                <CardHeader className="p-4">
+                  <CardTitle className="text-sm">Your own sign-in, never a shared one</CardTitle>
+                  <CardDescription className="text-primary-foreground/75">
+                    Everything you do is recorded against your name, so nobody else can act as you
+                    and nobody has to share a password.
+                  </CardDescription>
+                </CardHeader>
+              </Card>
+              <Card className="border-white/15 bg-white/10 text-primary-foreground shadow-none">
+                <CardHeader className="p-4">
+                  <CardTitle className="text-sm">Access is given, not chosen</CardTitle>
+                  <CardDescription className="text-primary-foreground/75">
+                    Once your account exists, your hospital&rsquo;s owner adds you from their Staff
+                    page using your phone number. Until then the console tells you what to do next.
+                  </CardDescription>
+                </CardHeader>
+              </Card>
+            </>
+          ) : forFacility ? (
             <>
               <Card className="border-white/15 bg-white/10 text-primary-foreground shadow-none">
                 <CardHeader className="p-4">

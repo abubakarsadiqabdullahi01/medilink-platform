@@ -8,9 +8,16 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
-import { Detail, DetailGrid, EmptyState, PageHeader, QueueSkeleton } from '@/components/app/page-shell';
+import {
+  Detail,
+  DetailGrid,
+  EmptyState,
+  PageHeader,
+  QueueSkeleton,
+} from '@/components/app/page-shell';
 import { formatAgo, formatNaira, formatWhen } from '@/components/app/format';
-import { CheckInPanel } from './check-in-panel';
+import { CheckInPanel, type Attendance } from './check-in-panel';
+import { ExcusalPanel } from './excusal-panel';
 
 interface Assignment {
   id: string;
@@ -22,6 +29,7 @@ interface Assignment {
   status: string;
   startsAt: string;
   endsAt: string;
+  attendance?: Attendance | null;
 }
 
 const STATUSES = ['CONFIRMED', 'COMPLETED', 'NO_SHOW', 'CANCELLED'] as const;
@@ -31,7 +39,8 @@ export default function MyShiftsPage() {
 
   const queue = useQueue<Assignment>(
     ['my-shifts', status],
-    `/api/v1/assignments?scopeType=SELF&status=${status}`,
+    // Each shift's attendance arrives with it: one request for the page.
+    `/api/v1/assignments?scopeType=SELF&status=${status}&include=attendance`,
     (body) => (body as { assignments?: Assignment[] }).assignments ?? [],
   );
 
@@ -50,7 +59,7 @@ export default function MyShiftsPage() {
         <TabsList>
           {STATUSES.map((value) => (
             <TabsTrigger key={value} value={value}>
-              {value.toLowerCase().replace('_', ' ')}
+              {humanise(value)}
             </TabsTrigger>
           ))}
         </TabsList>
@@ -74,7 +83,7 @@ export default function MyShiftsPage() {
           }
         />
       ) : (
-        <div className="space-y-4">
+        <div className="grid items-start gap-4 lg:grid-cols-2 2xl:grid-cols-3">
           {rows.map((row) => (
             <Card key={row.id}>
               <CardHeader className="flex-row items-start justify-between gap-4 space-y-0 pb-4">
@@ -99,8 +108,13 @@ export default function MyShiftsPage() {
                 {row.status === 'CONFIRMED' ? (
                   <>
                     <Separator />
-                    <CheckInPanel assignmentId={row.id} />
+                    <CheckInPanel assignmentId={row.id} startsAt={row.startsAt} attendance={row.attendance} />
                   </>
+                ) : null}
+
+                {(row.status === 'CONFIRMED' && new Date(row.endsAt) < new Date()) ||
+                row.status === 'NO_SHOW' ? (
+                  <ExcusalPanel assignmentId={row.id} canAsk={row.status === 'CONFIRMED'} attendance={row.attendance} />
                 ) : null}
               </CardContent>
             </Card>

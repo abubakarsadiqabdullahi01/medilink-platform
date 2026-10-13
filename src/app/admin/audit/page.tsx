@@ -27,9 +27,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { humanise } from '@/components/app/status-badge';
 import { EmptyState, PageHeader } from '@/components/app/page-shell';
-import { formatWhen, recordLabel, shortId } from '@/components/app/format';
+import { actionLabel, formatWhen, recordLabel, shortId } from '@/components/app/format';
 import { AUDIT_AREA_LABELS, AUDIT_AREA_VALUES } from '@/modules/audit-compliance/domain/audit-areas';
 
 interface AuditEntry {
@@ -267,7 +266,7 @@ export default function AuditPage() {
                         scans sentences, an investigator quoting a row wants
                         the string the code actually wrote. */}
                     <Badge variant="secondary" title={row.action}>
-                      {humanise(row.action.replace(/\./g, ' '))}
+                      {actionLabel(row.action)}
                     </Badge>
                   </TableCell>
                   <TableCell className="text-xs">

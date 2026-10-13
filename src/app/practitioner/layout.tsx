@@ -1,103 +1,16 @@
-'use client';
-
-import {
-  CalendarCheck,
-  CalendarDays,
-  FileCheck2,
-  Inbox,
-  LayoutDashboard,
-  Receipt,
-  ShieldCheck,
-  UserRound,
-  Wallet,
-} from 'lucide-react';
-import { SessionProvider } from '@/lib/ui/session';
-import { ConsoleShell, type NavSection } from '@/components/app/console-shell';
+import { sessionState } from '@/modules/auth/application/session-state';
+import PractitionerLayout from './console-layout';
 
 /**
- * The practitioner's own view.
+ * The server half of the practitioner console's layout.
  *
- * Everything here is `SELF`-scoped, so nothing needs a facility id and no
- * page has to ask which hospital — a practitioner acts for themselves and the
- * session already says who that is.
- *
- * Ordered by how often it is opened rather than by module number: offers and
- * the next shift are daily; the profile and credentials are filled in once
- * and then largely left alone.
+ * Looks the session up while rendering and hands it to the client half, so the
+ * navigation is in the HTML that arrives rather than appearing after the
+ * scripts load, hydrate and ask for it. A missing session is passed on as
+ * null, not redirected here: the client provider already turns a 401 into the
+ * sign-in page, and one place deciding that keeps the two from disagreeing.
  */
-const SECTIONS: NavSection[] = [
-  {
-    heading: 'Today',
-    items: [
-      { href: '/practitioner', label: 'Overview', icon: LayoutDashboard, permission: null },
-      {
-        href: '/practitioner/offers',
-        label: 'Offers',
-        icon: Inbox,
-        permission: 'service_request.read',
-      },
-      {
-        href: '/practitioner/shifts',
-        label: 'My shifts',
-        icon: CalendarCheck,
-        permission: 'service_request.read',
-      },
-    ],
-  },
-  {
-    heading: 'Getting paid',
-    items: [
-      {
-        href: '/practitioner/timesheets',
-        label: 'Timesheets',
-        icon: Receipt,
-        permission: 'timesheet.submit',
-      },
-      {
-        href: '/practitioner/earnings',
-        label: 'Earnings',
-        icon: Wallet,
-        permission: 'invoice.read',
-      },
-    ],
-  },
-  {
-    heading: 'Your account',
-    items: [
-      {
-        href: '/practitioner/availability',
-        label: 'Availability',
-        icon: CalendarDays,
-        permission: 'availability.write',
-      },
-      {
-        href: '/practitioner/credentials',
-        label: 'Credentials',
-        icon: FileCheck2,
-        permission: 'credential.submit',
-      },
-      {
-        href: '/practitioner/profile',
-        label: 'Profile',
-        icon: UserRound,
-        permission: 'practitioner.profile.read',
-      },
-      {
-        href: '/practitioner/privacy',
-        label: 'Your data',
-        icon: ShieldCheck,
-        permission: 'practitioner.profile.read',
-      },
-    ],
-  },
-];
-
-export default function PractitionerLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <SessionProvider>
-      <ConsoleShell title="Practitioner" sections={SECTIONS}>
-        {children}
-      </ConsoleShell>
-    </SessionProvider>
-  );
+export default async function Layout({ children }: { children: React.ReactNode }) {
+  const initialSession = await sessionState();
+  return <PractitionerLayout initialSession={initialSession}>{children}</PractitionerLayout>;
 }

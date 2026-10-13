@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -33,8 +34,10 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
 import { Detail, DetailGrid, EmptyState, PageHeader } from '@/components/app/page-shell';
-import { formatWhen } from '@/components/app/format';
+import { formatAgo, formatWhen } from '@/components/app/format';
 import { CredentialsTab } from './credentials-tab';
+import { EvidenceReview } from './evidence-review';
+import { StandingPanel } from './standing-panel';
 
 /**
  * The practitioner directory, and recording what a practitioner cannot record
@@ -62,8 +65,24 @@ interface Entry {
   yearsOfExperience: number | null;
   identityRecorded: boolean;
   registrationRecorded: boolean;
+  /** When they said "I am done, review me"; null while they have not. */
+  submittedForReviewAt: string | null;
   createdAt: string;
 }
+
+/**
+ * The officer's queues. Everybody who has registered is not a queue: most of
+ * them are half-way through a form, and an officer opening one then would be
+ * reviewing something its owner has not finished. So the list opens on those
+ * who have asked, longest-waiting first, with the rest a click away.
+ */
+type Queue = 'waiting' | 'draft' | 'all';
+
+const QUEUES: [Queue, string][] = [
+  ['waiting', 'Waiting for approval'],
+  ['draft', 'Not submitted yet'],
+  ['all', 'Everyone'],
+];
 
 interface Identity {
   ninLast4: string;
@@ -93,6 +112,20 @@ interface Eligibility {
 
 const REGISTRATION_STATUSES = ['ACTIVE', 'SUSPENDED', 'EXPIRED', 'STRUCK_OFF', 'UNKNOWN'] as const;
 
+/** Each eligibility blocker as the officer would say it, and where it is fixed. */
+const BLOCKER_LABELS: Record<string, string> = {
+  account_not_usable: 'The account is suspended or closed',
+  profile_incomplete: 'No profile yet — the practitioner creates it',
+  identity_unverified: 'Identity (NIN) not recorded — below',
+  identity_name_mismatch: 'The name on the NIN slip does not match the account',
+  registration_missing: 'No regulator registration recorded — below',
+  registration_not_active: 'The regulator registration is not active',
+  registration_evidence_stale: 'The registration was last checked more than a year ago',
+  credential_missing: 'A mandatory credential is not verified yet — Credentials tab',
+  credential_expired: 'A mandatory credential has expired',
+  screening_not_clear: 'Sanctions screening is flagged — see Sanctions screening',
+};
+
 /** Short enough that the whole page is scannable without scrolling past it. */
 const PAGE_SIZE = 20;
 
@@ -117,13 +150,47 @@ function Avatar({ entry, size = 'sm' }: { entry: Entry; size?: 'sm' | 'lg' }) {
   );
 }
 
+/**
+ * `?user=<id>` opens that practitioner directly — what the credentials queue
+ * links to for a NIN or a licence, which are confirmed here, beside the rest of
+ * their record, rather than approved in place.
+ */
 export default function PractitionersPage() {
+  return (
+    <Suspense fallback={<Skeleton className="h-96 w-full" />}>
+      <Practitioners />
+    </Suspense>
+  );
+}
+
+function Practitioners() {
+  const router = useRouter();
+  const wanted = useSearchParams().get('user');
   const queryClient = useQueryClient();
   const reference = useReference();
 
   const [search, setSearch] = useState('');
   const [applied, setApplied] = useState('');
+  const [queue, setQueue] = useState<Queue>('waiting');
   const [selected, setSelected] = useState<Entry | null>(null);
+  const [tab, setTab] = useState('record');
+
+  const linked = useQuery({
+    queryKey: ['practitioner-by-id', wanted],
+    queryFn: () =>
+      api.get<{ practitioners?: Entry[] }>(
+        `/api/v1/practitioners?scopeType=PLATFORM&limit=1&userId=${wanted}`,
+      ),
+    enabled: Boolean(wanted) && !selected,
+    retry: false,
+  });
+  useEffect(() => {
+    const found = linked.data?.practitioners?.[0];
+    if (found && !selected) {
+      setSelected(found);
+      setTab('record');
+    }
+  }, [linked.data, selected]);
 
   const [nin, setNin] = useState('');
   const [nameMatch, setNameMatch] = useState('true');
@@ -147,12 +214,13 @@ export default function PractitionersPage() {
   const cursor = cursors[pageIndex] ?? null;
 
   const directory = useQuery({
-    queryKey: ['practitioner-directory', applied, cursor],
+    queryKey: ['practitioner-directory', applied, cursor, queue],
     queryFn: async () => {
       const search = applied ? `&search=${encodeURIComponent(applied)}` : '';
       const from = cursor ? `&cursor=${cursor}` : '';
+      const which = queue === 'all' ? '' : `&application=${queue}`;
       return api.get<{ practitioners?: Entry[]; nextCursor?: string | null }>(
-        `/api/v1/practitioners?scopeType=PLATFORM&limit=${PAGE_SIZE}${search}${from}`,
+        `/api/v1/practitioners?scopeType=PLATFORM&limit=${PAGE_SIZE}${which}${search}${from}`,
       );
     },
     // Keeps the page under the cursor while the next one loads, instead of
@@ -238,7 +306,14 @@ export default function PractitionersPage() {
           title={selected.fullName}
           description={selected.phone}
           action={
-            <Button variant="outline" onClick={() => setSelected(null)}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setSelected(null);
+                // Otherwise the link that opened this would open it again.
+                if (wanted) router.replace('/admin/practitioners');
+              }}
+            >
               <ArrowLeft />
               All practitioners
             </Button>
@@ -271,7 +346,7 @@ export default function PractitionersPage() {
               place. Identity, registration and credentials gate the same
               outcome, and reviewing them on three different screens is how an
               officer verifies two of the three and moves on. */}
-          <Tabs defaultValue="record">
+          <Tabs value={tab} onValueChange={setTab}>
             <TabsList>
               <TabsTrigger value="record">Identity and registration</TabsTrigger>
               <TabsTrigger value="credentials">Credentials</TabsTrigger>
@@ -304,7 +379,7 @@ export default function PractitionersPage() {
                       <ul className="mt-2 space-y-1">
                         {(eligibility.data?.blockers ?? []).map((blocker) => (
                           <li key={blocker} className="text-sm text-muted-foreground">
-                            · {humanise(blocker)}
+                            · {BLOCKER_LABELS[blocker] ?? humanise(blocker)}
                           </li>
                         ))}
                       </ul>
@@ -312,6 +387,18 @@ export default function PractitionersPage() {
                   )}
                 </CardContent>
               </Card>
+
+              <EvidenceReview
+                userId={selected.userId}
+                practitionerName={selected.fullName}
+                regulator={
+                  (reference.data?.professionalCategories ?? []).find(
+                    (row) => row.id === selected.professionalCategoryId,
+                  )?.regulator ?? null
+                }
+              />
+
+              <StandingPanel userId={selected.userId} onChanged={refresh} />
 
               <Card>
                 <CardHeader className="pb-3">
@@ -394,147 +481,165 @@ export default function PractitionersPage() {
                 </CardContent>
               </Card>
 
-              <div className="grid gap-6 lg:grid-cols-2">
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-sm">Record an identity</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <form
-                      className="space-y-4"
-                      onSubmit={(event) => {
-                        event.preventDefault();
-                        recordIdentity.mutate();
-                      }}
-                    >
-                      <div className="space-y-1.5">
-                        <Label htmlFor="nin">NIN, as it appears on the slip</Label>
-                        <Input
-                          id="nin"
-                          value={nin}
-                          onChange={(event) => setNin(event.target.value.replace(/\D/g, ''))}
-                          inputMode="numeric"
-                          className="tabular tracking-wider"
-                          autoComplete="off"
-                        />
-                        <p className="text-xs leading-relaxed text-muted-foreground">
-                          The number is turned into a keyed digest and its last four digits. It is
-                          never stored, logged or returned — so check it before you submit, because
-                          nobody can read it back afterwards.
-                        </p>
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <Label>Does the name on the slip match the account?</Label>
-                        <Select value={nameMatch} onValueChange={setNameMatch}>
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="true">Yes, it matches</SelectItem>
-                            <SelectItem value="false">No, it does not</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <p className="text-xs text-muted-foreground">
-                          Recording a mismatch is not a rejection. It stays on the record as its own
-                          blocker until somebody settles which name is right.
-                        </p>
-                      </div>
-
-                      <Button
-                        type="submit"
-                        loading={recordIdentity.isPending}
-                        disabled={nin.trim().length < 11}
+              {/* The fallback. Somebody who sent nothing — verified in person, or by
+                  telephone — still has to be recordable, so the forms stay; they are
+                  just no longer the way every identity and registration gets in. */}
+              <details className="group rounded-xl border bg-card">
+                <summary className="cursor-pointer select-none px-6 py-4 text-sm font-medium">
+                  Record by hand{' '}
+                  <span className="font-normal text-muted-foreground">
+                    — for somebody who has submitted nothing to confirm
+                  </span>
+                </summary>
+                <div className="grid gap-6 p-6 pt-0 lg:grid-cols-2">
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-sm">Record an identity</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <form
+                        className="space-y-4"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          recordIdentity.mutate();
+                        }}
                       >
-                        <BadgeCheck />
-                        Record identity
-                      </Button>
-                    </form>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-sm">Record a registration</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <form
-                      className="space-y-4"
-                      onSubmit={(event) => {
-                        event.preventDefault();
-                        recordRegistration.mutate();
-                      }}
-                    >
-                      <div className="grid gap-4 sm:grid-cols-2">
                         <div className="space-y-1.5">
-                          <Label htmlFor="regulator">Regulator</Label>
+                          <Label htmlFor="nin">NIN, as it appears on the slip</Label>
                           <Input
-                            id="regulator"
-                            value={regulator}
-                            onChange={(event) => setRegulator(event.target.value.toUpperCase())}
-                            placeholder="MDCN"
+                            id="nin"
+                            value={nin}
+                            onChange={(event) => setNin(event.target.value.replace(/\D/g, ''))}
+                            inputMode="numeric"
+                            className="tabular tracking-wider"
+                            autoComplete="off"
                           />
+                          <p className="text-xs leading-relaxed text-muted-foreground">
+                            The number is turned into a keyed digest and its last four digits. It is
+                            never stored, logged or returned — so check it before you submit,
+                            because nobody can read it back afterwards.
+                          </p>
                         </div>
 
                         <div className="space-y-1.5">
-                          <Label htmlFor="folio">Folio or licence number</Label>
-                          <Input
-                            id="folio"
-                            value={folioNumber}
-                            onChange={(event) => setFolioNumber(event.target.value)}
-                            placeholder="MDCN/12345"
-                          />
-                        </div>
-
-                        <div className="space-y-1.5">
-                          <Label>Status on the register</Label>
-                          <Select value={registrationStatus} onValueChange={setRegistrationStatus}>
+                          <Label>Does the name on the slip match the account?</Label>
+                          <Select value={nameMatch} onValueChange={setNameMatch}>
                             <SelectTrigger>
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              {REGISTRATION_STATUSES.map((status) => (
-                                <SelectItem key={status} value={status}>
-                                  {humanise(status)}
-                                </SelectItem>
-                              ))}
+                              <SelectItem value="true">Yes, it matches</SelectItem>
+                              <SelectItem value="false">No, it does not</SelectItem>
                             </SelectContent>
                           </Select>
+                          <p className="text-xs text-muted-foreground">
+                            Recording a mismatch is not a rejection. It stays on the record as its
+                            own blocker until somebody settles which name is right.
+                          </p>
                         </div>
 
-                        <div className="space-y-1.5">
-                          <Label htmlFor="expires">Expires (optional)</Label>
-                          <Input
-                            id="expires"
-                            type="date"
-                            value={expiresAt}
-                            onChange={(event) => setExpiresAt(event.target.value)}
-                          />
-                        </div>
-                      </div>
+                        <Button
+                          type="submit"
+                          loading={recordIdentity.isPending}
+                          disabled={nin.trim().length < 11}
+                        >
+                          <BadgeCheck />
+                          Record identity
+                        </Button>
+                      </form>
+                    </CardContent>
+                  </Card>
 
-                      <p className="text-xs leading-relaxed text-muted-foreground">
-                        Only an active registration permits practice. Recording one that is
-                        suspended or struck off is still worth doing — it is what the record should
-                        say.
-                      </p>
-
-                      <Button
-                        type="submit"
-                        loading={recordRegistration.isPending}
-                        disabled={regulator.trim().length < 2 || folioNumber.trim().length < 3}
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-sm">Record a registration</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <form
+                        className="space-y-4"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          recordRegistration.mutate();
+                        }}
                       >
-                        <BadgeCheck />
-                        Record registration
-                      </Button>
-                    </form>
-                  </CardContent>
-                </Card>
-              </div>
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          <div className="space-y-1.5">
+                            <Label htmlFor="regulator">Regulator</Label>
+                            <Input
+                              id="regulator"
+                              value={regulator}
+                              onChange={(event) => setRegulator(event.target.value.toUpperCase())}
+                              placeholder="MDCN"
+                            />
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <Label htmlFor="folio">Folio or licence number</Label>
+                            <Input
+                              id="folio"
+                              value={folioNumber}
+                              onChange={(event) => setFolioNumber(event.target.value)}
+                              placeholder="MDCN/12345"
+                            />
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <Label>Status on the register</Label>
+                            <Select
+                              value={registrationStatus}
+                              onValueChange={setRegistrationStatus}
+                            >
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {REGISTRATION_STATUSES.map((status) => (
+                                  <SelectItem key={status} value={status}>
+                                    {humanise(status)}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <Label htmlFor="expires">Expires (optional)</Label>
+                            <Input
+                              id="expires"
+                              type="date"
+                              value={expiresAt}
+                              onChange={(event) => setExpiresAt(event.target.value)}
+                            />
+                          </div>
+                        </div>
+
+                        <p className="text-xs leading-relaxed text-muted-foreground">
+                          Only an active registration permits practice. Recording one that is
+                          suspended or struck off is still worth doing — it is what the record
+                          should say.
+                        </p>
+
+                        <Button
+                          type="submit"
+                          loading={recordRegistration.isPending}
+                          disabled={regulator.trim().length < 2 || folioNumber.trim().length < 3}
+                        >
+                          <BadgeCheck />
+                          Record registration
+                        </Button>
+                      </form>
+                    </CardContent>
+                  </Card>
+                </div>
+              </details>
             </TabsContent>
 
             <TabsContent value="credentials" className="pt-5">
-              <CredentialsTab userId={selected.userId} practitionerName={selected.fullName} />
+              <CredentialsTab
+                userId={selected.userId}
+                practitionerName={selected.fullName}
+                onConfirm={() => setTab('record')}
+              />
             </TabsContent>
           </Tabs>
         </div>
@@ -552,8 +657,25 @@ export default function PractitionersPage() {
     <>
       <PageHeader
         title="Practitioners"
-        description="Everybody who has registered. Open one to see what is on record and to enter an identity or a professional registration — neither is something a practitioner can do for themselves."
+        description="Practitioners join the queue when they submit for approval, so you are never reviewing something half-finished. Open one to see what is on record and to enter an identity or a professional registration — neither is something a practitioner can do for themselves."
       />
+
+      <Tabs
+        value={queue}
+        onValueChange={(next) => {
+          setQueue(next as Queue);
+          startOver();
+        }}
+        className="mb-4"
+      >
+        <TabsList>
+          {QUEUES.map(([value, label]) => (
+            <TabsTrigger key={value} value={value}>
+              {label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
 
       <Card className="mb-6">
         <CardContent className="pt-6">
@@ -616,11 +738,23 @@ export default function PractitionersPage() {
       ) : rows.length === 0 ? (
         <EmptyState
           icon={<UserRound />}
-          title={applied ? 'Nobody matches that' : 'No practitioners yet'}
+          title={
+            applied
+              ? 'Nobody matches that'
+              : queue === 'waiting'
+                ? 'Nobody is waiting for approval'
+                : queue === 'draft'
+                  ? 'Everybody has submitted'
+                  : 'No practitioners yet'
+          }
           description={
             applied
               ? 'Try part of a name, or the number they registered with.'
-              : 'They appear here as soon as somebody completes registration.'
+              : queue === 'waiting'
+                ? 'Somebody appears here the moment they submit their application.'
+                : queue === 'draft'
+                  ? 'Anybody still filling in their profile, availability or documents would be listed here.'
+                  : 'They appear here as soon as somebody completes registration.'
           }
         />
       ) : (
@@ -649,6 +783,15 @@ export default function PractitionersPage() {
                   {/* What an officer is scanning this list for: who still
                       needs something recorded. */}
                   <div className="hidden shrink-0 items-center gap-2 sm:flex">
+                    {row.submittedForReviewAt ? (
+                      <span className="rounded-full bg-info/10 px-2 py-0.5 text-[0.7rem] font-medium text-info">
+                        Submitted {formatAgo(row.submittedForReviewAt)}
+                      </span>
+                    ) : (
+                      <span className="rounded-full bg-muted px-2 py-0.5 text-[0.7rem] font-medium text-muted-foreground">
+                        Not submitted
+                      </span>
+                    )}
                     <span
                       className={cn(
                         'rounded-full px-2 py-0.5 text-[0.7rem] font-medium',

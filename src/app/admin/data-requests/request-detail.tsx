@@ -14,7 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
 import { Detail, DetailGrid, PageHeader } from '@/components/app/page-shell';
-import { formatAgo, formatWhen } from '@/components/app/format';
+import { actionLabel, formatAgo, formatWhen } from '@/components/app/format';
 
 /**
  * One data-subject request, answered with the duty in front of you.
@@ -81,6 +81,17 @@ export function RequestDetail({
   });
 
   const open = request.status === 'RECEIVED' || request.status === 'IN_PROGRESS';
+
+  const start = useMutation({
+    mutationFn: () => api.post(`/api/v1/data-requests/${request.id}/start`, { id: request.id }),
+    onSuccess: () => {
+      toast.success('Marked as in progress');
+      void queryClient.invalidateQueries({ queryKey: ['request-queue'] });
+      void queryClient.invalidateQueries({ queryKey: ['request-history', request.id] });
+      onBack();
+    },
+    onError: (error) => toast.error('Could not pick it up', { description: errorMessage(error) }),
+  });
 
   const close = useMutation({
     mutationFn: (status: 'COMPLETED' | 'REFUSED') =>
@@ -196,6 +207,27 @@ export function RequestDetail({
                   <CardTitle className="text-sm">Answer it</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  {request.status === 'RECEIVED' ? (
+                    /* Optional, not a required step. A simple access request
+                       answered in one sitting should not need a click first;
+                       this is for the ones that take days, so a colleague
+                       opening the queue does not start it again. */
+                    <div className="flex flex-wrap items-center gap-3 rounded-lg border p-3">
+                      <p className="min-w-0 flex-1 text-sm text-muted-foreground">
+                        Nobody has picked this up yet. Marking it in progress says you have it —
+                        the month still runs from the day it arrived.
+                      </p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        loading={start.isPending}
+                        onClick={() => start.mutate()}
+                      >
+                        I am working on it
+                      </Button>
+                    </div>
+                  ) : null}
+
                   <div className="space-y-1.5">
                     <Label htmlFor="request-outcome">
                       What was done{' '}
@@ -258,7 +290,7 @@ export function RequestDetail({
                     {history.data.map((entry) => (
                       <li key={entry.id} className="border-l-2 border-border pl-4">
                         <p className="text-sm font-medium">
-                          {humanise(entry.action.replace(/\./g, ' '))}
+                          {actionLabel(entry.action)}
                         </p>
                         <p className="mt-0.5 text-xs text-muted-foreground">
                           {formatWhen(entry.createdAt)} · {formatAgo(entry.createdAt)}

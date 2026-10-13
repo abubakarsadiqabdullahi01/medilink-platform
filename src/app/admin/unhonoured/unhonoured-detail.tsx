@@ -15,7 +15,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
 import { Detail, DetailGrid, PageHeader } from '@/components/app/page-shell';
-import { formatAgo, formatWhen } from '@/components/app/format';
+import { actionLabel, formatAgo, formatWhen } from '@/components/app/format';
 
 /**
  * One unhonoured shift, and the decision about whose fault it was.
@@ -184,6 +184,8 @@ export function UnhonouredDetail({ record, onBack }: { record: Unhonoured; onBac
               </Card>
             ) : null}
 
+            <ExcusalRequests record={record} open={open} onDecided={onBack} />
+
             {open ? (
               <Card>
                 <CardHeader className="pb-3">
@@ -273,7 +275,7 @@ export function UnhonouredDetail({ record, onBack }: { record: Unhonoured; onBac
                     {history.data.map((entry) => (
                       <li key={entry.id} className="border-l-2 border-border pl-4">
                         <p className="text-sm font-medium">
-                          {humanise(entry.action.replace(/\./g, ' '))}
+                          {actionLabel(entry.action)}
                         </p>
                         <p className="mt-0.5 text-xs text-muted-foreground">
                           {formatWhen(entry.createdAt)} · {formatAgo(entry.createdAt)}
@@ -296,5 +298,139 @@ export function UnhonouredDetail({ record, onBack }: { record: Unhonoured; onBac
         </Tabs>
       </div>
     </>
+  );
+}
+
+interface Excusal {
+  id: string;
+  reason: string;
+  status: 'REQUESTED' | 'GRANTED' | 'REFUSED';
+  decisionNotes: string | null;
+  decidedAt: string | null;
+  createdAt: string;
+}
+
+/**
+ * What the practitioner said, before anybody decides fault.
+ *
+ * The request was always recorded and always decidable over the API, but the
+ * officer had no way to see it from here — so the flag got decided without
+ * the one piece of evidence the practitioner had offered. Granting closes the
+ * flag as nobody's fault, which is what the server does; refusing leaves it
+ * open for the decision below and needs a reason, because the practitioner is
+ * owed one.
+ */
+function ExcusalRequests({
+  record,
+  open,
+  onDecided,
+}: {
+  record: Unhonoured;
+  open: boolean;
+  onDecided: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [notes, setNotes] = useState('');
+
+  const excusals = useQuery({
+    queryKey: ['excusals', record.assignmentId],
+    queryFn: async () => {
+      const body = await api.get<{ excusals?: Excusal[] }>(
+        `/api/v1/assignments/${record.assignmentId}/excusals?scopeType=PLATFORM`,
+      );
+      return body.excusals ?? [];
+    },
+    retry: false,
+  });
+
+  const decide = useMutation({
+    mutationFn: (input: { id: string; decision: 'grant' | 'refuse' }) =>
+      api.post(`/api/v1/excusals/${input.id}/decide`, {
+        decision: input.decision,
+        notes: notes.trim() || undefined,
+      }),
+    onSuccess: (_data, input) => {
+      toast.success(input.decision === 'grant' ? 'Excused — the flag is closed' : 'Request refused');
+      void queryClient.invalidateQueries({ queryKey: ['excusals', record.assignmentId] });
+      void queryClient.invalidateQueries({ queryKey: ['unhonoured-queue'] });
+      void queryClient.invalidateQueries({ queryKey: ['unhonoured-history', record.id] });
+      void queryClient.invalidateQueries({ queryKey: ['tile'] });
+      setNotes('');
+      if (input.decision === 'grant') onDecided();
+    },
+    onError: (error) => toast.error('Could not decide it', { description: errorMessage(error) }),
+  });
+
+  if (excusals.isPending) return <Skeleton className="h-24 w-full" />;
+  if (excusals.isError) {
+    return (
+      <Alert variant="destructive">
+        <TriangleAlert />
+        <AlertDescription>The practitioner&apos;s excusal requests could not be loaded.</AlertDescription>
+      </Alert>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm">What the practitioner said</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {excusals.data.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            They have not asked to be excused. They can, from their own shifts page, until this is
+            decided.
+          </p>
+        ) : (
+          excusals.data.map((excusal) => (
+            <div key={excusal.id} className="space-y-3 rounded-md border p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs text-muted-foreground">Asked {formatAgo(excusal.createdAt)}</p>
+                <StatusBadge status={excusal.status} />
+              </div>
+              <p className="text-sm">{excusal.reason}</p>
+              {excusal.decisionNotes ? (
+                <p className="text-xs text-muted-foreground">Decision: {excusal.decisionNotes}</p>
+              ) : null}
+
+              {open && excusal.status === 'REQUESTED' ? (
+                <div className="space-y-2 border-t pt-3">
+                  <Label htmlFor={`excusal-notes-${excusal.id}`}>
+                    Your note{' '}
+                    <span className="font-normal text-muted-foreground">— required to refuse</span>
+                  </Label>
+                  <Textarea
+                    id={`excusal-notes-${excusal.id}`}
+                    rows={2}
+                    placeholder="What you checked, and what it showed."
+                    value={notes}
+                    onChange={(event) => setNotes(event.target.value)}
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="success"
+                      loading={decide.isPending && decide.variables?.decision === 'grant'}
+                      disabled={decide.isPending}
+                      onClick={() => decide.mutate({ id: excusal.id, decision: 'grant' })}
+                    >
+                      Excuse them
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      loading={decide.isPending && decide.variables?.decision === 'refuse'}
+                      disabled={decide.isPending || notes.trim().length < MIN_REASON}
+                      onClick={() => decide.mutate({ id: excusal.id, decision: 'refuse' })}
+                    >
+                      Refuse
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ))
+        )}
+      </CardContent>
+    </Card>
   );
 }

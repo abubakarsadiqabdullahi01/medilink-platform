@@ -1,268 +1,214 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { toast } from 'sonner';
-import { TriangleAlert } from 'lucide-react';
-import { api, errorMessage } from '@/lib/ui/api';
-import { useReference } from '@/lib/ui/reference';
+import { Suspense, useRef } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { ArrowRight, CircleAlert, CircleCheck, Clock } from 'lucide-react';
+import { usePractitionerSetup } from '@/lib/ui/practitioner';
 import { useSession } from '@/lib/ui/session';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Separator } from '@/components/ui/separator';
-import { Textarea } from '@/components/ui/textarea';
-import { Combobox } from '@/components/app/combobox';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { PageHeader } from '@/components/app/page-shell';
-import { PhotoField } from './photo-field';
+import { formatWhen } from '@/components/app/format';
+import { AvailabilitySection } from './availability-section';
+import { CredentialsSection } from './credentials-section';
+import { INTRO } from './copy';
+import { PrivacySection } from './privacy-section';
+import { ProfileForm } from './profile-form';
+import { OnRecord, ProfileSummary } from './profile-summary';
+import { ReturnedNotice } from './returned-notice';
+import { SetupWizard } from './setup-wizard';
 
-interface Profile {
-  id: string;
-  professionalCategoryId: string;
-  specialtyId: string | null;
-  yearsOfExperience: number;
-  bio: string | null;
-  photoObjectKey: string | null;
-  homeStateId: string | null;
-  homeLgaId: string | null;
-  travelPreference: string;
-}
-
-const TRAVEL = [
-  ['SAME_LGA', 'Only my own local government area'],
-  ['SAME_STATE', 'Anywhere in my state'],
-  ['ANYWHERE', 'Anywhere in Nigeria'],
+const TABS = [
+  ['profile', 'Profile'],
+  ['credentials', 'Credentials'],
+  ['availability', 'Availability'],
+  ['privacy', 'Privacy'],
 ] as const;
 
 /**
- * The profile, which is also half the matcher's input.
+ * Everything about the practitioner as a person, in one place: who they are,
+ * what they have proved, when they can work and what Medilink may do with it.
  *
- * Travel preference and home LGA are not decoration: the engine scores
- * proximity against them and excludes a shift outside what somebody said they
- * would travel to. The form says so, because a practitioner who leaves the
- * default has effectively narrowed their own offers without being told.
+ * It used to be four sidebar items — Profile, Credentials, Availability, Your
+ * data — and a newcomer had to discover that all four were the same job. A
+ * practitioner who has not finished starting out is walked through it as a
+ * wizard; once they have, or if they choose to skip, it is a tabbed page they
+ * can come back to. `?tab=` deep-links a tab, which is how the overview and the
+ * old URLs point at the one thing somebody has to do.
  */
-export default function ProfilePage() {
-  const session = useSession();
-  const reference = useReference();
-  const queryClient = useQueryClient();
-
-  const profile = useQuery({
-    queryKey: ['profile'],
-    queryFn: () => api.get<Profile>('/api/v1/practitioners/me'),
-    retry: false,
-  });
-
-  const [categoryId, setCategoryId] = useState('');
-  const [specialtyId, setSpecialtyId] = useState('');
-  const [years, setYears] = useState('0');
-  const [bio, setBio] = useState('');
-  const [stateId, setStateId] = useState('');
-  const [lgaId, setLgaId] = useState('');
-  const [travel, setTravel] = useState('SAME_STATE');
-
-  // Seeded once the profile arrives; after that the form is the source of
-  // truth, or typing would be overwritten on every refetch.
-  useEffect(() => {
-    if (!profile.data) return;
-    setCategoryId(profile.data.professionalCategoryId);
-    setSpecialtyId(profile.data.specialtyId ?? '');
-    setYears(String(profile.data.yearsOfExperience));
-    setBio(profile.data.bio ?? '');
-    setStateId(profile.data.homeStateId ?? '');
-    setLgaId(profile.data.homeLgaId ?? '');
-    setTravel(profile.data.travelPreference);
-  }, [profile.data]);
-
-  const exists = Boolean(profile.data);
-  const specialties = (reference.data?.specialties ?? []).filter(
-    (row) => row.categoryId === categoryId,
+export default function MyProfilePage() {
+  return (
+    <Suspense fallback={<Skeleton className="h-96 w-full" />}>
+      <MyProfile />
+    </Suspense>
   );
-  const lgas = (reference.data?.lgas ?? []).filter((row) => row.stateId === stateId);
+}
 
-  const save = useMutation({
-    mutationFn: () => {
-      const body = {
-        professionalCategoryId: categoryId,
-        specialtyId: specialtyId || undefined,
-        yearsOfExperience: Number(years || '0'),
-        bio: bio.trim() || undefined,
-        homeStateId: stateId || undefined,
-        homeLgaId: lgaId || undefined,
-        travelPreference: travel,
-      };
-      return exists
-        ? api.patch('/api/v1/practitioners/me', body)
-        : api.post('/api/v1/practitioners/me', body);
-    },
-    onSuccess: () => {
-      toast.success('Saved');
-      void queryClient.invalidateQueries({ queryKey: ['profile'] });
-      void queryClient.invalidateQueries({ queryKey: ['eligibility'] });
-    },
-    onError: (error) => toast.error('Could not save', { description: errorMessage(error) }),
-  });
+function MyProfile() {
+  const session = useSession();
+  const router = useRouter();
+  const tab = useSearchParams().get('tab');
+  const setup = usePractitionerSetup();
+
+  // Decided once, when the data first arrives. Finishing the last step makes
+  // setup "complete" and would otherwise throw the practitioner out of the
+  // wizard before they had seen the final screen.
+  const startedInSetup = useRef<boolean | null>(null);
+  if (setup.ready && startedInSetup.current === null) startedInSetup.current = setup.setupNeeded;
+  const inWizard = !tab && startedInSetup.current === true;
+
+  function goTab(next: string) {
+    router.replace(`/practitioner/profile?tab=${next}`, { scroll: false });
+  }
+  function resumeSetup() {
+    startedInSetup.current = true;
+    router.replace('/practitioner/profile', { scroll: false });
+  }
+
+  if (!setup.ready) {
+    return (
+      <div>
+        <PageHeader
+          title="My profile"
+          description={`${session.user.fullName} · ${session.user.phone}`}
+        />
+        <Skeleton className="h-96 w-full" />
+      </div>
+    );
+  }
+
+  if (inWizard) {
+    return (
+      <SetupWizard
+        done={setup.steps.map((step) => step.done)}
+        categoryId={setup.categoryId}
+        blockers={setup.blockers}
+        submissions={setup.submissions}
+        submittedAt={setup.submittedForReviewAt}
+        onSkip={() => goTab('profile')}
+        onFinish={() => goTab('profile')}
+      />
+    );
+  }
+
+  const current = TABS.some(([value]) => value === tab) ? (tab as string) : 'profile';
+  // A dot on the tab that still has something for them to do.
+  const needsAttention: Record<string, boolean> = {
+    profile: !setup.hasProfile,
+    credentials: setup.hasProfile && (!setup.documentsDone || setup.rejected.length > 0),
+    availability: setup.hasProfile && !setup.hasAvailability,
+  };
 
   return (
-    <>
+    <div>
       <PageHeader
-        title="Profile"
-        description={`${session.user.fullName} · ${session.user.phone}`}
+        title="My profile"
+        description="Your details, documents, availability and privacy settings, in one place."
       />
 
-      {profile.isPending ? (
-        <Skeleton className="h-96 w-full" />
-      ) : (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm">
-              {exists ? 'Your details' : 'Create your profile'}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {!exists ? (
-              <Alert variant="warning">
-                <TriangleAlert />
-                <AlertDescription>
-                  You have no profile yet, so you cannot be matched to anything. This is the first
-                  step.
-                </AlertDescription>
-              </Alert>
-            ) : null}
+      {setup.profile ? <ProfileSummary profile={setup.profile} state={setup.state} /> : null}
 
-            <PhotoField hasPhoto={Boolean(profile.data?.photoObjectKey)} profileExists={exists} />
-            <Separator />
+      {setup.state === 'CHANGES_NEEDED' ? <ReturnedNotice rejected={setup.rejected} className="mb-6" /> : null}
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label>Profession</Label>
-                <Select value={categoryId} onValueChange={setCategoryId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Choose one" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(reference.data?.professionalCategories ?? []).map((row) => (
-                      <SelectItem key={row.id} value={row.id}>
-                        {row.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+      {setup.state === 'WAITING' ? (
+        <Alert variant="info" className="mb-6">
+          <Clock />
+          <AlertDescription>
+            <strong>Waiting for approval.</strong> You submitted{' '}
+            {formatWhen(setup.submittedForReviewAt)}; an officer is checking your identity,
+            professional registration and documents. You can keep editing — they review what is on
+            file when they get to it.
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
-              <div className="space-y-1.5">
-                <Label>Specialty</Label>
-                <Select
-                  value={specialtyId}
-                  onValueChange={setSpecialtyId}
-                  disabled={specialties.length === 0}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder={specialties.length === 0 ? 'None' : 'Optional'} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {specialties.map((row) => (
-                      <SelectItem key={row.id} value={row.id}>
-                        {row.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="years">Years of experience</Label>
-                <Input
-                  id="years"
-                  type="number"
-                  min={0}
-                  value={years}
-                  onChange={(event) => setYears(event.target.value)}
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="state">State you live in</Label>
-                <Combobox
-                  id="state"
-                  options={(reference.data?.states ?? []).map((row) => ({
-                    value: row.id,
-                    label: row.name,
-                    hint: row.zone,
-                  }))}
-                  value={stateId}
-                  onChange={(value) => {
-                    setStateId(value);
-                    // The LGA belonged to the old state, so it is no longer
-                    // an answer to this question.
-                    setLgaId('');
-                  }}
-                  searchPlaceholder="Search 37 states…"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="lga">Local government area</Label>
-                <Combobox
-                  id="lga"
-                  options={lgas.map((row) => ({ value: row.id, label: row.name }))}
-                  value={lgaId}
-                  onChange={setLgaId}
-                  disabled={lgas.length === 0}
-                  placeholder={lgas.length === 0 ? 'Choose a state first' : 'Choose one'}
-                  searchPlaceholder={`Search ${lgas.length} areas…`}
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label>How far you will travel</Label>
-                <Select value={travel} onValueChange={setTravel}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {TRAVEL.map(([value, label]) => (
-                      <SelectItem key={value} value={value}>
-                        {label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              Your local government area and how far you will travel are what the matcher scores
-              proximity on. Narrowing them narrows the shifts you are offered.
-            </p>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="bio">About you (optional)</Label>
-              <Textarea
-                id="bio"
-                rows={3}
-                placeholder="Where you have worked, what you are good at."
-                value={bio}
-                onChange={(event) => setBio(event.target.value)}
-              />
-            </div>
-
-            <Button disabled={!categoryId} loading={save.isPending} onClick={() => save.mutate()}>
-              {exists ? 'Save changes' : 'Create profile'}
+      {setup.state === 'READY' ? (
+        <Alert variant="info" className="mb-6">
+          <CircleCheck />
+          <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+            <span>
+              <strong>Everything is in.</strong> An officer does not start reviewing until you
+              submit it for approval.
+            </span>
+            <Button size="sm" onClick={resumeSetup}>
+              Review and submit
+              <ArrowRight />
             </Button>
-          </CardContent>
-        </Card>
-      )}
-    </>
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      {setup.state === 'DRAFT' ? (
+        <Alert variant="warning" className="mb-6">
+          <CircleAlert />
+          <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+            <span>
+              Your setup is not finished
+              {!setup.hasProfile
+                ? ': you have no profile yet'
+                : !setup.hasAvailability
+                  ? ': you have not said when you can work'
+                  : ': a required document is missing'}
+              . Until it is, you cannot be offered shifts.
+            </span>
+            <Button size="sm" onClick={resumeSetup}>
+              Continue setup
+              <ArrowRight />
+            </Button>
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      <Tabs value={current} onValueChange={goTab}>
+        {/* Scrolls sideways on a phone rather than wrapping to a second row, which
+            reads as two separate controls. */}
+        <div className="-mx-1 mb-5 overflow-x-auto px-1 pb-1">
+          <TabsList className="w-max">
+            {TABS.map(([value, label]) => (
+              <TabsTrigger key={value} value={value} className="gap-2 whitespace-nowrap">
+                {label}
+                {needsAttention[value] ? (
+                  <>
+                    <span aria-hidden="true" className="size-1.5 rounded-full bg-warning" />
+                    <span className="sr-only">needs your attention</span>
+                  </>
+                ) : null}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
+
+        {/* The form takes two thirds and what Medilink has recorded sits beside it,
+            so a wide screen reads both at once; a phone stacks them. */}
+        <TabsContent
+          value="profile"
+          className="grid items-start gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]"
+        >
+          <ProfileForm />
+          <OnRecord blockers={setup.blockers} eligible={setup.eligible} />
+        </TabsContent>
+
+        <TabsContent value="credentials">
+          <Intro>{INTRO.credentials}</Intro>
+          <CredentialsSection professionalCategoryId={setup.categoryId} />
+        </TabsContent>
+
+        <TabsContent value="availability">
+          <Intro>{INTRO.availability}</Intro>
+          <AvailabilitySection />
+        </TabsContent>
+
+        <TabsContent value="privacy">
+          <Intro>{INTRO.privacy}</Intro>
+          <PrivacySection />
+        </TabsContent>
+      </Tabs>
+    </div>
   );
+}
+
+function Intro({ children }: { children: string }) {
+  return <p className="mb-5 max-w-2xl text-sm leading-relaxed text-muted-foreground">{children}</p>;
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { LogIn, LogOut } from 'lucide-react';
 import { api, errorMessage } from '@/lib/ui/api';
@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label';
 import { StatusBadge } from '@/components/app/status-badge';
 import { formatWhen } from '@/components/app/format';
 
-interface Attendance {
+export interface Attendance {
   id: string;
   status: string;
   checkedInAt: string | null;
@@ -25,18 +25,27 @@ interface Attendance {
  * payload pasted — because they are the same secret and the service tells
  * them apart. Two inputs would imply two systems.
  */
-export function CheckInPanel({ assignmentId }: { assignmentId: string }) {
+/**
+ * How early the code box appears. The ward reads the code out at the desk, so
+ * nobody can use one days ahead — but a list of next week's shifts each with
+ * an empty code box and a Check in button read as though they should.
+ */
+const OPENS_BEFORE_START_MS = 3 * 60 * 60 * 1000;
+
+export function CheckInPanel({
+  assignmentId,
+  startsAt,
+  attendance: record,
+}: {
+  assignmentId: string;
+  startsAt: string;
+  /** Joined onto the shift by the list (`include=attendance`); null until a code has been issued. */
+  attendance?: Attendance | null;
+}) {
   const queryClient = useQueryClient();
   const [code, setCode] = useState('');
 
-  const attendance = useQuery({
-    queryKey: ['my-attendance', assignmentId],
-    queryFn: () =>
-      api.get<{ attendance: Attendance }>(
-        `/api/v1/assignments/${assignmentId}/attendance?scopeType=SELF`,
-      ),
-    retry: false,
-  });
+  const attendance = { data: record ? { attendance: record } : undefined };
 
   const present = useMutation({
     mutationFn: (purpose: 'CHECK_IN' | 'CHECK_OUT') =>
@@ -47,8 +56,8 @@ export function CheckInPanel({ assignmentId }: { assignmentId: string }) {
     onSuccess: (_data, purpose) => {
       toast.success(purpose === 'CHECK_IN' ? 'Checked in' : 'Checked out');
       setCode('');
-      void queryClient.invalidateQueries({ queryKey: ['my-attendance', assignmentId] });
-      void queryClient.invalidateQueries({ queryKey: ['my-timesheets'] });
+      void queryClient.invalidateQueries({ queryKey: ['my-shifts'] });
+      void queryClient.invalidateQueries({ queryKey: ['my-assignments-for-timesheets'] });
     },
     onError: (error) => toast.error('That code did not work', { description: errorMessage(error) }),
   });
@@ -56,6 +65,9 @@ export function CheckInPanel({ assignmentId }: { assignmentId: string }) {
   const status = attendance.data?.attendance.status ?? 'NOT_STARTED';
   const checkingIn = status !== 'CHECKED_IN';
   const finished = ['CHECKED_OUT', 'SUBMITTED', 'APPROVED', 'REJECTED'].includes(status);
+  const opensAt = new Date(new Date(startsAt).getTime() - OPENS_BEFORE_START_MS);
+  // A code the ward has already issued is honoured whenever it was issued.
+  const notYet = status === 'NOT_STARTED' && Date.now() < opensAt.getTime();
 
   return (
     <div className="space-y-3">
@@ -73,7 +85,12 @@ export function CheckInPanel({ assignmentId }: { assignmentId: string }) {
         ) : null}
       </div>
 
-      {finished ? null : (
+      {notYet ? (
+        <p className="text-sm text-muted-foreground">
+          Check-in opens {formatWhen(opensAt)}, three hours before the shift. Ask the ward for a code
+          when you arrive.
+        </p>
+      ) : finished ? null : (
         <div className="flex flex-wrap items-end gap-2">
           <div className="min-w-[12rem] flex-1 space-y-1.5">
             <Label htmlFor={`code-${assignmentId}`}>
@@ -101,10 +118,12 @@ export function CheckInPanel({ assignmentId }: { assignmentId: string }) {
         </div>
       )}
 
-      <p className="text-xs text-muted-foreground">
-        The ward issues the code; you present it. Five minutes, five attempts — ask them to read it
-        again if it lapses.
-      </p>
+      {notYet || finished ? null : (
+        <p className="text-xs text-muted-foreground">
+          The ward issues the code; you present it. Five minutes, five attempts — ask them to read it
+          again if it lapses.
+        </p>
+      )}
     </div>
   );
 }

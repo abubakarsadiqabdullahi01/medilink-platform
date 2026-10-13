@@ -1,8 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { FileCheck2, TriangleAlert } from 'lucide-react';
 import { api, errorMessage } from '@/lib/ui/api';
@@ -16,6 +15,7 @@ import { StatusBadge } from '@/components/app/status-badge';
 import { Detail, DetailGrid, EmptyState, QueueSkeleton } from '@/components/app/page-shell';
 import { DocumentDialog } from '@/components/app/document-dialog';
 import { formatAgo, formatDate } from '@/components/app/format';
+import { isRecordChecked, usePractitionerSubmissions } from './submissions';
 
 /**
  * One practitioner's credentials, reviewed where the rest of their record is.
@@ -32,37 +32,20 @@ import { formatAgo, formatDate } from '@/components/app/format';
  * so this needed no new API.
  */
 
-interface Submission {
-  id: string;
-  status: string;
-  reference: string | null;
-  expiresAt: string | null;
-  createdAt: string;
-  reviewNotes: string | null;
-  credentialTypeName: string;
-  documentObjectKey: string | null;
-}
-
 export function CredentialsTab({
   userId,
   practitionerName,
+  onConfirm,
 }: {
   userId: string;
   practitionerName: string;
+  /** Takes the officer to where a NIN or licence number is confirmed. */
+  onConfirm: () => void;
 }) {
   const queryClient = useQueryClient();
   const [notes, setNotes] = useState<Record<string, string>>({});
 
-  const queue = useQuery({
-    queryKey: ['practitioner-credentials', userId],
-    queryFn: async () => {
-      const body = await api.get<{ submissions?: Submission[] }>(
-        `/api/v1/credentials?scopeType=PLATFORM&scopeId=${userId}`,
-      );
-      return body.submissions ?? [];
-    },
-    retry: false,
-  });
+  const queue = usePractitionerSubmissions(userId);
 
   const review = useMutation({
     mutationFn: ({
@@ -135,7 +118,7 @@ export function CredentialsTab({
 
             <CardContent className="space-y-4">
               <DetailGrid>
-                <Detail label="Reference">{row.reference ?? 'None given'}</Detail>
+                <Detail label="Reference">{row.referenceNumber ?? 'None given'}</Detail>
                 <Detail label="Document">
                   {row.documentObjectKey ? 'Attached' : 'None attached'}
                 </Detail>
@@ -191,13 +174,22 @@ export function CredentialsTab({
                   </div>
 
                   <div className="flex flex-wrap gap-2">
-                    <Button
-                      variant="success"
-                      loading={review.isPending && review.variables?.id === row.id}
-                      onClick={() => review.mutate({ id: row.id, decision: 'approve' })}
-                    >
-                      Verify
-                    </Button>
+                    {isRecordChecked(row) ? (
+                      // Approving a NIN or a licence has to *record* the identity or
+                      // registration as well, which is done where the rest of that
+                      // record is — not by a bare "verify" that would leave them blocked.
+                      <Button variant="success" onClick={onConfirm}>
+                        Confirm in Identity and registration
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="success"
+                        loading={review.isPending && review.variables?.id === row.id}
+                        onClick={() => review.mutate({ id: row.id, decision: 'approve' })}
+                      >
+                        Verify
+                      </Button>
+                    )}
                     <Button
                       variant="outline"
                       disabled={!note || review.isPending}

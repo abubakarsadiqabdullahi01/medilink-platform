@@ -17,6 +17,7 @@ import {
   LogOut,
   type LucideIcon,
   Menu,
+  MessageSquarePlus,
   MessageSquareText,
   Moon,
   ScrollText,
@@ -26,6 +27,8 @@ import {
   X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { Avatar } from '@/components/app/avatar';
+import { SuggestionDialog } from '@/components/app/suggestion-dialog';
 import { api } from '@/lib/ui/api';
 import { useSession } from '@/lib/ui/session';
 import { Button } from '@/components/ui/button';
@@ -86,10 +89,13 @@ export const ICONS = {
 export function ConsoleShell({
   title,
   sections,
+  avatarSrc,
   children,
 }: {
   title: string;
   sections: NavSection[];
+  /** A photograph for the top-bar avatar, where the console has one to show. */
+  avatarSrc?: string | null;
   children: ReactNode;
 }) {
   const session = useSession();
@@ -98,6 +104,7 @@ export function ConsoleShell({
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [dark, setDark] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
 
   const visible = sections
     .map((section) => ({
@@ -159,13 +166,6 @@ export function ConsoleShell({
       // Private browsing: the toggle still works for this visit.
     }
   }
-
-  const initials = session.user.fullName
-    .split(' ')
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join('')
-    .toUpperCase();
 
   const nav = (
     <nav className="space-y-6">
@@ -269,9 +269,7 @@ export function ConsoleShell({
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent">
-                  <span className="flex size-7 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
-                    {initials}
-                  </span>
+                  <Avatar name={session.user.fullName} src={avatarSrc} size="sm" />
                   <span className="hidden sm:inline">{session.user.fullName}</span>
                 </button>
               </DropdownMenuTrigger>
@@ -281,11 +279,14 @@ export function ConsoleShell({
                   <p className="text-xs text-muted-foreground">{session.user.phone}</p>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-                  {session.permissions.length} permissions
-                  {session.stepUpFresh ? ' · step-up fresh' : ''}
-                </DropdownMenuLabel>
-                <DropdownMenuSeparator />
+                {/* Was a count of permissions and a step-up flag: true, and
+                    meaningless to anybody but a developer. */}
+                {session.permissions.includes('suggestion.submit') ? (
+                  <DropdownMenuItem onSelect={() => setSuggesting(true)}>
+                    <MessageSquarePlus />
+                    Send a suggestion
+                  </DropdownMenuItem>
+                ) : null}
                 <DropdownMenuItem onSelect={signOut}>
                   <LogOut />
                   Sign out
@@ -294,6 +295,7 @@ export function ConsoleShell({
             </DropdownMenu>
           </div>
         </header>
+        <SuggestionDialog open={suggesting} onOpenChange={setSuggesting} />
 
         {/*
           Full width, not a centred column. This was capped at `max-w-6xl`,

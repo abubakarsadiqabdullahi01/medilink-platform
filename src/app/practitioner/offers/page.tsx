@@ -13,7 +13,13 @@ import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
-import { Detail, DetailGrid, EmptyState, PageHeader, QueueSkeleton } from '@/components/app/page-shell';
+import {
+  Detail,
+  DetailGrid,
+  EmptyState,
+  PageHeader,
+  QueueSkeleton,
+} from '@/components/app/page-shell';
 import { formatAgo, formatNaira, formatWhen } from '@/components/app/format';
 
 interface Invitation {
@@ -34,6 +40,8 @@ interface Invitation {
   endsAt: string;
 }
 
+/** Answered offers shown before "show all". */
+const RECENT_ANSWERED = 10;
 /**
  * Offers, and answering them.
  *
@@ -54,9 +62,14 @@ interface Invitation {
 export default function OffersPage() {
   const reference = useReference();
   const queueKey = ['invitations'];
-  const queue = useQueue<Invitation>(queueKey, '/api/v1/invitations', (body) => (body as { invitations?: Invitation[] }).invitations ?? []);
+  const queue = useQueue<Invitation>(
+    queueKey,
+    '/api/v1/invitations',
+    (body) => (body as { invitations?: Invitation[] }).invitations ?? [],
+  );
 
   const [reasons, setReasons] = useState<Record<string, string>>({});
+  const [showAllAnswered, setShowAllAnswered] = useState(false);
 
   const respond = useQueueAction<{ id: string; decision: 'accept' | 'decline' }>({
     queueKey,
@@ -73,6 +86,9 @@ export default function OffersPage() {
 
   const open = (queue.data ?? []).filter((row) => row.status === 'INVITED');
   const answered = (queue.data ?? []).filter((row) => row.status !== 'INVITED');
+  // Months of history buried the one or two offers waiting on an answer; the
+  // rest are a click away.
+  const visibleAnswered = showAllAnswered ? answered : answered.slice(0, RECENT_ANSWERED);
 
   const professionOf = (row: Invitation) => {
     const category = nameOf(reference.data?.professionalCategories, row.professionalCategoryId);
@@ -102,7 +118,7 @@ export default function OffersPage() {
           description="A facility offers you a shift and it appears here, with a deadline to answer by."
         />
       ) : (
-        <div className="space-y-4">
+        <div className="grid items-start gap-4 md:grid-cols-2 2xl:grid-cols-3">
           {open.map((row) => {
             const lapsed = new Date(row.expiresAt) < new Date();
             const reason = reasons[row.id]?.trim() ?? '';
@@ -192,8 +208,10 @@ export default function OffersPage() {
 
           {answered.length > 0 ? (
             <>
-              <h2 className="pt-2 text-sm font-medium text-muted-foreground">Already answered</h2>
-              {answered.map((row) => (
+              <h2 className="col-span-full pt-2 text-sm font-medium text-muted-foreground">
+                Already answered
+              </h2>
+              {visibleAnswered.map((row) => (
                 <Card key={row.id}>
                   <CardContent className="flex flex-wrap items-center justify-between gap-3 pt-5">
                     <div className="min-w-0">
@@ -213,6 +231,17 @@ export default function OffersPage() {
                   </CardContent>
                 </Card>
               ))}
+              {answered.length > RECENT_ANSWERED ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowAllAnswered((value) => !value)}
+                >
+                  {showAllAnswered
+                    ? 'Show only the most recent'
+                    : `Show all ${answered.length} answered offers`}
+                </Button>
+              ) : null}
             </>
           ) : null}
         </div>

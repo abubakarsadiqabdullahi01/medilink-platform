@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { PlusCircle, ShieldCheck } from 'lucide-react';
 import { api, errorMessage } from '@/lib/ui/api';
@@ -27,6 +27,7 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { humanise } from '@/components/app/status-badge';
+import { formatWhen } from '@/components/app/format';
 
 const SEVERITIES = [
   ['NEAR_MISS', 'Near miss — caught before it reached the patient'],
@@ -49,6 +50,16 @@ const CATEGORIES = [
 
 const MIN_SUMMARY = 20;
 
+/** Far enough back to cover last week's shifts, which is when most reports are written. */
+const LOOKBACK_DAYS = 14;
+const NO_SHIFT = 'none';
+
+interface RecentShift {
+  id: string;
+  practitionerName: string;
+  startsAt: string;
+}
+
 /**
  * Reporting an incident, from the ward.
  *
@@ -66,6 +77,27 @@ export function ReportIncidentDialog({ facilityId }: { facilityId: string }) {
   const [severity, setSeverity] = useState('NEAR_MISS');
   const [category, setCategory] = useState('MEDICATION');
   const [summary, setSummary] = useState('');
+  const [assignmentId, setAssignmentId] = useState<string>(NO_SHIFT);
+
+  // Naming a shift names the practitioner on it: the server takes the
+  // subject from the assignment, after checking it is this facility's. Until
+  // this list existed the form said naming somebody was optional and offered
+  // no way to do it, so an incident could never reach the person involved —
+  // a suspension decided on one suspended nobody.
+  const recent = useQuery({
+    queryKey: ['incident-recent-shifts', facilityId],
+    queryFn: async () => {
+      const from = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString();
+      const to = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      const body = await api.get<{ assignments?: RecentShift[] }>(
+        `/api/v1/assignments?scopeType=FACILITY&scopeId=${facilityId}&from=${from}&to=${to}`,
+      );
+      return [...(body.assignments ?? [])].sort(
+        (a, b) => new Date(b.startsAt).getTime() - new Date(a.startsAt).getTime(),
+      );
+    },
+    enabled: open,
+  });
 
   const report = useMutation({
     mutationFn: () =>
@@ -75,6 +107,7 @@ export function ReportIncidentDialog({ facilityId }: { facilityId: string }) {
         severity,
         category,
         summary: summary.trim(),
+        assignmentId: assignmentId === NO_SHIFT ? undefined : assignmentId,
       }),
     onSuccess: () => {
       toast.success('Reported', {
@@ -84,6 +117,7 @@ export function ReportIncidentDialog({ facilityId }: { facilityId: string }) {
       setOpen(false);
       setSummary('');
       setOccurredAt('');
+      setAssignmentId(NO_SHIFT);
     },
     onError: (error) => toast.error('Could not report it', { description: errorMessage(error) }),
   });
@@ -149,6 +183,30 @@ export function ReportIncidentDialog({ facilityId }: { facilityId: string }) {
                 </SelectContent>
               </Select>
             </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>
+              The shift it happened on{' '}
+              <span className="font-normal text-muted-foreground">— optional</span>
+            </Label>
+            <Select value={assignmentId} onValueChange={setAssignmentId}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NO_SHIFT}>Not about a particular shift or person</SelectItem>
+                {(recent.data ?? []).map((row) => (
+                  <SelectItem key={row.id} value={row.id}>
+                    {row.practitionerName} · {formatWhen(row.startsAt)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Choosing a shift links the report to the practitioner who worked it. Shifts from the
+              last {LOOKBACK_DAYS} days are listed.
+            </p>
           </div>
 
           <div className="space-y-1.5">

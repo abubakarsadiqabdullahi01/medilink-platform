@@ -50,13 +50,13 @@ const workspaces = [
     name: 'Operations',
     icon: LayoutDashboard,
     description:
-      'Compliance and operations officers work the queues: credential reviews, facility verification, clinical incidents, disputes and the audit trail.',
+      'Medilink administrators work the queues: credential reviews, facility verification, clinical incidents, disputes, invoices, payouts and the audit trail.',
   },
   {
     name: 'Facility',
     icon: Building2,
     description:
-      'Schedulers and ward managers publish shifts, review ranked candidates, confirm offers, follow attendance and review timesheets.',
+      'Hospital owners and their administrators publish shifts, review ranked candidates, confirm offers, follow attendance, approve timesheets and manage their own staff.',
   },
   {
     name: 'Practitioner',
@@ -238,13 +238,19 @@ export default function LandingPage() {
                   Sign in <ArrowRight className="size-4" aria-hidden="true" />
                 </Link>
               </div>
-              {/* Said here rather than discovered on the sign-up form: a
-                  scheduler at a hospital cannot create their own account, and
-                  sending them to a form that will not serve them is worse than
-                  one honest line. */}
+              {/* Said here rather than discovered on the sign-up form: the
+                  button above is the practitioner's door, and a hospital or a
+                  member of its staff each has their own. */}
               <p className="mt-4 text-xs leading-relaxed text-white/60">
-                Practitioner accounts are self-service. Facilities and operations are onboarded by
-                Medilink.
+                Practitioners sign up in minutes.{' '}
+                <Link href="/register?as=facility" className="font-semibold text-white underline-offset-4 hover:underline">
+                  Register a hospital
+                </Link>{' '}
+                and Medilink verifies it before it can publish shifts. Hospital staff{' '}
+                <Link href="/register?as=staff" className="font-semibold text-white underline-offset-4 hover:underline">
+                  create a staff account
+                </Link>{' '}
+                and are added by their owner.
               </p>
               <ul className="mt-12 flex flex-col gap-3 border-t border-white/15 pt-6 text-sm text-white/75 sm:flex-row sm:flex-wrap sm:gap-x-7">
                 {proofPoints.map((point) => (
