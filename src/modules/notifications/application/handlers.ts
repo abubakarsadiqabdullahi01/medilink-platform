@@ -17,9 +17,15 @@ import { notify, type NotifyOutcome } from './notify';
  * record too, and counting it here meant a retry found nothing to do and the
  * person was never told at all.
  */
-async function alreadyNotified(userId: string, kind: string, relatedId: string): Promise<boolean> {
+async function alreadyNotified(
+  userId: string,
+  kind: string,
+  relatedId: string,
+  /** Only a message sent since then counts: a reopened offer is the same row and needs telling again. */
+  since?: Date,
+): Promise<boolean> {
   const existing = await prisma.notificationMessage.findFirst({
-    where: { userId, kind, relatedId, sentAt: { not: null } },
+    where: { userId, kind, relatedId, sentAt: { not: null, ...(since ? { gte: since } : {}) } },
     select: { id: true },
   });
   return existing !== null;
@@ -323,4 +329,111 @@ export async function notifyDisputeEvent(
   }
 
   failIfAnyFailed(outcomes, `the ${kind.replace('dispute.', '')} notice`);
+}
+
+function naira(kobo: number): string {
+  return `₦${(kobo / 100).toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
+}
+
+/**
+ * An offer reaches the practitioner as a text. The whole premise is that a nurse
+ * is told and answers in minutes; nothing was sent, so she had to open the app
+ * and look.
+ *
+ * Not sent for an offer that has already closed — withdrawn, answered or lapsed
+ * before the worker got to it — because a text about something she can no longer
+ * accept is worse than none.
+ */
+export async function notifyShiftInvited(payload: Record<string, unknown>): Promise<void> {
+  const invitationId = String(payload.invitationId ?? '');
+  const practitionerId = String(payload.userId ?? '');
+  const requestId = String(payload.serviceRequestId ?? '');
+  const offeredAt = payload.offeredAt ? new Date(String(payload.offeredAt)) : undefined;
+
+  if (!invitationId || !practitionerId || !requestId) {
+    logger.warn('shift.invited event missing ids; skipping notification');
+    return;
+  }
+
+  const [invitation, request] = await Promise.all([
+    prisma.invitation.findUnique({ where: { id: invitationId }, select: { status: true } }),
+    prisma.serviceRequest.findUnique({
+      where: { id: requestId },
+      select: {
+        startsAt: true,
+        endsAt: true,
+        hourlyRateKobo: true,
+        status: true,
+        facility: { select: { name: true } },
+      },
+    }),
+  ]);
+  if (!invitation || !request) {
+    logger.warn('shift.invited for a record that no longer exists', { invitationId });
+    return;
+  }
+  if (invitation.status !== 'INVITED' || request.status !== 'PUBLISHED') return;
+  if (await alreadyNotified(practitionerId, 'shift.invited', invitationId, offeredAt)) return;
+
+  const when = formatShift(request.startsAt.toISOString(), request.endsAt.toISOString());
+
+  failIfAnyFailed(
+    [
+      await notify({
+        userId: practitionerId,
+        kind: 'shift.invited',
+        body: `Shift offer at ${request.facility.name}: ${when}, ${naira(request.hourlyRateKobo)} an hour. Open Medilink to accept or decline. Medilink.`,
+        relatedType: 'matching.invitations',
+        relatedId: invitationId,
+      }),
+    ],
+    'the offer',
+  );
+}
+
+/**
+ * The facility hears that somebody said yes, so it can confirm while the
+ * practitioner is still waiting. No name: until there is a booking the platform
+ * shows initials at most, and a text goes to a phone anybody may pick up.
+ */
+export async function notifyShiftAccepted(payload: Record<string, unknown>): Promise<void> {
+  const invitationId = String(payload.invitationId ?? '');
+  const requestId = String(payload.serviceRequestId ?? '');
+  const acceptedAt = payload.acceptedAt ? new Date(String(payload.acceptedAt)) : undefined;
+
+  if (!invitationId || !requestId) {
+    logger.warn('shift.accepted event missing ids; skipping notification');
+    return;
+  }
+
+  const request = await prisma.serviceRequest.findUnique({
+    where: { id: requestId },
+    select: {
+      startsAt: true,
+      endsAt: true,
+      status: true,
+      facility: { select: { representativeUserId: true } },
+    },
+  });
+  if (!request) {
+    logger.warn('shift.accepted for a request that no longer exists', { requestId });
+    return;
+  }
+
+  const representative = request.facility.representativeUserId;
+  if (await alreadyNotified(representative, 'shift.accepted', invitationId, acceptedAt)) return;
+
+  const when = formatShift(request.startsAt.toISOString(), request.endsAt.toISOString());
+  failIfAnyFailed(
+    [
+      await notify({
+        userId: representative,
+        kind: 'shift.accepted',
+        body: `A practitioner has accepted your offer for the shift on ${when}. Open Medilink to confirm. Medilink.`,
+        relatedType: 'matching.invitations',
+        relatedId: invitationId,
+      }),
+    ],
+    'the acceptance',
+  );
 }

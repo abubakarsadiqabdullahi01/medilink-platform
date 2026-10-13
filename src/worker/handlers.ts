@@ -7,6 +7,8 @@ import {
   notifyAssignmentConfirmed,
   notifyDisputeEvent,
   notifyIncidentReported,
+  notifyShiftAccepted,
+  notifyShiftInvited,
 } from '../modules/notifications/application/handlers';
 import { computeAndSaveTimesheet } from '../modules/timesheets/application/timesheet';
 import type { EventHandler } from './processor';
@@ -24,6 +26,15 @@ export const handlers: Record<string, EventHandler> = {
   // gateway's latency — the reasoning issueOtp already documents.
   [EVENTS.AssignmentConfirmed]: async (payload) => {
     await notifyAssignmentConfirmed(payload);
+  },
+
+  // The offer and the answer to it, each as a text: the premise is that a nurse
+  // is told and answers in minutes, and nothing was sent.
+  [EVENTS.ShiftInvited]: async (payload) => {
+    await notifyShiftInvited(payload);
+  },
+  [EVENTS.ShiftAccepted]: async (payload) => {
+    await notifyShiftAccepted(payload);
   },
 
   // The other direction: a facility releasing somebody, or cancelling the

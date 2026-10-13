@@ -201,7 +201,14 @@ export async function invitePractitioners(input: InviteParams): Promise<Invitati
           eventType: EVENTS.ShiftInvited,
           aggregateType: 'matching.invitations',
           aggregateId: reopened.id,
-          payload: { invitationId: reopened.id, userId, serviceRequestId: request.id },
+          payload: {
+            invitationId: reopened.id,
+            userId,
+            serviceRequestId: request.id,
+            // Tells one offer of the same invitation from the next: a reopened
+            // invitation is the same row, and the person has to be told again.
+            offeredAt: new Date().toISOString(),
+          },
         });
 
         created.push(toInvitationView(reopened));
@@ -234,7 +241,12 @@ export async function invitePractitioners(input: InviteParams): Promise<Invitati
         eventType: EVENTS.ShiftInvited,
         aggregateType: 'matching.invitations',
         aggregateId: invitation.id,
-        payload: { invitationId: invitation.id, userId, serviceRequestId: request.id },
+        payload: {
+          invitationId: invitation.id,
+          userId,
+          serviceRequestId: request.id,
+          offeredAt: new Date().toISOString(),
+        },
       });
 
       created.push(toInvitationView(invitation));
@@ -327,6 +339,7 @@ export async function respondToInvitation(input: RespondParams): Promise<Invitat
           invitationId: updated.id,
           userId: input.userId,
           serviceRequestId: updated.serviceRequestId,
+          acceptedAt: new Date().toISOString(),
         },
       });
     }

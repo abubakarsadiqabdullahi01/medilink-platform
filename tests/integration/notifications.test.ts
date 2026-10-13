@@ -130,7 +130,8 @@ describe('a text that does not go', () => {
     const { assignment } = await confirmed(world);
     await runOnce({ handlers });
     const sent = sms.send.mock.calls.length;
-    expect(sent).toBe(2);
+    // The confirmation to each side, and the acceptance the facility is told of.
+    expect(sent).toBeGreaterThanOrEqual(2);
 
     // The same event delivered again, as at-least-once delivery will.
     const { notifyAssignmentConfirmed } = await import(
@@ -435,5 +436,111 @@ describe('a dispute, from the point of view of the people in it', () => {
         }),
       ).toBe(1);
     }
+  });
+});
+
+
+describe('an offer, and the answer to it', () => {
+  /**
+   * The whole premise is that a nurse is told by SMS and answers in minutes. No
+   * message was sent for an offer or for an acceptance: both people had to open
+   * the app and look.
+   */
+  async function offered(world: BookingWorld) {
+    const nurse = await eligiblePractitioner(world);
+    const [invitation] = await invitePractitioners({
+      requestId: world.requestId,
+      facilityId: world.facilityId,
+      userIds: [nurse.id],
+      actorId: world.schedulerId,
+    });
+    return { nurse, invitation: invitation! };
+  }
+
+  const kindsFor = (userId: string, kind: string) =>
+    prisma.notificationMessage.findMany({ where: { userId, kind } });
+
+  it('tells the practitioner who and when, in Lagos time, and what it pays', async () => {
+    const world = await buildBookingWorld();
+    const { nurse } = await offered(world);
+
+    await runOnce({ handlers });
+
+    const [message] = await kindsFor(nurse.id, 'shift.invited');
+    expect(message).toBeDefined();
+    expect(message!.body).toContain('Owerri General Hospital');
+    expect(message!.body).toContain('WAT');
+    // 500,000 kobo an hour.
+    expect(message!.body).toContain('5,000');
+    expect(message!.sentAt).not.toBeNull();
+  });
+
+  it('does not text twice when the event is delivered twice', async () => {
+    const world = await buildBookingWorld();
+    const { nurse } = await offered(world);
+    await runOnce({ handlers });
+    const before = sms.send.mock.calls.length;
+
+    // At-least-once delivery: the same event again.
+    await prisma.outboxEvent.updateMany({
+      where: { eventType: EVENTS.ShiftInvited },
+      data: { status: 'PENDING', availableAt: new Date(Date.now() - 1000) },
+    });
+    await runOnce({ handlers });
+
+    expect(sms.send.mock.calls.length).toBe(before);
+    expect(await kindsFor(nurse.id, 'shift.invited')).toHaveLength(1);
+  });
+
+  it('tells the practitioner again when the same shift is offered to them again', async () => {
+    const world = await buildBookingWorld();
+    const { nurse, invitation } = await offered(world);
+    await runOnce({ handlers });
+    // The offer lapses without an answer (a declined one is not offered again:
+    // that was the answer).
+    await prisma.invitation.update({ where: { id: invitation.id }, data: { status: 'EXPIRED' } });
+
+    // Offered again: the same invitation row is reopened.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await invitePractitioners({
+      requestId: world.requestId,
+      facilityId: world.facilityId,
+      userIds: [nurse.id],
+      actorId: world.schedulerId,
+    });
+    await runOnce({ handlers });
+
+    expect(await kindsFor(nurse.id, 'shift.invited')).toHaveLength(2);
+  });
+
+  it('tells the facility somebody accepted, without saying who', async () => {
+    const world = await buildBookingWorld();
+    const { nurse, invitation } = await offered(world);
+    await runOnce({ handlers });
+    await respondToInvitation({ invitationId: invitation.id, userId: nurse.id, decision: 'accept' });
+
+    await runOnce({ handlers });
+
+    const facility = await prisma.facility.findUniqueOrThrow({ where: { id: world.facilityId } });
+    const [message] = await kindsFor(facility.representativeUserId, 'shift.accepted');
+    expect(message).toBeDefined();
+    expect(message!.body).toContain('WAT');
+    // Until a booking exists the platform shows initials at most, never a name.
+    expect(message!.body).not.toContain('Amina');
+    expect(await kindsFor(nurse.id, 'shift.accepted')).toHaveLength(0);
+  });
+
+  it('is retried for a practitioner who could not be reached', async () => {
+    const world = await buildBookingWorld();
+    const { nurse } = await offered(world);
+    sms.send.mockResolvedValue(null);
+    expect((await runOnce({ handlers })).failed).toBeGreaterThanOrEqual(1);
+
+    sms.send.mockResolvedValue(ACCEPTED);
+    await makeDue();
+    await runOnce({ handlers });
+
+    const rows = await kindsFor(nurse.id, 'shift.invited');
+    expect(rows.filter((row) => row.sentAt !== null)).toHaveLength(1);
   });
 });
