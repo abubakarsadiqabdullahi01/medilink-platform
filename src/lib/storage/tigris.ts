@@ -1,4 +1,5 @@
 import {
+  DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
   PutObjectCommand,
@@ -123,4 +124,12 @@ export async function createDownloadUrl(objectKey: string): Promise<string> {
 /** Confirms the client actually completed the upload before we trust the row. */
 export async function headObject(objectKey: string) {
   return s3.send(new HeadObjectCommand({ Bucket: env.STORAGE_BUCKET, Key: objectKey }));
+}
+
+/**
+ * Deletes one object. Deleting a key that is not there succeeds, so a retry after
+ * a partial failure is safe.
+ */
+export async function deleteObject(objectKey: string): Promise<void> {
+  await s3.send(new DeleteObjectCommand({ Bucket: env.STORAGE_BUCKET, Key: objectKey }));
 }

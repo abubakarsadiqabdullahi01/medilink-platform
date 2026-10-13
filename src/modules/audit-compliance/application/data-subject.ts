@@ -38,6 +38,12 @@ export const DataSubjectErrors = {
       'Only a request still waiting can be picked up.',
       409,
     ),
+  erasureMustBeCarriedOut: () =>
+    new HttpError(
+      'erasure_must_be_carried_out',
+      'An erasure is completed by carrying it out, not by saying it was done. Use Erase, or refuse it with the reason.',
+      409,
+    ),
 };
 
 export interface RequestView {
@@ -188,6 +194,11 @@ export async function closeRequest(input: {
   // A refusal is a lawful outcome and has to be recorded as carefully as a
   // grant — more so, because it is the one somebody appeals.
   if (!input.outcome?.trim()) throw DataSubjectErrors.outcomeRequired();
+  // Closing an erasure as done recorded words and deleted nothing (AUD-01).
+  // Carrying it out closes it; only a refusal is closed by hand.
+  if (existing.kind === 'ERASURE' && input.status === 'COMPLETED') {
+    throw DataSubjectErrors.erasureMustBeCarriedOut();
+  }
 
   const updated = await prisma.$transaction(async (tx: Tx) => {
     const row = await tx.dataSubjectRequest.update({
@@ -408,11 +419,14 @@ export async function exportSubjectData(userId: string) {
  * the subject is entitled to before they ask, and an exception is a poor way
  * to carry three reasons and an explanation.
  */
-export async function assessErasure(userId: string) {
+export async function assessErasure(
+  userId: string,
+  db: Pick<Tx, 'assignment' | 'dispute' | 'ledgerEntry'> = prisma,
+) {
   const [confirmedAssignments, owedKobo, openDisputes] = await Promise.all([
-    prisma.assignment.count({ where: { userId, status: 'CONFIRMED' } }),
-    amountOwed(userId),
-    prisma.dispute.count({
+    db.assignment.count({ where: { userId, status: 'CONFIRMED' } }),
+    amountOwed(userId, db),
+    db.dispute.count({
       where: { assignment: { userId }, status: { in: ['OPEN', 'UNDER_REVIEW'] } },
     }),
   ]);

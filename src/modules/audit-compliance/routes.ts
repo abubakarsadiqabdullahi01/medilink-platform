@@ -38,6 +38,7 @@ export const ROUTES: RouteDefinition[] = [
   { method: 'GET', path: '/api/v1/data-requests', permission: 'audit.read', scopeType: 'PLATFORM' },
   { method: 'POST', path: '/api/v1/data-requests/:id/start', permission: 'audit.read', scopeType: 'PLATFORM' },
   { method: 'POST', path: '/api/v1/data-requests/:id/close', permission: 'audit.read', scopeType: 'PLATFORM' },
+  { method: 'POST', path: '/api/v1/data-requests/:id/erase', permission: 'data.erase', scopeType: 'PLATFORM' },
 
   { method: 'GET', path: '/api/v1/admin/system', permission: 'audit.read', scopeType: 'PLATFORM' },
   { method: 'POST', path: '/api/v1/admin/system/events/:id/replay', permission: 'system.manage', scopeType: 'PLATFORM' },

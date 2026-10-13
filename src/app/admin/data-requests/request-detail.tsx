@@ -8,13 +8,24 @@ import { api, errorMessage } from '@/lib/ui/api';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
 import { Detail, DetailGrid, PageHeader } from '@/components/app/page-shell';
+import { useStepUp } from '@/components/app/step-up';
 import { actionLabel, formatAgo, formatWhen } from '@/components/app/format';
+import { ERASURE_RETAINED } from '@/modules/audit-compliance/domain/erasure';
 
 /**
  * One data-subject request, answered with the duty in front of you.
@@ -68,6 +79,9 @@ export function RequestDetail({
 }) {
   const queryClient = useQueryClient();
   const [outcome, setOutcome] = useState('');
+  const [erasing, setErasing] = useState(false);
+  const [confirmation, setConfirmation] = useState('');
+  const stepUp = useStepUp('Erasing a person cannot be undone.');
 
   const history = useQuery({
     queryKey: ['request-history', request.id],
@@ -105,8 +119,84 @@ export function RequestDetail({
     onError: (error) => toast.error('Could not record that', { description: errorMessage(error) }),
   });
 
+  const erase = useMutation({
+    mutationFn: () => api.post<{ files: { deleted: number; pending: number } }>(`/api/v1/data-requests/${request.id}/erase`),
+    onSuccess: (report) => {
+      toast.success('Erased', {
+        description:
+          report.files.pending > 0
+            ? `${report.files.pending} file(s) could not be deleted from storage yet. Press Erase again to finish them.`
+            : 'Their details are replaced, their files deleted and the account closed.',
+      });
+      setErasing(false);
+      setConfirmation('');
+      void queryClient.invalidateQueries({ queryKey: ['request-queue'] });
+      void queryClient.invalidateQueries({ queryKey: ['request-history', request.id] });
+      onBack();
+    },
+    onError: (error) => {
+      if (stepUp.handle(error, () => erase.mutate())) return;
+      toast.error('Could not erase', { description: errorMessage(error) });
+    },
+  });
+
+  const isErasure = request.kind === 'ERASURE';
+
   return (
     <>
+      {stepUp.dialog}
+      <Dialog
+        open={erasing}
+        onOpenChange={(next) => {
+          if (!next) {
+            setErasing(false);
+            setConfirmation('');
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Erase {request.subjectName}</DialogTitle>
+            <DialogDescription>
+              This cannot be undone. Their name, email and number are replaced, their sign-ins
+              ended, what they wrote or was sent to them deleted, their files deleted from storage
+              and the account closed.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <p className="font-medium">What is kept, and why</p>
+            <ul className="space-y-2 text-xs text-muted-foreground">
+              {ERASURE_RETAINED.map((row) => (
+                <li key={row.area}>
+                  <span className="font-medium text-foreground">{row.area}.</span> {row.reason}
+                </li>
+              ))}
+            </ul>
+            <div className="space-y-1.5 pt-2">
+              <Label htmlFor="erase-confirmation">Type ERASE to confirm</Label>
+              <Input
+                id="erase-confirmation"
+                value={confirmation}
+                autoComplete="off"
+                onChange={(event) => setConfirmation(event.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setErasing(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={confirmation.trim() !== 'ERASE'}
+              loading={erase.isPending}
+              onClick={() => erase.mutate()}
+            >
+              Erase
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <PageHeader
         title={`${humanise(request.kind)} — ${request.subjectName}`}
         description={`Received ${formatAgo(request.receivedAt)} · due ${formatWhen(request.dueBy)}`}
@@ -228,6 +318,18 @@ export function RequestDetail({
                     </div>
                   ) : null}
 
+                  {isErasure ? (
+                    <Alert variant="warning">
+                      <TriangleAlert />
+                      <AlertDescription>
+                        Erase carries it out: it does not just record that it was done. Pick the
+                        request up first. It will be refused with the reason if something blocks it
+                        (a shift still to work, money owed, an open dispute, or an account that
+                        works for a facility). To refuse it yourself, write why below.
+                      </AlertDescription>
+                    </Alert>
+                  ) : null}
+
                   <div className="space-y-1.5">
                     <Label htmlFor="request-outcome">
                       What was done{' '}
@@ -245,16 +347,26 @@ export function RequestDetail({
                   </div>
 
                   <div className="flex flex-wrap gap-2">
+                    {isErasure ? (
+                      <Button
+                        variant="destructive"
+                        disabled={request.status !== 'IN_PROGRESS'}
+                        onClick={() => setErasing(true)}
+                      >
+                        Erase this person
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="success"
+                        disabled={outcome.trim().length < MIN_OUTCOME || close.isPending}
+                        loading={close.isPending && close.variables === 'COMPLETED'}
+                        onClick={() => close.mutate('COMPLETED')}
+                      >
+                        Answered
+                      </Button>
+                    )}
                     <Button
-                      variant="success"
-                      disabled={outcome.trim().length < MIN_OUTCOME || close.isPending}
-                      loading={close.isPending && close.variables === 'COMPLETED'}
-                      onClick={() => close.mutate('COMPLETED')}
-                    >
-                      Answered
-                    </Button>
-                    <Button
-                      variant="destructive"
+                      variant={isErasure ? 'outline' : 'destructive'}
                       disabled={outcome.trim().length < MIN_OUTCOME || close.isPending}
                       loading={close.isPending && close.variables === 'REFUSED'}
                       onClick={() => close.mutate('REFUSED')}

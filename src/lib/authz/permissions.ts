@@ -46,6 +46,7 @@ export const PERMISSIONS = {
   'audit.read': 'Read the audit trail',
   'config.manage': 'Edit controlled vocabularies and rate floors',
   'system.manage': 'See failures in background work and replay an event that gave up',
+  'data.erase': 'Carry out an erasure request: replace a person\'s details and delete their files (requires step-up auth)',
 
   // Module 18, the pilot's suggestion log. These two are the only keys added
   // to Section 8.8's catalogue by this codebase, and the reason is that no
@@ -81,6 +82,8 @@ export const STEP_UP_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>(
   // releasing a payout. All five routes name this one permission, and all are
   // what an open finance session on a stolen laptop is used for.
   'payout.manage',
+  // Erasing a person is not undone. See ERASURE in audit-compliance.
+  'data.erase',
   // Granting a role is how an attacker with one session gets a durable
   // second one. It is also rare enough that asking for a password again
   // costs an administrator seconds a month.
@@ -183,7 +186,7 @@ const ADMINISTRATOR: Permission[] = [
   'service_request.read', 'assignment.confirm', 'assignment.cancel',
   'invoice.read', 'payout.manage',
   'dispute.manage', 'sanction.apply', 'incident.manage',
-  'audit.read', 'system.manage',
+  'audit.read', 'system.manage', 'data.erase',
   'suggestion.submit', 'suggestion.triage',
 ];
 
