@@ -16,6 +16,8 @@ import { isContactOpen } from '../domain/contact';
 import { initialsOf } from '@/lib/names';
 import type { AssignmentOutcomes } from '../domain/reliability';
 import { recordDeclineAsSuggestion } from '@/modules/suggestions/application/suggestion';
+import { getFacility } from '@/modules/facilities/application/facility';
+import { bookingBlockers, bookingBlockersFor } from '@/modules/practitioners/application/bookable';
 
 /**
  * Steps 6.5, 6.6 and 6.7: invitation, acceptance, confirmation — and the
@@ -32,6 +34,27 @@ export const AssignmentErrors = {
     new HttpError('request_not_published', 'That request is not open for invitations.', 409),
   assignmentNotFound: () =>
     new HttpError('assignment_not_found', 'That assignment does not exist.', 404),
+  shiftStarted: () => new HttpError('shift_started', 'That shift has already started.', 409),
+  facilityNotActive: () =>
+    new HttpError(
+      'facility_not_verified',
+      'This facility cannot offer work until it is verified and its licence is in date.',
+      409,
+    ),
+  notBookable: (count: number) =>
+    new HttpError(
+      'practitioner_not_bookable',
+      count === 1
+        ? 'One of the people you chose can no longer be offered this shift: their verification, profession or consent no longer allows it. Run the match again.'
+        : `${count} of the people you chose can no longer be offered this shift: their verification, profession or consent no longer allows it. Run the match again.`,
+      409,
+    ),
+  cannotAccept: () =>
+    new HttpError(
+      'cannot_accept',
+      'You cannot take this shift right now: your verification is incomplete or has lapsed. Open your profile to see what is outstanding.',
+      409,
+    ),
   cannotConfirm: (blockers: string[]) =>
     new HttpError('cannot_confirm', `This confirmation cannot proceed: ${blockers.join(', ')}.`, 409),
   invalidTransition: (from: string, to: string) =>
@@ -96,6 +119,18 @@ export async function invitePractitioners(input: InviteParams): Promise<Invitati
   });
   if (!request) throw AssignmentErrors.assignmentNotFound();
   if (request.status !== 'PUBLISHED') throw AssignmentErrors.requestNotPublished();
+
+  // Matching ran earlier; this is later. Everything it relied on is asked again —
+  // a shift that has since started, a facility whose licence has since lapsed, a
+  // practitioner whose registration has since expired or who has since withdrawn
+  // consent — so a stale shortlist cannot put an offer in front of somebody who
+  // could not now be matched.
+  const now = new Date();
+  if (request.startsAt.getTime() <= now.getTime()) throw AssignmentErrors.shiftStarted();
+  if (!(await getFacility(request.facilityId)).canPublish) throw AssignmentErrors.facilityNotActive();
+  const blockers = await bookingBlockersFor(input.userIds, request.professionalCategoryId, now);
+  const refused = input.userIds.filter((userId) => (blockers.get(userId) ?? ['not_eligible']).length > 0);
+  if (refused.length > 0) throw AssignmentErrors.notBookable(refused.length);
 
   const expiresAt = new Date(
     Date.now() + (input.expiresInHours ?? DEFAULT_INVITATION_HOURS) * 60 * 60 * 1000,
@@ -220,6 +255,23 @@ export async function respondToInvitation(input: RespondParams): Promise<Invitat
 
   const now = new Date();
   const accepted = input.decision === 'accept';
+
+  // Saying no is always possible. Saying yes is a commitment to a shift, so it is
+  // checked against the world as it is now: the shift must still be open and the
+  // practitioner still eligible, in the profession and consenting. Otherwise a
+  // lapsed licence is accepted onto the shift and discovered at confirmation —
+  // or not at all.
+  if (accepted) {
+    const request = await prisma.serviceRequest.findFirst({
+      where: { id: invitation.serviceRequestId, deletedAt: null },
+      select: { status: true, startsAt: true, professionalCategoryId: true },
+    });
+    if (!request || request.status !== 'PUBLISHED') throw AssignmentErrors.invitationClosed();
+    if (request.startsAt.getTime() <= now.getTime()) throw AssignmentErrors.shiftStarted();
+    if ((await bookingBlockers(input.userId, request.professionalCategoryId, now)).length > 0) {
+      throw AssignmentErrors.cannotAccept();
+    }
+  }
 
   return prisma.$transaction(async (tx: Tx) => {
     const applied = await tx.invitation.updateMany({
@@ -403,16 +455,47 @@ export interface ConfirmParams {
   actorId: string;
 }
 
+/**
+ * Locks the request row for the rest of the transaction.
+ *
+ * The practitioner lock stops one person being double-booked; it does nothing for
+ * the *request*. Two different practitioners hold two different practitioner
+ * locks, so two confirmations onto the last place could both read "none filled"
+ * and both insert — and at a headcount of two, both would see one short of full,
+ * so the shift was never marked filled and later expired with a full roster.
+ *
+ * Always taken before the practitioner lock, never after: every confirmation
+ * acquires its locks in this one order, so two of them can wait for each other's
+ * request but never deadlock on each other's practitioner.
+ */
+async function lockRequest(tx: Tx, requestId: string): Promise<void> {
+  await tx.$queryRaw`SELECT id FROM service_requests.service_requests WHERE id = ${requestId}::uuid FOR UPDATE`;
+}
+
 export async function confirmAssignment(input: ConfirmParams): Promise<AssignmentView> {
-  const request = await prisma.serviceRequest.findFirst({
+  const known = await prisma.serviceRequest.findFirst({
     where: { id: input.requestId, facilityId: input.facilityId, deletedAt: null },
   });
-  if (!request) throw AssignmentErrors.assignmentNotFound();
+  if (!known) throw AssignmentErrors.assignmentNotFound();
+
+  // The facility and the practitioner are re-checked at the moment of booking, not
+  // trusted from the match that preceded it. Read before the transaction opens:
+  // neither is something this booking can race against within its own lock.
+  const now = new Date();
+  const [facility, bookingBlockersNow] = await Promise.all([
+    getFacility(known.facilityId),
+    bookingBlockers(input.userId, known.professionalCategoryId, now),
+  ]);
 
   return prisma.$transaction(async (tx: Tx) => {
+    await lockRequest(tx, known.id);
     await lockPractitioner(tx, input.userId);
 
-    // Everything below is read inside the lock, so what it sees cannot change
+    // Re-read under the lock. The copy read above predates it, so its status may
+    // already be stale — a concurrent confirmation may just have filled the shift.
+    const request = await tx.serviceRequest.findUniqueOrThrow({ where: { id: known.id } });
+
+    // Everything below is read inside the locks, so what it sees cannot change
     // under it.
     const [invitation, confirmedCount, alreadyAssigned, conflicting] = await Promise.all([
       tx.invitation.findUnique({
@@ -435,6 +518,9 @@ export async function confirmAssignment(input: ConfirmParams): Promise<Assignmen
 
     const blockers = confirmBlockers({
       requestStatus: request.status,
+      shiftStarted: request.startsAt.getTime() <= now.getTime(),
+      facilityActive: facility.canPublish,
+      practitionerBookable: bookingBlockersNow.length === 0,
       headcount: request.headcount,
       confirmedCount,
       invitationStatus: invitation?.status ?? null,

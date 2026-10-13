@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('@/modules/practitioners/application/bookable', () => import('./support/always-bookable'));
+
 vi.mock('next/headers', async () => {
   const { cookieJar } = await import('./support/cookie-jar');
   return { cookies: () => cookieJar };
@@ -536,3 +538,4 @@ describe('the route table', () => {
     expect(manual?.permission).toBe('attendance.record');
   });
 });
+

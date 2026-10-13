@@ -56,6 +56,9 @@ export function canTransitionAssignment(
 
 export type ConfirmBlocker =
   | 'request_not_published'
+  | 'shift_started'
+  | 'facility_not_verified'
+  | 'practitioner_not_bookable'
   | 'request_full'
   | 'invitation_not_accepted'
   | 'already_assigned'
@@ -63,6 +66,12 @@ export type ConfirmBlocker =
 
 export interface ConfirmCheck {
   requestStatus: 'DRAFT' | 'PUBLISHED' | 'FILLED' | 'CANCELLED' | 'EXPIRED';
+  /** The shift's start has passed. Nothing can be booked onto a shift already under way. */
+  shiftStarted: boolean;
+  /** The facility is still verified and in date. Verification is not a one-off. */
+  facilityActive: boolean;
+  /** Eligible, in this profession, and not withdrawn from matching — as of now. */
+  practitionerBookable: boolean;
   headcount: number;
   confirmedCount: number;
   invitationStatus: InvitationStatusValue | null;
@@ -81,6 +90,9 @@ export function confirmBlockers(check: ConfirmCheck): ConfirmBlocker[] {
   const blockers: ConfirmBlocker[] = [];
 
   if (check.requestStatus !== 'PUBLISHED') blockers.push('request_not_published');
+  if (check.shiftStarted) blockers.push('shift_started');
+  if (!check.facilityActive) blockers.push('facility_not_verified');
+  if (!check.practitionerBookable) blockers.push('practitioner_not_bookable');
   if (check.confirmedCount >= check.headcount) blockers.push('request_full');
   if (check.invitationStatus !== 'ACCEPTED') blockers.push('invitation_not_accepted');
   if (check.alreadyAssigned) blockers.push('already_assigned');

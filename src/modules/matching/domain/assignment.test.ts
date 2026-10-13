@@ -82,6 +82,9 @@ describe('canTransitionAssignment', () => {
 describe('confirmBlockers', () => {
   const ready: ConfirmCheck = {
     requestStatus: 'PUBLISHED',
+    shiftStarted: false,
+    facilityActive: true,
+    practitionerBookable: true,
     headcount: 2,
     confirmedCount: 0,
     invitationStatus: 'ACCEPTED',
@@ -97,6 +100,27 @@ describe('confirmBlockers', () => {
     expect(confirmBlockers({ ...ready, requestStatus: 'CANCELLED' })).toContain(
       'request_not_published',
     );
+  });
+
+  it('refuses a shift that has already started', () => {
+    expect(confirmBlockers({ ...ready, shiftStarted: true })).toContain('shift_started');
+  });
+
+  it('refuses when the facility is no longer verified and in date', () => {
+    // Verification is not a one-off: a lapsed licence stops new bookings at once.
+    expect(confirmBlockers({ ...ready, facilityActive: false })).toContain('facility_not_verified');
+  });
+
+  it('refuses a practitioner who is no longer eligible, in the profession, or consenting', () => {
+    expect(confirmBlockers({ ...ready, practitionerBookable: false })).toContain(
+      'practitioner_not_bookable',
+    );
+  });
+
+  it('reports every reason at once, not just the first', () => {
+    expect(
+      confirmBlockers({ ...ready, shiftStarted: true, facilityActive: false, practitionerBookable: false }),
+    ).toEqual(['shift_started', 'facility_not_verified', 'practitioner_not_bookable']);
   });
 
   it('refuses once the headcount is met', () => {
@@ -126,12 +150,15 @@ describe('confirmBlockers', () => {
     expect(
       confirmBlockers({
         requestStatus: 'CANCELLED',
+        shiftStarted: true,
+        facilityActive: false,
+        practitionerBookable: false,
         headcount: 1,
         confirmedCount: 1,
         invitationStatus: 'DECLINED',
         alreadyAssigned: true,
         hasConflict: true,
       }),
-    ).toHaveLength(5);
+    ).toHaveLength(8);
   });
 });

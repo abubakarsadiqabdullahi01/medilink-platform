@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma, type Tx } from '@/lib/db';
 import { recordAudit } from '@/lib/audit';
 import { getServiceRequest } from '@/modules/service-requests/application/request';
+import { getFacility } from '@/modules/facilities/application/facility';
 import { listMatchCandidates } from '@/modules/practitioners/application/candidates';
 import { availabilityForWindowBatch } from '@/modules/availability/application/availability';
 import {
@@ -13,7 +14,7 @@ import {
 } from '../domain/engine';
 import { initialsOf } from '@/lib/names';
 import { reliabilityFrom } from '../domain/reliability';
-import { assignmentOutcomesFor } from './assignment';
+import { AssignmentErrors, assignmentOutcomesFor } from './assignment';
 
 /**
  * Running a match: gather the inputs, hand them to the pure engine, and write
@@ -78,10 +79,14 @@ export async function runMatch(input: RunMatchParams): Promise<MatchRunView> {
     facilityId: input.facilityId,
   });
 
-  const facility = await prisma.facility.findUniqueOrThrow({
-    where: { id: request.facilityId },
-    select: { stateId: true, lgaId: true },
-  });
+  // A match puts people in front of a facility, so it is for work that can actually be
+  // offered: a published request, from a facility that is verified and in date, for a
+  // shift that has not started. A draft raised by an unverified owner is none of these,
+  // and ranking real practitioners against it is a directory search with extra steps.
+  if (request.status !== 'PUBLISHED') throw AssignmentErrors.requestNotPublished();
+  if (request.startsAt.getTime() <= Date.now()) throw AssignmentErrors.shiftStarted();
+  const facility = await getFacility(request.facilityId);
+  if (!facility.canPublish) throw AssignmentErrors.facilityNotActive();
 
   const profiles = await listMatchCandidates({
     professionalCategoryId: request.professionalCategoryId,

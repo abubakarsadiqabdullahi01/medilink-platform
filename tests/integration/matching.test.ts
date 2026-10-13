@@ -11,7 +11,10 @@ import { GET as matchRunRoute } from '@/app/api/v1/match-runs/[id]/route';
 import { ROLE_PERMISSIONS } from '@/lib/authz/permissions';
 import { issueSession } from '@/modules/auth/application/session-service';
 import { createFacility, verifyFacility } from '@/modules/facilities/application/facility';
-import { createServiceRequest } from '@/modules/service-requests/application/request';
+import {
+  createServiceRequest,
+  publishServiceRequest,
+} from '@/modules/service-requests/application/request';
 import { createProfile } from '@/modules/practitioners/application/profile';
 import { addBlock, addSlot } from '@/modules/availability/application/availability';
 import {
@@ -81,7 +84,9 @@ interface World {
   credentialTypeId: string;
 }
 
-async function buildWorld(options: { specialtyRequired?: boolean } = {}): Promise<World> {
+async function buildWorld(
+  options: { specialtyRequired?: boolean; publish?: boolean } = {},
+): Promise<World> {
   await ensureRole('facility_owner', ROLE_PERMISSIONS.facility_owner ?? []);
 
   const state = await createState();
@@ -146,6 +151,15 @@ async function buildWorld(options: { specialtyRequired?: boolean } = {}): Promis
     cancellationTerms: 'Either party may cancel up to 24 hours before the shift.',
     actorId: scheduler.id,
   });
+  // A match is for work that can be offered, so the world publishes it — unless a
+  // test is about what happens when it has not been.
+  if (options.publish !== false) {
+    await publishServiceRequest({
+      requestId: request.id,
+      facilityId: facility.id,
+      actorId: scheduler.id,
+    });
+  }
 
   return {
     facilityId: facility.id,
@@ -405,6 +419,59 @@ describe('running a match', () => {
     expect(ranked(second.body).map((entry) => [entry.userId, entry.rank, entry.score])).toEqual(
       ranked(first.body).map((entry) => [entry.userId, entry.rank, entry.score]),
     );
+  });
+});
+
+describe('what may be matched', () => {
+  /**
+   * A match puts real practitioners in front of a facility. Run against a draft
+   * an unverified owner raised, or against a facility that has since lapsed, it
+   * is a directory search with extra steps.
+   */
+  it('refuses a request that is still a draft', async () => {
+    const world = await buildWorld({ publish: false });
+    await eligiblePractitioner(world);
+    await issueSession({ userId: world.schedulerId });
+
+    const result = await callMatch(world.requestId, world.facilityId);
+
+    expect(result.status).toBe(409);
+    expect(result.body).toMatchObject({ error: { code: 'request_not_published' } });
+  });
+
+  it('refuses a facility that is no longer verified', async () => {
+    const world = await buildWorld();
+    await eligiblePractitioner(world);
+    await prisma.facility.update({ where: { id: world.facilityId }, data: { status: 'SUSPENDED' } });
+    await issueSession({ userId: world.schedulerId });
+
+    const result = await callMatch(world.requestId, world.facilityId);
+
+    expect(result.status).toBe(409);
+    expect(result.body).toMatchObject({ error: { code: 'facility_not_verified' } });
+  });
+
+  it('refuses a shift that has already started', async () => {
+    const world = await buildWorld();
+    await prisma.serviceRequest.update({
+      where: { id: world.requestId },
+      data: { startsAt: new Date(Date.now() - 60 * 60 * 1000), endsAt: new Date(Date.now() + 60 * 60 * 1000) },
+    });
+    await issueSession({ userId: world.schedulerId });
+
+    const result = await callMatch(world.requestId, world.facilityId);
+
+    expect(result.status).toBe(409);
+    expect(result.body).toMatchObject({ error: { code: 'shift_started' } });
+  });
+
+  it('writes no run for a refused match', async () => {
+    const world = await buildWorld({ publish: false });
+    await issueSession({ userId: world.schedulerId });
+
+    await callMatch(world.requestId, world.facilityId);
+
+    expect(await prisma.matchRun.count()).toBe(0);
   });
 });
 
