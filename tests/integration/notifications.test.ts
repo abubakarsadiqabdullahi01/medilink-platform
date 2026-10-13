@@ -14,6 +14,7 @@ import {
 } from '@/modules/matching/application/assignment';
 import { startRegistration } from '@/modules/auth/application/registration';
 import { reportIncident } from '@/modules/clinical-incidents/application/incident';
+import { publishEvent } from '@/lib/outbox';
 import { runOnce } from '@/worker/processor';
 import { handlers } from '@/worker/handlers';
 import {
@@ -293,6 +294,144 @@ describe('a serious clinical incident', () => {
       expect(
         await prisma.notificationMessage.count({
           where: { userId: user.id, relatedId: incident.id, sentAt: { not: null } },
+        }),
+      ).toBe(1);
+    }
+  });
+});
+
+
+describe('a dispute, from the point of view of the people in it', () => {
+  /**
+   * Nobody was told when a case was opened, picked up, decided or withdrawn. The
+   * admin screen said marking it under review "tells the other side somebody is
+   * looking" and that both sides read the outcome; neither was true.
+   */
+  async function worldWithAssignment() {
+    const world = await buildBookingWorld();
+    const { nurse, assignment } = await confirmed(world);
+    // The confirmation texts are not what is being looked at.
+    await runOnce({ handlers });
+    sms.send.mockClear();
+    const facility = await prisma.facility.findUniqueOrThrow({ where: { id: world.facilityId } });
+    return { world, nurse, assignment, representativeId: facility.representativeUserId };
+  }
+
+  async function publish(
+    eventType: string,
+    ids: { assignmentId: string; userId: string; facilityId: string },
+    extra: Record<string, unknown>,
+  ) {
+    const disputeId = '33333333-3333-3333-3333-333333333333';
+    await prisma.$transaction((tx) =>
+      publishEvent(tx, {
+        eventType,
+        aggregateType: 'disputes.disputes',
+        aggregateId: disputeId,
+        payload: { disputeId, ...ids, ...extra },
+      }),
+    );
+    await runOnce({ handlers });
+    return disputeId;
+  }
+
+  const messagesFor = (userId: string) =>
+    prisma.notificationMessage.findMany({ where: { userId, kind: { startsWith: 'dispute.' } } });
+
+  it('tells the facility when a practitioner opens one, and the practitioner when a facility does', async () => {
+    const { world, nurse, assignment, representativeId } = await worldWithAssignment();
+    const ids = { assignmentId: assignment.id, userId: nurse.id, facilityId: world.facilityId };
+
+    await publish(EVENTS.DisputeOpened, ids, { raisedParty: 'PRACTITIONER', category: 'HOURS' });
+    expect(await messagesFor(representativeId)).toHaveLength(1);
+    expect(await messagesFor(nurse.id)).toHaveLength(0);
+    // The reason somebody gave for opening it is not in a text message.
+    expect((await messagesFor(representativeId))[0]!.body).toContain('Owerri General Hospital');
+  });
+
+  it('tells a practitioner when the facility opened it', async () => {
+    const { world, nurse, assignment, representativeId } = await worldWithAssignment();
+    const ids = { assignmentId: assignment.id, userId: nurse.id, facilityId: world.facilityId };
+
+    await publish(EVENTS.DisputeOpened, ids, { raisedParty: 'FACILITY', category: 'CONDUCT' });
+    expect(await messagesFor(nurse.id)).toHaveLength(1);
+    expect(await messagesFor(representativeId)).toHaveLength(0);
+  });
+
+  it('lets the adjudicators know there is something to pick up', async () => {
+    const { world, nurse, assignment } = await worldWithAssignment();
+    const adjudicator = await createUser({ fullName: 'Disputes Officer' });
+    await grant({
+      userId: adjudicator.id,
+      roleKey: 'disputes_probe',
+      permissions: ['dispute.manage'],
+      scopeType: 'PLATFORM',
+    });
+
+    await publish(
+      EVENTS.DisputeOpened,
+      { assignmentId: assignment.id, userId: nurse.id, facilityId: world.facilityId },
+      { raisedParty: 'PRACTITIONER', category: 'HOURS' },
+    );
+    expect(await messagesFor(adjudicator.id)).toHaveLength(1);
+  });
+
+  it('tells both sides when it is picked up', async () => {
+    const { world, nurse, assignment, representativeId } = await worldWithAssignment();
+    await publish(
+      EVENTS.DisputeUnderReview,
+      { assignmentId: assignment.id, userId: nurse.id, facilityId: world.facilityId },
+      { raisedParty: 'PRACTITIONER' },
+    );
+    expect(await messagesFor(nurse.id)).toHaveLength(1);
+    expect(await messagesFor(representativeId)).toHaveLength(1);
+  });
+
+  it('tells both sides the outcome, and sends them to the app for the reasons', async () => {
+    const { world, nurse, assignment, representativeId } = await worldWithAssignment();
+    await publish(
+      EVENTS.DisputeResolved,
+      { assignmentId: assignment.id, userId: nurse.id, facilityId: world.facilityId },
+      { raisedParty: 'PRACTITIONER', outcome: 'UPHELD' },
+    );
+
+    for (const id of [nurse.id, representativeId]) {
+      const [message] = await messagesFor(id);
+      expect(message!.body).toMatch(/upheld/i);
+      expect(message!.body).toMatch(/Medilink/);
+    }
+  });
+
+  it('tells only the other side when it is withdrawn', async () => {
+    const { world, nurse, assignment, representativeId } = await worldWithAssignment();
+    await publish(
+      EVENTS.DisputeWithdrawn,
+      { assignmentId: assignment.id, userId: nurse.id, facilityId: world.facilityId },
+      { raisedParty: 'PRACTITIONER' },
+    );
+    expect(await messagesFor(representativeId)).toHaveLength(1);
+    expect(await messagesFor(nurse.id)).toHaveLength(0);
+  });
+
+  it('is retried for whoever could not be reached, and does not text anyone twice', async () => {
+    const { world, nurse, assignment, representativeId } = await worldWithAssignment();
+    const rep = await prisma.user.findUniqueOrThrow({ where: { id: representativeId } });
+    sms.send.mockImplementation(async (message: { to: string }) =>
+      message.to === rep.phone ? null : ACCEPTED,
+    );
+    await publish(
+      EVENTS.DisputeUnderReview,
+      { assignmentId: assignment.id, userId: nurse.id, facilityId: world.facilityId },
+      { raisedParty: 'PRACTITIONER' },
+    );
+    sms.send.mockResolvedValue(ACCEPTED);
+    await makeDue();
+    await runOnce({ handlers });
+
+    for (const id of [nurse.id, representativeId]) {
+      expect(
+        await prisma.notificationMessage.count({
+          where: { userId: id, kind: 'dispute.under_review', sentAt: { not: null } },
         }),
       ).toBe(1);
     }

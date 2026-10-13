@@ -31,12 +31,18 @@ import {
  * the attendance record remembers its own pre-dispute state instead of this
  * table doing it.
  *
- * **Nothing here publishes an event on resolution, and that is deliberate.**
- * Upholding sends the figures back to `SUBMITTED`, so the ordinary approval
- * path publishes `TimesheetApproved` again when they are decided; dismissing
- * restores the record unchanged, so downstream has nothing to react to. An
- * event announcing a resolution would carry no information the existing ones
- * do not, and Section 8.2's vocabulary is not mine to extend for that.
+ * **Everybody concerned is told what happens to a case.** Opening, being
+ * picked up, being decided and being withdrawn each publish an event in the
+ * same transaction as the change, and the notification handlers turn them into
+ * texts. The admin screen has long said that marking a case under review "tells
+ * the other side somebody is looking" and that both sides read the outcome; with
+ * only DisputeOpened published and nothing consuming it, neither was true.
+ *
+ * Resolution publishes the *outcome* and never the officer's notes: a text
+ * message is not where a finding belongs, and the parties read the reasons in
+ * the app. Upholding still sends the figures back to `SUBMITTED`, so the
+ * ordinary approval path publishes `TimesheetApproved` again when they are
+ * decided; that is a separate fact and this event does not stand in for it.
  */
 
 export const DisputeErrors = {
@@ -156,6 +162,20 @@ export async function sideOnCase(
     return 'FACILITY';
   }
   return null;
+}
+
+/** What every dispute event carries: enough to find the people, nothing of the argument. */
+function eventPayload(
+  row: { id: string; assignmentId: string; raisedParty: string },
+  assignment: { userId: string; facilityId: string },
+) {
+  return {
+    disputeId: row.id,
+    assignmentId: row.assignmentId,
+    userId: assignment.userId,
+    facilityId: assignment.facilityId,
+    raisedParty: row.raisedParty,
+  };
 }
 
 /** Open, or being worked. Both are live cases as far as every rule here goes. */
@@ -299,6 +319,13 @@ export async function beginReview(input: {
       after: { status: next.status },
     });
 
+    await publishEvent(tx, {
+      eventType: EVENTS.DisputeUnderReview,
+      aggregateType: 'disputes.disputes',
+      aggregateId: row.id,
+      payload: eventPayload(next, assignment),
+    });
+
     return next;
   });
 
@@ -363,6 +390,13 @@ export async function resolveDispute(input: ResolveDisputeParams): Promise<Dispu
       after: { status: next.status, outcome: next.outcome },
     });
 
+    await publishEvent(tx, {
+      eventType: EVENTS.DisputeResolved,
+      aggregateType: 'disputes.disputes',
+      aggregateId: row.id,
+      payload: { ...eventPayload(next, assignment), outcome },
+    });
+
     return next;
   });
 
@@ -417,6 +451,13 @@ export async function withdrawDispute(input: {
       scopeId: assignment.userId,
       before: { status: row.status },
       after: { status: next.status },
+    });
+
+    await publishEvent(tx, {
+      eventType: EVENTS.DisputeWithdrawn,
+      aggregateType: 'disputes.disputes',
+      aggregateId: row.id,
+      payload: eventPayload(next, assignment),
     });
 
     return next;

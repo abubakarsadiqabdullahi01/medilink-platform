@@ -5,6 +5,7 @@ import { screenPractitioner } from '../modules/practitioners/application/screeni
 import {
   notifyAssignmentCancelled,
   notifyAssignmentConfirmed,
+  notifyDisputeEvent,
   notifyIncidentReported,
 } from '../modules/notifications/application/handlers';
 import { computeAndSaveTimesheet } from '../modules/timesheets/application/timesheet';
@@ -54,6 +55,12 @@ export const handlers: Record<string, EventHandler> = {
   [EVENTS.ClinicalIncidentReported]: async (payload) => {
     await notifyIncidentReported(payload);
   },
+
+  // The four things that happen to a dispute, each told to the people in it.
+  [EVENTS.DisputeOpened]: (payload) => notifyDisputeEvent('dispute.opened', payload),
+  [EVENTS.DisputeUnderReview]: (payload) => notifyDisputeEvent('dispute.under_review', payload),
+  [EVENTS.DisputeResolved]: (payload) => notifyDisputeEvent('dispute.resolved', payload),
+  [EVENTS.DisputeWithdrawn]: (payload) => notifyDisputeEvent('dispute.withdrawn', payload),
 
   [EVENTS.PractitionerRegistered]: async (payload) => {
     // Stage 4.7: send the welcome message through the notification adapter.

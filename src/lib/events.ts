@@ -23,6 +23,9 @@ export const EVENTS = {
   NoShowRecorded: 'no_show.recorded',
   SanctionApplied: 'sanction.applied',
   DisputeOpened: 'dispute.opened',
+  DisputeUnderReview: 'dispute.under_review',
+  DisputeResolved: 'dispute.resolved',
+  DisputeWithdrawn: 'dispute.withdrawn',
   ClinicalIncidentReported: 'clinical_incident.reported',
 } as const;
 

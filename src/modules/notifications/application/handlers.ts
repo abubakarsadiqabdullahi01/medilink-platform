@@ -210,3 +210,117 @@ export async function notifyIncidentReported(payload: Record<string, unknown>): 
 
   failIfAnyFailed(outcomes, 'the incident alert');
 }
+
+/**
+ * What happens to a dispute, told to the people in it.
+ *
+ * Nobody was, at any step. The admin screen said marking a case under review
+ * "tells the other side somebody is looking" and that both sides read the
+ * outcome; only DisputeOpened was published, and nothing consumed it.
+ *
+ *   opened        the other side, and the adjudicators, who have something to pick up
+ *   under review  both sides
+ *   resolved      both sides, with the outcome and a pointer to the reasons
+ *   withdrawn     the other side
+ *
+ * What was argued is never in a text: not the reason somebody gave, not the
+ * officer's notes. The parties read those in the app, signed in.
+ */
+type DisputeKind = 'dispute.opened' | 'dispute.under_review' | 'dispute.resolved' | 'dispute.withdrawn';
+
+export async function notifyDisputeEvent(
+  kind: DisputeKind,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  const disputeId = String(payload.disputeId ?? '');
+  const assignmentId = String(payload.assignmentId ?? '');
+  const practitionerId = String(payload.userId ?? '');
+  const facilityId = String(payload.facilityId ?? '');
+  const raisedBy = String(payload.raisedParty ?? '');
+
+  if (!disputeId || !assignmentId || !practitionerId || !facilityId) {
+    logger.warn('dispute event missing ids; skipping notification', { kind });
+    return;
+  }
+
+  const [facility, assignment] = await Promise.all([
+    prisma.facility.findUnique({
+      where: { id: facilityId },
+      select: { name: true, representativeUserId: true },
+    }),
+    prisma.assignment.findUnique({
+      where: { id: assignmentId },
+      select: { startsAt: true, endsAt: true },
+    }),
+  ]);
+  if (!facility || !assignment) {
+    logger.warn('dispute event for a record that no longer exists', { kind, disputeId });
+    return;
+  }
+
+  const shift = `the shift at ${facility.name} on ${formatShift(
+    assignment.startsAt.toISOString(),
+    assignment.endsAt.toISOString(),
+  )}`;
+  const outcome = String(payload.outcome ?? '').toLowerCase();
+
+  const practitioner = practitionerId;
+  const facilitySide = facility.representativeUserId;
+  const otherThanRaiser = raisedBy === 'FACILITY' ? [practitioner] : [facilitySide];
+
+  const wording: Record<DisputeKind, { to: string[]; body: string }> = {
+    'dispute.opened': {
+      to: otherThanRaiser,
+      body: `A dispute has been opened over ${shift}. Open Medilink to read it and add what you know. Medilink.`,
+    },
+    'dispute.under_review': {
+      to: [practitioner, facilitySide],
+      body: `The dispute over ${shift} is now being reviewed by Medilink. Medilink.`,
+    },
+    'dispute.resolved': {
+      to: [practitioner, facilitySide],
+      body: `The dispute over ${shift} has been decided: ${outcome || 'resolved'}. Open Medilink to read the reasons. Medilink.`,
+    },
+    'dispute.withdrawn': {
+      to: otherThanRaiser,
+      body: `The dispute over ${shift} has been withdrawn by the other party. Medilink.`,
+    },
+  };
+
+  const { to, body } = wording[kind];
+  const outcomes: NotifyOutcome[] = [];
+
+  for (const userId of new Set(to)) {
+    if (await alreadyNotified(userId, kind, disputeId)) continue;
+    outcomes.push(
+      await notify({
+        userId,
+        kind,
+        body,
+        relatedType: 'disputes.disputes',
+        relatedId: disputeId,
+      }),
+    );
+  }
+
+  // Somebody has to pick a new case up. Not a failure if nobody holds the
+  // permission — the queue is still there — so it is a warning, unlike a death.
+  if (kind === 'dispute.opened') {
+    const adjudicators = await usersHoldingPlatformPermission('dispute.manage');
+    if (adjudicators.length === 0) logger.warn('a dispute was opened and no one holds dispute.manage', { disputeId });
+    for (const adjudicator of adjudicators) {
+      if (await alreadyNotified(adjudicator.id, kind, disputeId)) continue;
+      outcomes.push(
+        await notify({
+          userId: adjudicator.id,
+          kind,
+          body: `A dispute has been opened over ${shift} and is waiting for review. Medilink.`,
+          relatedType: 'disputes.disputes',
+          relatedId: disputeId,
+        }),
+      );
+    }
+  }
+
+  failIfAnyFailed(outcomes, `the ${kind.replace('dispute.', '')} notice`);
+}
