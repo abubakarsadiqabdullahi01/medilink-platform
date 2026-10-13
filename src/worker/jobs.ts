@@ -4,6 +4,10 @@ import { expireRegistrations } from '../modules/practitioners/application/expiry
 import { expireCredentials } from '../modules/credentials/application/expiry';
 import { expireStartedRequests } from '../modules/service-requests/application/expiry';
 import { sweepUnhonouredAssignments } from '../modules/cancellations-sanctions/application/fault';
+import {
+  alertShiftsNotCheckedIn,
+  sendShiftReminders,
+} from '../modules/notifications/application/shift-alerts';
 import type { JobHandler } from './scheduler';
 
 /**
@@ -25,6 +29,8 @@ export interface JobDefinition {
   intervalSeconds: number;
 }
 
+export const MINUTES_5 = 5 * 60;
+export const MINUTES_15 = 15 * 60;
 export const HOURLY = 60 * 60;
 export const DAILY = 24 * HOURLY;
 
@@ -65,9 +71,27 @@ export const JOB_DEFINITIONS: JobDefinition[] = [
       'Flag CONFIRMED assignments whose shift has ended with no sign of attendance, awaiting a fault decision. Hourly, and it decides nothing: an absence has a dozen innocent explanations and the platform cannot tell them apart from a database row.',
     intervalSeconds: HOURLY,
   },
+  {
+    key: 'shift.reminder_sweep',
+    description:
+      'Remind each practitioner a few hours before a confirmed shift. Every fifteen minutes; nobody is told twice, and anybody who could not be reached is tried again on the next run.',
+    intervalSeconds: MINUTES_15,
+  },
+  {
+    key: 'shift.start_watch',
+    description:
+      'Tell the practitioner and the facility when nobody has checked in thirty minutes after a shift started, while it can still be saved. Every five minutes so thirty minutes means about thirty minutes. Decides nothing: the sweep after the shift, and a person, own the question of an absence.',
+    intervalSeconds: MINUTES_5,
+  },
 ];
 
 export const jobs: Record<string, JobHandler> = {
+  'shift.reminder_sweep': async () => {
+    await sendShiftReminders();
+  },
+  'shift.start_watch': async () => {
+    await alertShiftsNotCheckedIn();
+  },
   'service_request.expiry_sweep': async () => {
     await expireStartedRequests();
   },

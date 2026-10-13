@@ -2,7 +2,7 @@ import { prisma } from '@/lib/db';
 import { logger } from '@/lib/logger';
 import { WAT_OFFSET_MINUTES } from '@/modules/availability/domain/availability';
 import { usersHoldingPlatformPermission } from '@/modules/auth/application/grants';
-import { notify, type NotifyOutcome } from './notify';
+import { alreadyNotified, notify, type NotifyOutcome } from './notify';
 
 /**
  * What a domain event turns into, for the people it concerns.
@@ -11,25 +11,6 @@ import { notify, type NotifyOutcome } from './notify';
  * retried delivery must not send a second message. Each checks for a message
  * it has already recorded against the same assignment before sending.
  */
-
-/**
- * Whether this person has already been *told*. A failed attempt is on the
- * record too, and counting it here meant a retry found nothing to do and the
- * person was never told at all.
- */
-async function alreadyNotified(
-  userId: string,
-  kind: string,
-  relatedId: string,
-  /** Only a message sent since then counts: a reopened offer is the same row and needs telling again. */
-  since?: Date,
-): Promise<boolean> {
-  const existing = await prisma.notificationMessage.findFirst({
-    where: { userId, kind, relatedId, sentAt: { not: null, ...(since ? { gte: since } : {}) } },
-    select: { id: true },
-  });
-  return existing !== null;
-}
 
 /**
  * Lagos time, because that is the time on every other screen and the one the
@@ -49,7 +30,7 @@ export function formatShift(startsAt: string, endsAt: string): string {
  * who was told is skipped on the retry (see `alreadyNotified`), so this costs
  * nobody a second message.
  */
-function failIfAnyFailed(outcomes: NotifyOutcome[], what: string): void {
+export function failIfAnyFailed(outcomes: NotifyOutcome[], what: string): void {
   const failed = outcomes.filter((outcome) => outcome === 'failed').length;
   if (failed > 0) throw new Error(`SMS delivery failed for ${failed} recipient(s) of ${what}.`);
 }

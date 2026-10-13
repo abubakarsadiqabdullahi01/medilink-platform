@@ -70,3 +70,22 @@ export async function notificationsFor(userId: string) {
     select: { kind: true, recipient: true, body: true, sentAt: true, createdAt: true },
   });
 }
+
+/**
+ * Whether this person has already been *told*. A failed attempt is on the
+ * record too, and counting it meant a retry found nothing to do and the person
+ * was never told at all.
+ */
+export async function alreadyNotified(
+  userId: string,
+  kind: string,
+  relatedId: string,
+  /** Only a message sent since then counts: a reopened offer is the same row and needs telling again. */
+  since?: Date,
+): Promise<boolean> {
+  const existing = await prisma.notificationMessage.findFirst({
+    where: { userId, kind, relatedId, sentAt: { not: null, ...(since ? { gte: since } : {}) } },
+    select: { id: true },
+  });
+  return existing !== null;
+}
