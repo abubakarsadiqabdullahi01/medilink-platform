@@ -138,6 +138,65 @@ export function priceTimesheet(
   return { lines, baseKobo, premiumKobo: totalKobo - baseKobo, totalKobo };
 }
 
+/** The figures a timesheet row keeps, which is all pricing needs of it. */
+export interface StoredTimesheet {
+  billableMinutes: number;
+  nightOnlyMinutes: number;
+  holidayMinutes: number;
+  overtimeMinutes: number;
+  onCallMinutes: number;
+  hourlyRateKobo: number;
+}
+
+/**
+ * The exclusive split, from the bands the timesheet recorded.
+ *
+ * `nightMinutes` and `holidayMinutes` overlap on the timesheet by design - a
+ * reader wants to see both - so pricing needs the buckets that do not. They
+ * used to be rebuilt by subtracting one overlapping figure from the other,
+ * which loses minutes unless the holiday happens to sit wholly inside the
+ * night or the night wholly inside the holiday: a shift 18:00-02:00 with the
+ * second day a holiday was billed 120 minutes short, and with the first day a
+ * holiday, 120 night minutes short. The timesheet computed the exact split
+ * when it was worked out and now keeps it, so this reads it back.
+ *
+ * Holiday takes precedence over night, so `holidayMinutes` is the holiday
+ * bucket as it stands; ordinary is what is left.
+ */
+export function exclusiveBands(
+  sheet: Pick<StoredTimesheet, 'billableMinutes' | 'nightOnlyMinutes' | 'holidayMinutes'>,
+) {
+  return {
+    ordinaryMinutes: Math.max(
+      0,
+      sheet.billableMinutes - sheet.nightOnlyMinutes - sheet.holidayMinutes,
+    ),
+    nightMinutes: sheet.nightOnlyMinutes,
+    holidayMinutes: sheet.holidayMinutes,
+  };
+}
+
+/**
+ * What a stored timesheet is worth under a card.
+ *
+ * The one place a timesheet row becomes money. The invoice bills from it and
+ * the facility's approval screen shows it, so what a person is asked to approve
+ * cannot differ from what they are then charged.
+ */
+export function priceStoredTimesheet(sheet: StoredTimesheet, card: RateCardLike) {
+  const bands = exclusiveBands(sheet);
+  const priced = priceTimesheet(
+    {
+      ...bands,
+      overtimeMinutes: sheet.overtimeMinutes,
+      onCallMinutes: sheet.onCallMinutes,
+      hourlyRateKobo: sheet.hourlyRateKobo,
+    },
+    card,
+  );
+  return { bands, priced };
+}
+
 export type MultiplierProblem = 'below_par' | 'implausibly_high' | 'not_an_integer';
 
 /** A rate card nobody can typo a decimal point into. */

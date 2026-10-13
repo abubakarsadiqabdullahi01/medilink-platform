@@ -211,3 +211,15 @@ export function readRateTerms(value: unknown): RateTerms | null {
     fixedAt: typeof terms.fixedAt === 'string' ? terms.fixedAt : '',
   };
 }
+
+/**
+ * The terms a booking is priced on: the ones kept on it, or, for a booking made
+ * before terms were kept, the card in force on the shift's date.
+ */
+export async function termsOfBooking(booking: {
+  facilityId: string;
+  startsAt: Date;
+  rateTerms: unknown;
+}): Promise<RateTerms> {
+  return readRateTerms(booking.rateTerms) ?? rateTermsFor(booking.facilityId, booking.startsAt);
+}

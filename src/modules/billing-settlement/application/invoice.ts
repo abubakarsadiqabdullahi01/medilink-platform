@@ -4,8 +4,8 @@ import { recordAudit } from '@/lib/audit';
 import { publishEvent } from '@/lib/outbox';
 import { EVENTS } from '@/lib/events';
 import { HttpError } from '@/lib/http/errors';
-import { rateTermsFor, readRateTerms } from '@/modules/rates-contracts/application/rate-card';
-import { priceTimesheet } from '@/modules/rates-contracts/domain/pricing';
+import { termsOfBooking } from '@/modules/rates-contracts/application/rate-card';
+import { priceStoredTimesheet } from '@/modules/rates-contracts/domain/pricing';
 import {
   PLATFORM_FEE_UNSET_BP,
   entriesForApprovedWork,
@@ -102,36 +102,6 @@ async function postTransaction(
   return transactionId;
 }
 
-/**
- * The exclusive split, from the bands the timesheet recorded.
- *
- * `nightMinutes` and `holidayMinutes` overlap on the timesheet by design — a
- * reader wants to see both — so pricing needs the buckets that do not. They
- * used to be rebuilt here by subtracting one overlapping figure from the other,
- * which loses minutes unless the holiday happens to sit wholly inside the
- * night or the night wholly inside the holiday: a shift 18:00-02:00 with the
- * second day a holiday was billed 120 minutes short, and with the first day a
- * holiday, 120 night minutes short. The timesheet computed the exact split
- * when it was worked out and now keeps it, so this reads it back.
- *
- * Holiday takes precedence over night, so `holidayMinutes` is the holiday
- * bucket as it stands; ordinary is what is left.
- */
-function exclusiveBands(sheet: {
-  billableMinutes: number;
-  nightOnlyMinutes: number;
-  holidayMinutes: number;
-}) {
-  return {
-    ordinaryMinutes: Math.max(
-      0,
-      sheet.billableMinutes - sheet.nightOnlyMinutes - sheet.holidayMinutes,
-    ),
-    nightMinutes: sheet.nightOnlyMinutes,
-    holidayMinutes: sheet.holidayMinutes,
-  };
-}
-
 /** One line as it is written, before the invoice that holds it exists. */
 interface InvoiceLineData extends InvoiceLineView {
   rateCardId: string | null;
@@ -186,19 +156,12 @@ export async function generateInvoice(input: GenerateInvoiceParams): Promise<Inv
   const lines: InvoiceLineData[] = [];
   for (const row of billable) {
     const sheet = row.timesheet!;
-    const terms =
-      readRateTerms(row.assignment.rateTerms) ??
-      (await rateTermsFor(input.facilityId, row.assignment.startsAt));
-    const bands = exclusiveBands(sheet);
-    const priced = priceTimesheet(
-      {
-        ...bands,
-        overtimeMinutes: sheet.overtimeMinutes,
-        onCallMinutes: sheet.onCallMinutes,
-        hourlyRateKobo: sheet.hourlyRateKobo,
-      },
-      terms,
-    );
+    const terms = await termsOfBooking({
+      facilityId: input.facilityId,
+      startsAt: row.assignment.startsAt,
+      rateTerms: row.assignment.rateTerms,
+    });
+    const { bands, priced } = priceStoredTimesheet(sheet, terms);
 
     lines.push({
       assignmentId: row.assignmentId,

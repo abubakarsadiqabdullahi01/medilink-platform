@@ -3,8 +3,10 @@ import { computeTimesheet } from '@/modules/timesheets/domain/hours';
 import {
   DEFAULT_RATE_CARD,
   NO_PREMIUM_BP,
+  exclusiveBands,
   lineAmountKobo,
   multiplierProblems,
+  priceStoredTimesheet,
   priceTimesheet,
   type PriceableTimesheet,
 } from './pricing';
@@ -180,5 +182,37 @@ describe('multiplierProblems', () => {
 
   it('refuses a fraction of a basis point', () => {
     expect(multiplierProblems(10_000.5)).toContain('not_an_integer');
+  });
+});
+
+describe('pricing a stored timesheet', () => {
+  const stored = {
+    billableMinutes: 480,
+    nightOnlyMinutes: 120,
+    holidayMinutes: 60,
+    overtimeMinutes: 0,
+    onCallMinutes: 0,
+    hourlyRateKobo: RATE,
+  };
+
+  it('splits the minutes without losing or repeating any', () => {
+    const bands = exclusiveBands(stored);
+    expect(bands).toEqual({ ordinaryMinutes: 300, nightMinutes: 120, holidayMinutes: 60 });
+    expect(bands.ordinaryMinutes + bands.nightMinutes + bands.holidayMinutes).toBe(480);
+  });
+
+  it('never goes negative when the bands claim more than the shift', () => {
+    expect(exclusiveBands({ ...stored, billableMinutes: 100 }).ordinaryMinutes).toBe(0);
+  });
+
+  it('prices the same as pricing the bands by hand', () => {
+    const card = { ...DEFAULT_RATE_CARD, nightMultiplierBp: 15_000, holidayMultiplierBp: 20_000 };
+    const { bands, priced } = priceStoredTimesheet(stored, card);
+    expect(priced).toEqual(
+      priceTimesheet({ ...bands, overtimeMinutes: 0, onCallMinutes: 0, hourlyRateKobo: RATE }, card),
+    );
+    // 5h ordinary, 2h of night at 1.5x, 1h of holiday at 2x, on ₦5,000 an hour.
+    expect(priced.totalKobo).toBe(2_500_000 + 1_500_000 + 1_000_000);
+    expect(priced.premiumKobo).toBe(priced.totalKobo - 4_000_000);
   });
 });

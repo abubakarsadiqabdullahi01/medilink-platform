@@ -817,6 +817,29 @@ export async function getAssignment(assignmentId: string): Promise<AssignmentVie
 }
 
 /**
+ * What each of these bookings is priced on: the facility, when the shift starts,
+ * and the allowances fixed when it was booked.
+ *
+ * For `timesheets`, which shows a facility what a shift will be billed and may
+ * not read `matching.assignments` itself. One query for the whole page.
+ */
+export async function bookingTermsFor(
+  assignmentIds: string[],
+): Promise<Map<string, { facilityId: string; startsAt: Date; rateTerms: unknown }>> {
+  if (assignmentIds.length === 0) return new Map();
+  const rows = await prisma.assignment.findMany({
+    where: { id: { in: assignmentIds } },
+    select: { id: true, facilityId: true, startsAt: true, rateTerms: true },
+  });
+  return new Map(
+    rows.map((row) => [
+      row.id,
+      { facilityId: row.facilityId, startsAt: row.startsAt, rateTerms: row.rateTerms },
+    ]),
+  );
+}
+
+/**
  * Whether this facility has booked this person: a live, finished or no-show
  * assignment, but not one that was cancelled — a cancelled booking is a person
  * who never turned up on the ward.

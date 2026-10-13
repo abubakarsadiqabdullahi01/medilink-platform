@@ -60,6 +60,8 @@ interface Timesheet {
   onCallMinutes: number;
   hourlyRateKobo: number;
   amountKobo: number;
+  /** Allowances the facility's rate card adds on top of `amountKobo`. */
+  premiumKobo?: number;
   revision: number;
 }
 
@@ -207,6 +209,13 @@ export default function MyTimesheetsPage() {
                       <strong>{formatNaira(sheet.amountKobo)}</strong>
                     </Detail>
                   </DetailGrid>
+
+                  {sheet.premiumKobo ? (
+                    <p className="text-xs text-muted-foreground">
+                      The facility&apos;s rate card adds {formatNaira(sheet.premiumKobo)} for night,
+                      holiday or overtime hours on this shift.
+                    </p>
+                  ) : null}
 
                   <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
                     <span>Night {formatMinutes(sheet.nightMinutes)}</span>

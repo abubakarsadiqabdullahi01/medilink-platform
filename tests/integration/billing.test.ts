@@ -22,7 +22,11 @@ import {
   respondToInvitation,
 } from '@/modules/matching/application/assignment';
 import { recordManualAttendance } from '@/modules/attendance/application/attendance';
-import { reviewTimesheet, submitTimesheet } from '@/modules/timesheets/application/timesheet';
+import {
+  reviewTimesheet,
+  submitTimesheet,
+  timesheetsForAssignments,
+} from '@/modules/timesheets/application/timesheet';
 import { createRateCard } from '@/modules/rates-contracts/application/rate-card';
 import {
   accountBalance,
@@ -522,6 +526,62 @@ describe('premiums are fixed when the shift is booked', () => {
 
     const invoice = await generateInvoice(period(world));
     expect(invoice.grossKobo).toBe(6_000_000);
+  });
+});
+
+describe('the approval screen states what will be billed', () => {
+  /**
+   * The facility approved "₦40,000" and was invoiced ₦60,000: the timesheet's
+   * own amount is the hours at the base rate, and the premiums the facility's
+   * own card adds are applied only when the invoice is raised. What a person is
+   * asked to approve has to be what they are then billed.
+   */
+  const NIGHT = {
+    from: new Date('2026-09-09T19:00:00.000Z'),
+    to: new Date('2026-09-10T03:00:00.000Z'),
+  };
+
+  async function sheetOf(assignmentId: string) {
+    const sheets = await timesheetsForAssignments([assignmentId]);
+    return sheets.get(assignmentId)!.timesheet;
+  }
+
+  it('carries the premium-inclusive figure and says how much of it is premium', async () => {
+    const world = await buildWorld(NIGHT, { name: 'At booking', nightMultiplierBp: 15_000 });
+
+    const sheet = await sheetOf(world.assignmentId);
+    // The hours at the base rate are still there; they are not what is billed.
+    expect(sheet.amountKobo).toBe(4_000_000);
+    expect(sheet.premiumKobo).toBe(2_000_000);
+    expect(sheet.billedKobo).toBe(6_000_000);
+  });
+
+  it('is the figure the invoice then bills', async () => {
+    const world = await buildWorld(NIGHT, { name: 'At booking', nightMultiplierBp: 15_000 });
+
+    const sheet = await sheetOf(world.assignmentId);
+    const invoice = await generateInvoice(period(world));
+    expect(sheet.billedKobo).toBe(invoice.grossKobo);
+  });
+
+  it('does not move when the facility changes its card afterwards', async () => {
+    const world = await buildWorld(NIGHT, { name: 'At booking', nightMultiplierBp: 15_000 });
+    await createRateCard({
+      facilityId: world.facilityId,
+      actorId: world.reviewerId,
+      name: 'Cut after booking',
+      nightMultiplierBp: 10_000,
+    });
+
+    expect((await sheetOf(world.assignmentId)).billedKobo).toBe(6_000_000);
+  });
+
+  it('is the base figure when there are no allowances', async () => {
+    const world = await buildWorld(NIGHT);
+
+    const sheet = await sheetOf(world.assignmentId);
+    expect(sheet.premiumKobo).toBe(0);
+    expect(sheet.billedKobo).toBe(sheet.amountKobo);
   });
 });
 
