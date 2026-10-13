@@ -102,6 +102,21 @@ export async function ensureAttendanceRecord(assignmentId: string): Promise<Atte
   return toView(created);
 }
 
+/**
+ * Attendance for many shifts in one query — what a roster page needs for its
+ * rows. A shift nobody has issued a code for has no record yet, so it is simply
+ * absent from the map; callers read that as "not started".
+ */
+export async function attendanceForAssignments(
+  assignmentIds: string[],
+): Promise<Map<string, AttendanceView>> {
+  if (assignmentIds.length === 0) return new Map();
+  const rows = await prisma.attendanceRecord.findMany({
+    where: { assignmentId: { in: assignmentIds } },
+  });
+  return new Map(rows.map((row) => [row.assignmentId, toView(row)]));
+}
+
 export async function getAttendance(assignmentId: string): Promise<AttendanceView> {
   const record = await prisma.attendanceRecord.findUnique({ where: { assignmentId } });
   if (!record) throw AttendanceErrors.recordNotFound();

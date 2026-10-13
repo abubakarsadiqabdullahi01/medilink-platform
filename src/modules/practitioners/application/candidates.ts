@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/db';
 import { getEligibilityFor } from './eligibility';
+import { withdrawnFromMatching } from '@/modules/audit-compliance/application/consent';
 
 /**
  * The practitioner data the matcher needs, exposed as a function rather than
@@ -61,16 +62,24 @@ export async function listMatchCandidates(input: {
   // One batch rather than a call per profile. Every candidate here shares the
   // category that selected them, so the per-practitioner version re-read the
   // same category row and the same requirement list once for each of them.
-  const eligibility = await getEligibilityFor(profiles.map((profile) => profile.userId));
+  const [eligibility, withdrawn] = await Promise.all([
+    getEligibilityFor(profiles.map((profile) => profile.userId)),
+    withdrawnFromMatching(profiles.map((profile) => profile.userId)),
+  ]);
 
-  return profiles.map((profile) => ({
-    userId: profile.userId,
-    professionalCategoryId: profile.professionalCategoryId,
-    specialtyId: profile.specialtyId,
-    yearsOfExperience: profile.yearsOfExperience,
-    homeStateId: profile.homeStateId,
-    homeLgaId: profile.homeLgaId,
-    travelPreference: profile.travelPreference,
-    eligible: eligibility.get(profile.userId)?.eligible ?? false,
-  }));
+  // Left out entirely rather than listed as excluded: somebody who has
+  // withdrawn "letting facilities find your profile" should not appear in a
+  // facility's candidate list at all, reason attached or not.
+  return profiles
+    .filter((profile) => !withdrawn.has(profile.userId))
+    .map((profile) => ({
+      userId: profile.userId,
+      professionalCategoryId: profile.professionalCategoryId,
+      specialtyId: profile.specialtyId,
+      yearsOfExperience: profile.yearsOfExperience,
+      homeStateId: profile.homeStateId,
+      homeLgaId: profile.homeLgaId,
+      travelPreference: profile.travelPreference,
+      eligible: eligibility.get(profile.userId)?.eligible ?? false,
+    }));
 }

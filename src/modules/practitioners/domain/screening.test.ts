@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  findSanctionMatch,
-  isScreeningClear,
-  normaliseFolio,
-  normaliseName,
-} from './screening';
+import { findSanctionMatch, isScreeningClear, normaliseFolio, normaliseName } from './screening';
 
 describe('normaliseName', () => {
   it('ignores case and punctuation', () => {
@@ -75,9 +70,10 @@ describe('findSanctionMatch', () => {
   });
 
   it('matches a listed name written the other way round', () => {
-    expect(
-      findSanctionMatch({ fullName: 'Yusuf Amina', folioNumbers: [] }, [struckOff]),
-    ).toEqual({ entryId: 'entry-1', matchedOn: 'name' });
+    expect(findSanctionMatch({ fullName: 'Yusuf Amina', folioNumbers: [] }, [struckOff])).toEqual({
+      entryId: 'entry-1',
+      matchedOn: 'name',
+    });
   });
 
   it('matches a listed folio even when the name differs', () => {
@@ -92,7 +88,11 @@ describe('findSanctionMatch', () => {
   });
 
   it('prefers the folio match, as the stronger signal', () => {
-    const nameOnly = { id: 'entry-3', normalisedName: normaliseName('Amina Yusuf'), folioNumber: null };
+    const nameOnly = {
+      id: 'entry-3',
+      normalisedName: normaliseName('Amina Yusuf'),
+      folioNumber: null,
+    };
     expect(
       findSanctionMatch({ fullName: 'Amina Yusuf', folioNumbers: ['MDCN/R/12345'] }, [
         nameOnly,

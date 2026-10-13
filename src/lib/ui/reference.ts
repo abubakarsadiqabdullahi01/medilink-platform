@@ -4,12 +4,19 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/ui/api';
 
 export interface ReferenceData {
-  professionalCategories: { id: string; name: string }[];
+  professionalCategories: { id: string; name: string; regulator: string }[];
   specialties: { id: string; name: string; categoryId: string }[];
-  credentialTypes: { id: string; name: string; key: string; verificationMethod: string }[];
+  credentialTypes: {
+    id: string;
+    name: string;
+    key: string;
+    verificationMethod: string;
+    requiredForCategoryIds: string[];
+  }[];
   facilityTypes: { id: string; name: string }[];
   states: { id: string; name: string; zone: string }[];
   lgas: { id: string; name: string; stateId: string }[];
+  verification: { identityAutomated: boolean; registrationAutomated: boolean };
 }
 
 /**

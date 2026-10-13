@@ -366,8 +366,32 @@ export interface InvoiceQueueRow extends Omit<InvoiceView, 'lines'> {
   lines: InvoiceLineWithPractitioner[];
 }
 
+export interface InvoicePage {
+  invoices: InvoiceQueueRow[];
+  nextCursor: string | null;
+  /**
+   * What is owed and what has been paid across *all* of a facility's invoices,
+   * not just this page: a figure summed from the rows on screen would shrink
+   * and change as somebody paged, and a finance officer reads it as the debt.
+   */
+  totals: { outstandingKobo: number; outstandingCount: number; paidKobo: number };
+}
+
+export interface ListInvoicesOptions {
+  limit?: number;
+  cursor?: string;
+  /** Leave drafts out: a draft is still being put together and is not a bill. */
+  billedOnly?: boolean;
+}
+
 /**
- * A facility's invoices, with a name against every line.
+ * A facility's invoices, newest period first, a page at a time, with a name
+ * against every line.
+ *
+ * A busy hospital accumulates one invoice per period per month for years, each
+ * carrying every shift as a line; returning them all was a 2 MB response at a
+ * couple of thousand invoices. The page is bounded and the totals come from
+ * their own aggregate.
  *
  * `invoice_lines.practitioner_id` carries no Prisma relation — struck once a
  * shift is billed, an invoice line is meant to outlive the assignment it
@@ -375,15 +399,32 @@ export interface InvoiceQueueRow extends Omit<InvoiceView, 'lines'> {
  * schema. Named here the same way an unrelated id gets named everywhere else
  * in this codebase: a second query, batched, and merged by id.
  */
-export async function listInvoices(facilityId: string): Promise<InvoiceQueueRow[]> {
-  const rows = await prisma.invoice.findMany({
-    where: { facilityId },
-    include: { lines: true },
-    orderBy: { createdAt: 'desc' },
-  });
+export async function listInvoices(
+  facilityId: string,
+  options: ListInvoicesOptions = {},
+): Promise<InvoicePage> {
+  const limit = options.limit ?? 25;
+  const [rows, grouped] = await Promise.all([
+    prisma.invoice.findMany({
+      where: { facilityId, ...(options.billedOnly ? { status: { not: 'DRAFT' as const } } : {}) },
+      include: { lines: true },
+      orderBy: [{ periodStart: 'desc' }, { id: 'desc' }],
+      take: limit + 1,
+      ...(options.cursor ? { cursor: { id: options.cursor }, skip: 1 } : {}),
+    }),
+    prisma.invoice.groupBy({
+      by: ['status'],
+      where: { facilityId, status: { in: ['ISSUED', 'PAID'] } },
+      _sum: { grossKobo: true },
+      _count: { _all: true },
+    }),
+  ]);
+
+  const hasMore = rows.length > limit;
+  const page = hasMore ? rows.slice(0, limit) : rows;
 
   const practitionerIds = [
-    ...new Set(rows.flatMap((row) => row.lines.map((line) => line.practitionerId))),
+    ...new Set(page.flatMap((row) => row.lines.map((line) => line.practitionerId))),
   ];
   const people = practitionerIds.length
     ? await prisma.user.findMany({
@@ -393,16 +434,27 @@ export async function listInvoices(facilityId: string): Promise<InvoiceQueueRow[
     : [];
   const nameById = new Map(people.map((person) => [person.id, person.fullName]));
 
-  return rows.map((row) => {
-    const view = toView(row);
-    return {
-      ...view,
-      lines: view.lines.map((line) => ({
-        ...line,
-        practitionerName: nameById.get(line.practitionerId) ?? 'Unknown practitioner',
-      })),
-    };
-  });
+  const issued = grouped.find((row) => row.status === 'ISSUED');
+  const paid = grouped.find((row) => row.status === 'PAID');
+
+  return {
+    invoices: page.map((row) => {
+      const view = toView(row);
+      return {
+        ...view,
+        lines: view.lines.map((line) => ({
+          ...line,
+          practitionerName: nameById.get(line.practitionerId) ?? 'Unknown practitioner',
+        })),
+      };
+    }),
+    nextCursor: hasMore ? (page.at(-1)?.id ?? null) : null,
+    totals: {
+      outstandingKobo: issued?._sum.grossKobo ?? 0,
+      outstandingCount: issued?._count._all ?? 0,
+      paidKobo: paid?._sum.grossKobo ?? 0,
+    },
+  };
 }
 
 /**

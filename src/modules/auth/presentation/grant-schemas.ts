@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isNigerianPhone } from '@/lib/phone';
 
 const uuid = z.string().uuid();
 
@@ -36,5 +37,10 @@ export const revokeGrantSchema = z.object({
 export const findUserSchema = z.object({
   scopeType,
   scopeId: uuid.optional(),
-  phone: z.string().trim().min(7).max(20),
+  phone: z
+    .string()
+    .trim()
+    .min(7)
+    .max(20)
+    .refine(isNigerianPhone, 'Enter a Nigerian mobile number, for example 0803 123 4567.'),
 });

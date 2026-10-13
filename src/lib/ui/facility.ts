@@ -9,6 +9,8 @@ export interface FacilitySummary {
   id: string;
   name: string;
   status: string;
+  /** Compliance's note on a rejection, which the owner is owed. */
+  reviewNotes?: string | null;
 }
 
 /**

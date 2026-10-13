@@ -1,6 +1,10 @@
 import { z } from 'zod';
 import { ALLOWED_CONTENT_TYPES, MAX_UPLOAD_BYTES } from '@/lib/storage/tigris';
-import { BIO_MAX_LENGTH, YEARS_OF_EXPERIENCE_MAX, YEARS_OF_EXPERIENCE_MIN } from '../domain/profile';
+import {
+  BIO_MAX_LENGTH,
+  YEARS_OF_EXPERIENCE_MAX,
+  YEARS_OF_EXPERIENCE_MIN,
+} from '../domain/profile';
 import { FOLIO_NUMBER_MAX_LENGTH } from '../domain/verification';
 
 /**
@@ -54,12 +58,10 @@ export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
 
 export const requestPhotoUploadUrlSchema = z.object({
   filename: z.string().trim().min(1).max(255),
-  contentType: z.string().refine((value) => ALLOWED_CONTENT_TYPES.has(value), 'Unsupported file type.'),
-  sizeBytes: z.coerce
-    .number()
-    .int()
-    .positive()
-    .max(MAX_UPLOAD_BYTES, 'File is too large.'),
+  contentType: z
+    .string()
+    .refine((value) => ALLOWED_CONTENT_TYPES.has(value), 'Unsupported file type.'),
+  sizeBytes: z.coerce.number().int().positive().max(MAX_UPLOAD_BYTES, 'File is too large.'),
 });
 export type RequestPhotoUploadUrlInput = z.infer<typeof requestPhotoUploadUrlSchema>;
 
@@ -94,12 +96,38 @@ export const recordRegistrationSchema = z.object({
   userId: z.string().uuid(),
   regulator: z.string().trim().min(2).max(20),
   folioNumber: z.string().trim().min(3).max(FOLIO_NUMBER_MAX_LENGTH),
-  registrationStatus: z.enum(['ACTIVE', 'SUSPENDED', 'EXPIRED', 'STRUCK_OFF', 'UNKNOWN']).optional(),
+  registrationStatus: z
+    .enum(['ACTIVE', 'SUSPENDED', 'EXPIRED', 'STRUCK_OFF', 'UNKNOWN'])
+    .optional(),
   practiceType: z.string().trim().max(100).optional(),
   location: z.string().trim().max(200).optional(),
   expiresAt: z.coerce.date().optional(),
 });
 export type RecordRegistrationInput = z.infer<typeof recordRegistrationSchema>;
+
+/**
+ * Confirming what a practitioner submitted, rather than retyping it.
+ *
+ * Neither variant carries the NIN or the licence number: they are read from
+ * the submission on the server, which is the point — the officer confirms their
+ * reading of the document, and the number cannot differ from what was sent.
+ */
+export const confirmFromSubmissionSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('identity'),
+    submissionId: z.string().uuid(),
+    /** Whether the name on the slip matches the account. Required unless a provider answers. */
+    nameMatch: z.boolean().optional(),
+  }),
+  z.object({
+    kind: z.literal('registration'),
+    submissionId: z.string().uuid(),
+    /** What the licence shows. Required unless a provider answers. */
+    registrationStatus: z.enum(['ACTIVE', 'SUSPENDED', 'EXPIRED', 'STRUCK_OFF', 'UNKNOWN']).optional(),
+    expiresAt: z.coerce.date().optional(),
+  }),
+]);
+export type ConfirmFromSubmissionInput = z.infer<typeof confirmFromSubmissionSchema>;
 
 /** SELF for a practitioner's own record, PLATFORM for compliance. */
 export const verificationQuerySchema = z.object({
@@ -118,3 +146,13 @@ export const eligibilityQuerySchema = z.object({
   scopeId: z.string().uuid().optional(),
 });
 export type EligibilityQueryInput = z.infer<typeof eligibilityQuerySchema>;
+
+/** Compliance only: a screening result is never the practitioner's to read or answer. */
+export const screeningQuerySchema = z.object({ userId: z.string().uuid() });
+
+export const clearScreeningSchema = z.object({
+  userId: z.string().uuid(),
+  // What made the officer sure it is a different person. A flag cleared with
+  // no reason is indistinguishable, later, from one cleared without looking.
+  notes: z.string().trim().min(20).max(1000),
+});

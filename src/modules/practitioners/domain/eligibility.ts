@@ -25,11 +25,7 @@ export type EligibilityBlocker =
   | 'screening_not_clear';
 
 export type UserStatusValue =
-  | 'PENDING_VERIFICATION'
-  | 'UNDER_REVIEW'
-  | 'ACTIVE'
-  | 'SUSPENDED'
-  | 'DEACTIVATED';
+  'PENDING_VERIFICATION' | 'UNDER_REVIEW' | 'ACTIVE' | 'SUSPENDED' | 'DEACTIVATED';
 
 export interface EligibilityInput {
   userStatus: UserStatusValue;
@@ -79,7 +75,9 @@ export function eligibilityBlockers(
     blockers.push('registration_missing');
   } else {
     if (!isRegistrationUsable(input.registration, now)) blockers.push('registration_not_active');
-    if (isEvidenceStale(input.registration.evidenceRetrievedAt, input.registrationReviewDays, now)) {
+    if (
+      isEvidenceStale(input.registration.evidenceRetrievedAt, input.registrationReviewDays, now)
+    ) {
       // An active licence checked two years ago is not evidence that someone
       // may work a shift tomorrow.
       blockers.push('registration_evidence_stale');

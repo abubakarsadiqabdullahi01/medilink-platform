@@ -13,6 +13,8 @@ import { listPractitioners } from '@/modules/practitioners/application/directory
  */
 const listSchema = z.object({
   search: z.string().trim().max(120).optional(),
+  application: z.enum(['waiting', 'draft']).optional(),
+  userId: z.string().uuid().optional(),
   limit: z.coerce.number().int().positive().max(100).default(25),
   cursor: z.string().uuid().optional(),
 });
@@ -24,6 +26,12 @@ export async function GET(request: Request) {
     permission: 'practitioner.profile.read',
     scope: () => ({ type: 'PLATFORM' }),
     action: async ({ input }) =>
-      listPractitioners({ search: input.search, limit: input.limit, cursor: input.cursor }),
+      listPractitioners({
+        search: input.search,
+        application: input.application,
+        userId: input.userId,
+        limit: input.limit,
+        cursor: input.cursor,
+      }),
   });
 }

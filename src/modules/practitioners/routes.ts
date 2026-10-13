@@ -63,6 +63,26 @@ export const ROUTES: RouteDefinition[] = [
     permission: 'credential.review',
     scopeType: 'PLATFORM',
   },
+  // Records the identity or registration from what the practitioner submitted
+  // and decides the submission in the same act.
+  {
+    method: 'POST',
+    path: '/api/v1/practitioners/verification/confirm',
+    permission: 'credential.review',
+    scopeType: 'PLATFORM',
+  },
+  {
+    method: 'GET',
+    path: '/api/v1/practitioners/screening',
+    permission: 'credential.review',
+    scopeType: 'PLATFORM',
+  },
+  {
+    method: 'POST',
+    path: '/api/v1/practitioners/screening',
+    permission: 'credential.review',
+    scopeType: 'PLATFORM',
+  },
   {
     method: 'POST',
     path: '/api/v1/practitioners/me/photo-upload-url',
@@ -73,6 +93,12 @@ export const ROUTES: RouteDefinition[] = [
     method: 'POST',
     path: '/api/v1/practitioners/me/photo-url',
     permission: 'practitioner.profile.read',
+    scopeType: 'SELF',
+  },
+  {
+    method: 'POST',
+    path: '/api/v1/practitioners/me/submit',
+    permission: 'practitioner.profile.write',
     scopeType: 'SELF',
   },
   // Lives under /users because it answers "who is this number", but it is

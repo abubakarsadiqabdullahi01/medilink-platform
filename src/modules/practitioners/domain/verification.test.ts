@@ -21,12 +21,9 @@ describe('normaliseNin', () => {
     expect(normaliseNin('123-4567-8901')).toBe(NIN);
   });
 
-  it.each(['1234567890', '123456789012', '1234567890a', '', '   '])(
-    'refuses %o',
-    (input) => {
-      expect(() => normaliseNin(input)).toThrow(NinFormatError);
-    },
-  );
+  it.each(['1234567890', '123456789012', '1234567890a', '', '   '])('refuses %o', (input) => {
+    expect(() => normaliseNin(input)).toThrow(NinFormatError);
+  });
 });
 
 describe('hashNin', () => {
@@ -109,9 +106,12 @@ describe('isRegistrationUsable', () => {
     expect(isRegistrationUsable({ ...active, expiresAt: null }, NOW)).toBe(true);
   });
 
-  it.each(['SUSPENDED', 'EXPIRED', 'STRUCK_OFF'] as const)('refuses a %s registration', (status) => {
-    expect(isRegistrationUsable({ ...active, registrationStatus: status }, NOW)).toBe(false);
-  });
+  it.each(['SUSPENDED', 'EXPIRED', 'STRUCK_OFF'] as const)(
+    'refuses a %s registration',
+    (status) => {
+      expect(isRegistrationUsable({ ...active, registrationStatus: status }, NOW)).toBe(false);
+    },
+  );
 
   it('refuses UNKNOWN rather than treating it as good news', () => {
     // The regulator was unreachable or unreadable. Defaulting that to "fine"

@@ -2,6 +2,27 @@ import { HttpError } from '@/lib/http/errors';
 
 export class ServiceRequestError extends HttpError {}
 
+/**
+ * Kobo to the naira a person would say. The domain stores integer kobo
+ * (rule 3), but a message is read by a scheduler, and "650000 kobo" made
+ * them do the division in their head.
+ */
+function naira(kobo: number): string {
+  const whole = kobo % 100 === 0;
+  return `₦${(kobo / 100).toLocaleString('en-NG', {
+    minimumFractionDigits: whole ? 0 : 2,
+    maximumFractionDigits: whole ? 0 : 2,
+  })}`;
+}
+
+/** What each facility blocker means to the person trying to publish. */
+const PUBLISH_BLOCKER_TEXT: Record<string, string> = {
+  not_verified: 'Medilink has not verified it',
+  suspended: 'it is suspended',
+  licence_expired: 'its operating licence has expired',
+  deleted: 'it has been closed',
+};
+
 export const ServiceRequestErrors = {
   requestNotFound: () =>
     new ServiceRequestError('service_request_not_found', 'That service request does not exist.', 404),
@@ -34,14 +55,16 @@ export const ServiceRequestErrors = {
   belowRateFloor: (minHourlyKobo: number) =>
     new ServiceRequestError(
       'below_rate_floor',
-      `The rate is below the floor for this category and shift, which is ${minHourlyKobo} kobo an hour.`,
+      `The rate is below the minimum for this profession and shift type, which is ${naira(minHourlyKobo)} an hour.`,
       422,
     ),
 
   facilityCannotPublish: (blockers: string[]) =>
     new ServiceRequestError(
       'facility_cannot_publish',
-      `This facility cannot publish work: ${blockers.join(', ')}.`,
+      `This facility cannot publish shifts yet: ${blockers
+        .map((blocker) => PUBLISH_BLOCKER_TEXT[blocker] ?? blocker)
+        .join('; ')}.`,
       409,
     ),
 

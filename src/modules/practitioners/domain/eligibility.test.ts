@@ -72,7 +72,9 @@ describe('each blocker on its own', () => {
   });
 
   it('blocks a missing profile', () => {
-    expect(eligibilityBlockers(eligible({ hasProfile: false }), NOW)).toContain('profile_incomplete');
+    expect(eligibilityBlockers(eligible({ hasProfile: false }), NOW)).toContain(
+      'profile_incomplete',
+    );
   });
 
   it('blocks an unverified identity', () => {
@@ -144,7 +146,9 @@ describe('each blocker on its own', () => {
   });
 
   it('blocks a practitioner never screened at all', () => {
-    expect(eligibilityBlockers(eligible({ screening: null }), NOW)).toContain('screening_not_clear');
+    expect(eligibilityBlockers(eligible({ screening: null }), NOW)).toContain(
+      'screening_not_clear',
+    );
   });
 });
 

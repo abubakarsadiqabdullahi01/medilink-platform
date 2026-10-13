@@ -1,11 +1,17 @@
 import { Prisma } from '@prisma/client';
+import { returnApplicationForChanges } from '@/modules/practitioners/application/application-review';
 import { prisma, type Tx } from '@/lib/db';
 import { env } from '@/lib/env';
 import { recordAudit } from '@/lib/audit';
 import { publishEvent } from '@/lib/outbox';
 import { EVENTS } from '@/lib/events';
 import { createDownloadUrl, createUploadUrl, headObject } from '@/lib/storage/tigris';
-import { computeExpiresAt, requiredEvidenceFor } from '../domain/submission';
+import {
+  computeExpiresAt,
+  holdsNin,
+  maskReference,
+  requiredEvidenceFor,
+} from '../domain/submission';
 import { CredentialErrors } from '../domain/errors';
 
 /**
@@ -57,6 +63,22 @@ export interface CredentialQueueRow extends CredentialSubmissionView {
   practitionerPhone: string;
   practitionerPhotoUrl: string | null;
   credentialTypeName: string;
+  /**
+   * How this one is checked. A queue that offers "Verify" on a NIN and "Verify"
+   * on a certificate is offering two different acts under one word, so the
+   * screen needs to know which it is looking at.
+   */
+  verificationMethod: string;
+}
+
+/**
+ * What an audit row may say about a submission. The reference on a NIN is the
+ * NIN, and the trail is append-only and read by more people than the record, so
+ * it carries only the last four digits.
+ */
+function auditView(view: CredentialSubmissionView, verificationMethod: string) {
+  if (!holdsNin(verificationMethod) || !view.referenceNumber) return view;
+  return { ...view, referenceNumber: maskReference(view.referenceNumber) };
 }
 
 function toView(submission: {
@@ -200,7 +222,7 @@ export async function submitCredential(
       actorId: input.userId,
       scopeType: 'SELF',
       scopeId: input.userId,
-      after: toView(created),
+      after: auditView(toView(created), credentialType.verificationMethod),
     });
 
     await publishEvent(tx, {
@@ -270,7 +292,7 @@ export async function listSubmissions(query: ListSubmissionsQuery): Promise<Subm
           practitionerProfile: { select: { photoObjectKey: true } },
         },
       },
-      credentialType: { select: { name: true } },
+      credentialType: { select: { name: true, verificationMethod: true } },
     },
   });
 
@@ -292,6 +314,7 @@ export async function listSubmissions(query: ListSubmissionsQuery): Promise<Subm
     practitionerPhone: row.user.phone,
     practitionerPhotoUrl: signed.get(row.userId) ?? null,
     credentialTypeName: row.credentialType.name,
+    verificationMethod: row.credentialType.verificationMethod,
   }));
 
   const hasMore = rows.length > query.limit;
@@ -368,9 +391,20 @@ export async function reviewCredential(
       scopeType: 'SELF',
       scopeId: existing.userId,
       reason: input.reviewNotes,
-      before: toView(existing),
-      after: toView(updated),
+      before: auditView(toView(existing), existing.credentialType.verificationMethod),
+      after: auditView(toView(updated), existing.credentialType.verificationMethod),
     });
+
+    // A refusal of something the profession requires sends the application
+    // back to the practitioner, who must fix it and submit again.
+    if (input.decision === 'reject') {
+      await returnApplicationForChanges(tx, {
+        userId: existing.userId,
+        credentialTypeId: existing.credentialTypeId,
+        reviewerId: input.reviewerId,
+        reason: input.reviewNotes,
+      });
+    }
 
     // No event on reject or on an information request — neither exists in
     // the vocabulary, and the audit row above is the record.
@@ -463,11 +497,81 @@ export async function resupplyCredential(
       actorId: input.userId,
       scopeType: 'SELF',
       scopeId: input.userId,
-      before: toView(existing),
-      after: toView(updated),
+      before: auditView(toView(existing), existing.credentialType.verificationMethod),
+      after: auditView(toView(updated), existing.credentialType.verificationMethod),
     });
 
     return toView(updated);
+  });
+}
+
+/**
+ * What the confirmation flow needs to know about a submission before it writes
+ * anything: whose it is, what it is, whether it is still waiting, and what the
+ * practitioner supplied.
+ */
+export interface SubmissionForVerification {
+  id: string;
+  userId: string;
+  status: CredentialSubmissionStatusValue;
+  referenceNumber: string | null;
+  documentObjectKey: string | null;
+  credentialTypeName: string;
+  verificationMethod: string;
+}
+
+export async function getSubmissionForVerification(
+  submissionId: string,
+): Promise<SubmissionForVerification> {
+  const row = await prisma.credentialSubmission.findUnique({
+    where: { id: submissionId },
+    include: { credentialType: { select: { name: true, verificationMethod: true } } },
+  });
+  if (!row || row.deletedAt) throw CredentialErrors.submissionNotFound();
+  return {
+    id: row.id,
+    userId: row.userId,
+    status: row.status,
+    referenceNumber: row.referenceNumber,
+    documentObjectKey: row.documentObjectKey,
+    credentialTypeName: row.credentialType.name,
+    verificationMethod: row.credentialType.verificationMethod,
+  };
+}
+
+/**
+ * Once an identity has been recorded from a NIN the number has done its job:
+ * the identity record keeps a digest and the last four, and this keeps the same.
+ * Left whole it would be the one place in the system that still held somebody's
+ * NIN in the clear.
+ */
+export async function maskSubmissionReference(input: {
+  submissionId: string;
+  actorId: string;
+}): Promise<void> {
+  const existing = await prisma.credentialSubmission.findUnique({
+    where: { id: input.submissionId },
+  });
+  if (!existing?.referenceNumber) return;
+
+  const masked = maskReference(existing.referenceNumber);
+  if (masked === existing.referenceNumber) return;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.credentialSubmission.update({
+      where: { id: existing.id },
+      data: { referenceNumber: masked },
+    });
+    await recordAudit(tx, {
+      action: 'credential.reference_masked',
+      entityType: 'credentials.credential_submissions',
+      entityId: existing.id,
+      actorId: input.actorId,
+      scopeType: 'SELF',
+      scopeId: existing.userId,
+      reason: 'Identity recorded; the number is no longer held in full.',
+      after: { referenceNumber: masked },
+    });
   });
 }
 

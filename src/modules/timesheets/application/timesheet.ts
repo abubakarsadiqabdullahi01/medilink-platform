@@ -143,9 +143,17 @@ export async function computeAndSaveTimesheet(assignmentId: string): Promise<Tim
     amountKobo: totals.amountKobo,
   };
 
-  const saved = existing
-    ? await prisma.timesheet.update({ where: { id: existing.id }, data })
-    : await prisma.timesheet.create({ data: { attendanceRecordId: record.id, ...data } });
+  // One statement, not a read and then a write. Two callers reach this for the
+  // same shift — the ShiftCompleted handler when it is checked out, and
+  // submitTimesheet when the practitioner presses Submit — and a check-out
+  // followed at once by Submit raced the two between the read above and the
+  // create, so one of them failed on the unique attendance_record_id and the
+  // practitioner saw a 500. Prisma runs this as a native ON CONFLICT upsert.
+  const saved = await prisma.timesheet.upsert({
+    where: { attendanceRecordId: record.id },
+    update: data,
+    create: { attendanceRecordId: record.id, ...data },
+  });
 
   return { ...saved, assignmentId, attendanceStatus: record.status };
 }
@@ -416,6 +424,62 @@ export interface RevisionView {
   actorId: string;
   reason: string;
   createdAt: Date;
+}
+
+/**
+ * The timesheet and its revisions for many shifts in three queries, however
+ * many shifts: the attendance records, the timesheets on them, and the
+ * revisions of those. What a timesheet list needs for every row, where it used
+ * to ask for each shift separately — a page of fifty was fifty-one requests
+ * and a practitioner's whole history could be two hundred.
+ *
+ * A shift with no timesheet yet (not worked, or not yet checked out) is simply
+ * absent from the map.
+ */
+export async function timesheetsForAssignments(
+  assignmentIds: string[],
+): Promise<Map<string, { timesheet: TimesheetView; revisions: RevisionView[] }>> {
+  const out = new Map<string, { timesheet: TimesheetView; revisions: RevisionView[] }>();
+  if (assignmentIds.length === 0) return out;
+
+  const records = await prisma.attendanceRecord.findMany({
+    where: { assignmentId: { in: assignmentIds } },
+    select: { id: true, assignmentId: true, status: true },
+  });
+  if (records.length === 0) return out;
+
+  const timesheets = await prisma.timesheet.findMany({
+    where: { attendanceRecordId: { in: records.map((row) => row.id) } },
+  });
+  const revisions = timesheets.length
+    ? await prisma.timesheetRevision.findMany({
+        where: { timesheetId: { in: timesheets.map((row) => row.id) } },
+        orderBy: { revision: 'asc' },
+      })
+    : [];
+
+  const recordOf = new Map(records.map((row) => [row.id, row]));
+  for (const timesheet of timesheets) {
+    const record = recordOf.get(timesheet.attendanceRecordId);
+    if (!record) continue;
+    out.set(record.assignmentId, {
+      timesheet: {
+        ...timesheet,
+        assignmentId: record.assignmentId,
+        attendanceStatus: record.status,
+      },
+      revisions: revisions
+        .filter((row) => row.timesheetId === timesheet.id)
+        .map((row) => ({
+          revision: row.revision,
+          previous: row.previous,
+          actorId: row.actorId,
+          reason: row.reason,
+          createdAt: row.createdAt,
+        })),
+    });
+  }
+  return out;
 }
 
 export async function timesheetRevisions(assignmentId: string): Promise<RevisionView[]> {

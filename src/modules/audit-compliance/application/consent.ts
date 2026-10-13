@@ -29,6 +29,14 @@ export const ConsentErrors = {
     new HttpError('agreement_not_found', 'That agreement version does not exist.', 404),
   alreadyAccepted: () =>
     new HttpError('agreement_already_accepted', 'You have already accepted that version.', 409),
+  identifierTaken: () =>
+    new HttpError(
+      'agreement_identifier_taken',
+      'A version with that identifier already exists. Give this one a new identifier, such as the date it takes effect.',
+      409,
+    ),
+  notYours: () =>
+    new HttpError('agreement_not_found', 'That agreement version does not exist.', 404),
 };
 
 export interface ConsentView {
@@ -123,6 +131,66 @@ export interface AgreementView {
   body: string;
   effectiveFrom: Date;
   acceptedAt: Date | null;
+}
+
+/**
+ * Consent given as part of something larger, inside that thing's transaction.
+ *
+ * Registration grants CONSENT_AT_REGISTRATION with the account itself: the
+ * list was defined in Stage 9 and never recorded by anything, so every
+ * practitioner's "Your data" page said their credentials were not shared with
+ * facilities while matching shared them regardless.
+ */
+export async function grantConsentsInTx(
+  tx: Tx,
+  input: { userId: string; purposes: ConsentPurposeValue[]; actorId: string; note?: string },
+): Promise<void> {
+  for (const purpose of input.purposes) {
+    const basis = BASIS_FOR_PURPOSE[purpose];
+    const created = await tx.consentRecord.create({
+      data: { userId: input.userId, purpose, granted: true, lawfulBasis: basis, note: input.note },
+    });
+    await recordAudit(tx, {
+      action: 'consent.granted',
+      entityType: 'consent.consent_records',
+      entityId: created.id,
+      actorId: input.actorId,
+      scopeType: 'SELF',
+      scopeId: input.userId,
+      reason: input.note,
+      after: { purpose, granted: true, lawfulBasis: basis },
+    });
+  }
+}
+
+/** The two purposes matching cannot run without. */
+const MATCHING_PURPOSES: ConsentPurposeValue[] = ['CREDENTIAL_SHARING', 'PROFILE_VISIBILITY'];
+
+/**
+ * Who has withdrawn either consent matching rests on, so matching leaves them
+ * out. "Turn this off and you will not be offered work" was printed beside
+ * the toggle and nothing acted on it.
+ *
+ * Only an explicit withdrawal counts. An account with no record at all
+ * predates consent being recorded at registration, and treating its silence
+ * as a withdrawal would silently remove every such practitioner from work.
+ */
+export async function withdrawnFromMatching(userIds: string[]): Promise<Set<string>> {
+  if (userIds.length === 0) return new Set();
+  const rows = await prisma.consentRecord.findMany({
+    where: { userId: { in: userIds }, purpose: { in: MATCHING_PURPOSES as never[] } },
+    orderBy: { grantedAt: 'desc' },
+    select: { userId: true, purpose: true, granted: true },
+  });
+  const seen = new Set<string>();
+  const withdrawn = new Set<string>();
+  for (const row of rows) {
+    const key = `${row.userId}|${row.purpose}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (!row.granted) withdrawn.add(row.userId);
+  }
+  return withdrawn;
 }
 
 /** Who an agreement binds. A privacy notice binds everybody; the rest do not. */
@@ -224,6 +292,56 @@ export async function acceptAgreement(input: {
   return { accepted: true, identifier: version.identifier };
 }
 
+export interface AgreementVersionView {
+  id: string;
+  kind: string;
+  identifier: string;
+  title: string;
+  body: string;
+  effectiveFrom: Date;
+  retiredAt: Date | null;
+  acceptances: number;
+}
+
+/**
+ * Every version ever published, newest first within each kind, with how many
+ * people accepted it. What the operator publishing the next one needs: what
+ * is in force, what it replaced, and how far acceptance has got.
+ */
+export async function listAgreementVersions(): Promise<AgreementVersionView[]> {
+  const rows = await prisma.agreementVersion.findMany({
+    orderBy: [{ kind: 'asc' }, { effectiveFrom: 'desc' }],
+    include: { _count: { select: { acceptances: true } } },
+  });
+  return rows.map((row) => ({
+    id: row.id,
+    kind: row.kind,
+    identifier: row.identifier,
+    title: row.title,
+    body: row.body,
+    effectiveFrom: row.effectiveFrom,
+    retiredAt: row.retiredAt,
+    acceptances: row._count.acceptances,
+  }));
+}
+
+/**
+ * Accepting a version on behalf of an audience — the check that the version
+ * binds that audience at all, so the facility route cannot be used to
+ * accept a practitioner's engagement terms or the reverse.
+ */
+export async function acceptAgreementAs(
+  audience: AgreementAudience,
+  input: { userId: string; versionId: string; ipAddress?: string; userAgent?: string },
+): Promise<{ accepted: true; identifier: string }> {
+  const version = await prisma.agreementVersion.findUnique({
+    where: { id: input.versionId },
+    select: { kind: true },
+  });
+  if (!version || !KINDS_BINDING[audience].includes(version.kind)) throw ConsentErrors.notYours();
+  return acceptAgreement(input);
+}
+
 /** Publishing a new version retires the one it replaces, in one transaction. */
 export async function publishAgreement(input: {
   kind: 'PRACTITIONER_ENGAGEMENT' | 'FACILITY_TERMS' | 'PRIVACY_NOTICE';
@@ -234,6 +352,12 @@ export async function publishAgreement(input: {
   actorId: string;
 }): Promise<AgreementView> {
   const effectiveFrom = input.effectiveFrom ?? new Date();
+
+  // Checked rather than left to the unique index, which surfaced as a 500:
+  // the identifier is how an acceptance names what was agreed, so reusing one
+  // is a mistake worth explaining, not a crash.
+  const taken = await prisma.agreementVersion.findUnique({ where: { identifier: input.identifier } });
+  if (taken) throw ConsentErrors.identifierTaken();
 
   return prisma.$transaction(async (tx: Tx) => {
     await tx.agreementVersion.updateMany({

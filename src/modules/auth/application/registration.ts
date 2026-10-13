@@ -6,6 +6,8 @@ import { hashPassword, passwordProblems } from '@/lib/password';
 import { maskPhone, normalizeNigerianPhone } from '@/lib/phone';
 import { consumeOtp, issueOtp, verifyOtp } from './otp-service';
 import { AuthErrors } from '../domain/errors';
+import { grantConsentsInTx } from '@/modules/audit-compliance/application/consent';
+import { CONSENT_AT_REGISTRATION } from '@/modules/audit-compliance/domain/consent';
 
 /**
  * Registration in three steps: claim a phone number, prove it with a code,
@@ -145,10 +147,14 @@ export async function verifyRegistrationPhone(input: {
 export async function setInitialPassword(input: {
   phone: string;
   password: string;
+  /** Defaults to practitioner; see setPasswordSchema for what staff means. */
+  accountType?: 'practitioner' | 'staff';
+  /** The practitioner ticked the box agreeing to be shown to facilities. */
+  consentToSharing?: boolean;
   ipAddress?: string;
   userAgent?: string;
   now?: Date;
-}): Promise<{ userId: string }> {
+}): Promise<{ userId: string; accountStatus: 'UNDER_REVIEW' | 'ACTIVE' }> {
   const phone = normalizeNigerianPhone(input.phone);
 
   const user = await prisma.user.findUnique({
@@ -179,11 +185,17 @@ export async function setInitialPassword(input: {
   if (problems.length > 0) throw AuthErrors.passwordRejected(problems);
 
   const passwordHash = await hashPassword(input.password);
+  const staff = input.accountType === 'staff';
+  // UNDER_REVIEW is the practitioner's wait for verification, and the
+  // activation sweep is what ends it. A staff account has nothing to verify —
+  // what it may do comes entirely from the grants somebody gives it — so it
+  // would sit in review for ever.
+  const accountStatus = staff ? 'ACTIVE' : 'UNDER_REVIEW';
 
   await prisma.$transaction(async (tx: Tx) => {
     await tx.user.update({
       where: { id: user.id },
-      data: { passwordHash, status: 'UNDER_REVIEW' },
+      data: { passwordHash, status: accountStatus },
     });
 
     await recordAudit(tx, {
@@ -193,19 +205,35 @@ export async function setInitialPassword(input: {
       actorId: user.id,
       scopeType: 'SELF',
       scopeId: user.id,
-      after: { status: 'UNDER_REVIEW' },
+      after: { status: accountStatus, accountType: staff ? 'staff' : 'practitioner' },
       ipAddress: input.ipAddress,
     });
 
     // Credentialling and role assignment react to this; the account is not
-    // usable for shifts until Stage 5 verification completes.
-    await publishEvent(tx, {
-      eventType: EVENTS.PractitionerRegistered,
-      aggregateType: 'identity.users',
-      aggregateId: user.id,
-      payload: { userId: user.id, phone: maskPhone(phone) },
-    });
+    // usable for shifts until Stage 5 verification completes. Not for staff:
+    // a hospital owner signing up used to be granted the practitioner role
+    // and screened against the quack list like a locum.
+    // With the account, not after it: a practitioner who is matched on day one
+    // has to have agreed to be shown before that, and the page that lets them
+    // withdraw has to have something true to say.
+    if (!staff && input.consentToSharing) {
+      await grantConsentsInTx(tx, {
+        userId: user.id,
+        purposes: CONSENT_AT_REGISTRATION,
+        actorId: user.id,
+        note: 'Given at registration',
+      });
+    }
+
+    if (!staff) {
+      await publishEvent(tx, {
+        eventType: EVENTS.PractitionerRegistered,
+        aggregateType: 'identity.users',
+        aggregateId: user.id,
+        payload: { userId: user.id, phone: maskPhone(phone) },
+      });
+    }
   });
 
-  return { userId: user.id };
+  return { userId: user.id, accountStatus };
 }

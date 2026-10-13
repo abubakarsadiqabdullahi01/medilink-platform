@@ -115,9 +115,16 @@ async function screenAgainst(
     // Only a change is worth a row: a nightly sweep over every practitioner
     // would otherwise write an audit entry per person per night, and the
     // trail that matters would drown in it.
-    if (!existing || existing.status !== status || existing.matchedEntryId !== data.matchedEntryId) {
+    if (
+      !existing ||
+      existing.status !== status ||
+      existing.matchedEntryId !== data.matchedEntryId
+    ) {
       await recordAudit(tx, {
-        action: status === 'FLAGGED' ? 'practitioner.screening_flagged' : 'practitioner.screening_cleared',
+        action:
+          status === 'FLAGGED'
+            ? 'practitioner.screening_flagged'
+            : 'practitioner.screening_cleared',
         entityType: 'practitioners.screening_results',
         entityId: row.id,
         actorId: userId,
@@ -189,6 +196,42 @@ export async function getScreeningResult(userId: string): Promise<ScreeningResul
   return row ? toView(row) : null;
 }
 
+export interface ScreeningReview {
+  screening: ScreeningResultView | null;
+  /** The list entry the name matched, so the officer can compare the two. */
+  matchedEntry: {
+    fullName: string;
+    sourceList: string;
+    folioNumber: string | null;
+    reason: string | null;
+    listedAt: Date;
+  } | null;
+}
+
+/**
+ * What an officer needs to answer a flag: the result, and the entry it hit.
+ *
+ * A flag on its own says only "this name is on a list". Whether it is the
+ * same person is the whole question, and it cannot be answered without seeing
+ * which entry, from which list, with which folio number.
+ */
+export async function getScreeningForReview(userId: string): Promise<ScreeningReview> {
+  const screening = await getScreeningResult(userId);
+  const entry = screening?.matchedEntryId
+    ? await prisma.sanctionedEntry.findUnique({
+        where: { id: screening.matchedEntryId },
+        select: {
+          fullName: true,
+          sourceList: true,
+          folioNumber: true,
+          reason: true,
+          listedAt: true,
+        },
+      })
+    : null;
+  return { screening, matchedEntry: entry };
+}
+
 export interface ClearScreeningParams {
   userId: string;
   actorId: string;
@@ -210,7 +253,12 @@ export async function clearScreeningFlag(
   return prisma.$transaction(async (tx: Tx) => {
     const row = await tx.screeningResult.update({
       where: { userId: input.userId },
-      data: { status: 'CLEAR', clearedBy: input.actorId, notes: input.notes, screenedAt: new Date() },
+      data: {
+        status: 'CLEAR',
+        clearedBy: input.actorId,
+        notes: input.notes,
+        screenedAt: new Date(),
+      },
     });
 
     await recordAudit(tx, {

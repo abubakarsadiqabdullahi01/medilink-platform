@@ -40,6 +40,14 @@ export const ROUTES: RouteDefinition[] = [
     permission: 'attendance.record',
     scopeType: 'SELF',
   },
+  // The officer deciding the flag reads the same list, at PLATFORM, with
+  // ?scopeType=PLATFORM. The SELF reading also checks the shift is theirs.
+  {
+    method: 'GET',
+    path: '/api/v1/assignments/:id/excusals',
+    permission: 'sanction.apply',
+    scopeType: 'PLATFORM',
+  },
   {
     method: 'POST',
     path: '/api/v1/excusals/:id/decide',

@@ -34,7 +34,9 @@ export function normaliseNin(input: string): string {
  * secret is what makes the stored value useless on its own.
  */
 export function hashNin(nin: string, secret: string): string {
-  return createHmac('sha256', secret).update(`nin:${normaliseNin(nin)}`).digest('hex');
+  return createHmac('sha256', secret)
+    .update(`nin:${normaliseNin(nin)}`)
+    .digest('hex');
 }
 
 export function ninLast4(nin: string): string {
@@ -74,12 +76,7 @@ export function isEvidenceStale(
   return ageDays >= reviewDays;
 }
 
-export type RegistrationStatusValue =
-  | 'ACTIVE'
-  | 'SUSPENDED'
-  | 'EXPIRED'
-  | 'STRUCK_OFF'
-  | 'UNKNOWN';
+export type RegistrationStatusValue = 'ACTIVE' | 'SUSPENDED' | 'EXPIRED' | 'STRUCK_OFF' | 'UNKNOWN';
 
 export interface RegistrationSnapshot {
   registrationStatus: RegistrationStatusValue;

@@ -9,7 +9,15 @@ export const generateInvoiceSchema = z.object({
 });
 export type GenerateInvoiceInput = z.infer<typeof generateInvoiceSchema>;
 
-export const listInvoicesSchema = z.object({ facilityId: uuid });
+export const listInvoicesSchema = z.object({
+  facilityId: uuid,
+  limit: z.coerce.number().int().min(1).max(100).default(25),
+  cursor: uuid.optional(),
+  billedOnly: z
+    .enum(['true', 'false'])
+    .optional()
+    .transform((value) => value === 'true'),
+});
 
 export const invoiceActionSchema = z.object({ id: uuid, facilityId: uuid });
 export type InvoiceActionInput = z.infer<typeof invoiceActionSchema>;

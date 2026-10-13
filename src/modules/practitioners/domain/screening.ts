@@ -9,8 +9,21 @@
 
 /** Titles carry no identity and are written inconsistently. */
 const TITLES = new Set([
-  'dr', 'doctor', 'prof', 'professor', 'mr', 'mrs', 'ms', 'miss', 'sir',
-  'nurse', 'pharm', 'engr', 'alhaji', 'alhaja', 'chief',
+  'dr',
+  'doctor',
+  'prof',
+  'professor',
+  'mr',
+  'mrs',
+  'ms',
+  'miss',
+  'sir',
+  'nurse',
+  'pharm',
+  'engr',
+  'alhaji',
+  'alhaja',
+  'chief',
 ]);
 
 /**

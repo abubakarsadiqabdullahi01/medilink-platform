@@ -39,6 +39,8 @@ export function useQueueAction<TVariables>(options: {
   queueKey: unknown[];
   run: (variables: TVariables) => Promise<unknown>;
   success: string | ((variables: TVariables) => string);
+  /** Runs after the toast and the refetch, for a form that should reset itself. */
+  onDone?: (variables: TVariables) => void;
 }) {
   const queryClient = useQueryClient();
 
@@ -50,6 +52,7 @@ export function useQueueAction<TVariables>(options: {
       );
       void queryClient.invalidateQueries({ queryKey: options.queueKey });
       void queryClient.invalidateQueries({ queryKey: ['tile'] });
+      options.onDone?.(variables);
     },
     onError: (error) => {
       toast.error('That did not work', { description: errorMessage(error) });

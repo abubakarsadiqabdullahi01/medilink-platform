@@ -51,6 +51,17 @@ export const PractitionerErrors = {
       422,
     ),
 
+  /**
+   * 422 rather than 409: nothing conflicts, the request is simply early. The
+   * message says what is left because this is also what an API client sees.
+   */
+  applicationIncomplete: (missing: string) =>
+    new PractitionerError(
+      'application_incomplete',
+      `Finish ${missing} before you submit for approval.`,
+      422,
+    ),
+
   noPhotoOnProfile: () =>
     new PractitionerError('no_photo_on_profile', 'There is no photograph on this profile.', 404),
 
@@ -75,6 +86,13 @@ export const PractitionerErrors = {
       'Record what the register showed for this folio number.',
       422,
     ),
+
+  /**
+   * 422: the request is well formed and the submission exists, but it is not
+   * something that can be confirmed as it stands. The message says what to do.
+   */
+  submissionNotConfirmable: (message: string) =>
+    new PractitionerError('submission_not_confirmable', message, 422),
 
   duplicateNin: () =>
     new PractitionerError(

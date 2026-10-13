@@ -11,11 +11,13 @@ import { setInitialPassword } from '@/modules/auth/application/registration';
  */
 export async function POST(request: Request) {
   return handleAuthRequest(request, setPasswordSchema, async (input, context) => {
-    await setInitialPassword({
+    const { accountStatus } = await setInitialPassword({
       phone: input.phone,
       password: input.password,
+      accountType: input.accountType,
+      consentToSharing: input.consentToSharing,
       ipAddress: context.ipAddress,
     });
-    return { status: 'password_set', accountStatus: 'UNDER_REVIEW', nextStep: 'login' };
+    return { status: 'password_set', accountStatus, nextStep: 'login' };
   });
 }

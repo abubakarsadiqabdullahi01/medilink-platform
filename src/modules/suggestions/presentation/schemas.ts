@@ -20,6 +20,13 @@ const area = z.enum([
 export const submitSuggestionSchema = z.object({
   area,
   body: z.string().trim().min(SUGGESTION_BODY_MIN_LENGTH).max(SUGGESTION_BODY_MAX_LENGTH),
+  /**
+   * Present when hospital staff send one. They hold `suggestion.submit` at
+   * their facility, not at SELF, so the SELF-only guard refused the very
+   * people the facility bundle gave it to. Only the scope uses it; the
+   * suggestion still records the person, not the hospital.
+   */
+  facilityId: z.string().uuid().optional(),
 });
 export type SubmitSuggestionInput = z.infer<typeof submitSuggestionSchema>;
 

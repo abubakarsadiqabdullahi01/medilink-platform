@@ -27,7 +27,18 @@ export const startRegistrationSchema = z.object({
 
 export const verifyPhoneSchema = z.object({ phone, code });
 
-export const setPasswordSchema = z.object({ phone, password });
+/**
+ * `staff` is an account opened to work for an organisation — a hospital's
+ * owner registering it, or a colleague the owner will add. It gets no
+ * practitioner role and no screening, because it is not a practitioner. The
+ * default stays `practitioner` so every existing caller means what it meant.
+ */
+export const setPasswordSchema = z.object({
+  phone,
+  password,
+  accountType: z.enum(['practitioner', 'staff']).default('practitioner'),
+  consentToSharing: z.boolean().optional(),
+});
 
 export const loginSchema = z.object({ phone, password: z.string().min(1) });
 

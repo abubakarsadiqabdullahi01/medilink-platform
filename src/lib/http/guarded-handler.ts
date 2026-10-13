@@ -4,6 +4,9 @@ import { contextLogger, requestContextFrom, type RequestContext } from './reques
 import { AuthorizationError, requirePermission, type RequestedScope } from '../authz/guard';
 import { requiresStepUp, type Permission } from '../authz/permissions';
 import { HttpError } from './errors';
+import { logger } from '../logger';
+import { env } from '../env';
+import { recordRequest, routeKey, serverTimingHeader, withTiming } from './timing';
 import { requireSession, type CurrentSession } from '@/modules/auth/application/session-service';
 
 /**
@@ -67,7 +70,7 @@ function mergeRouteParams(raw: unknown, routeParams?: Record<string, string>): u
   return { ...base, ...routeParams };
 }
 
-export async function handleGuardedRequest<TInput, TOutput>(
+async function handle<TInput, TOutput>(
   request: Request,
   options: GuardOptions<TInput, TOutput>,
   /**
@@ -131,4 +134,64 @@ export async function handleGuardedRequest<TInput, TOutput>(
     // have been returned: a distinguishable 403 and 404 is a directory.
     return handleError(error, context);
   }
+}
+
+/**
+ * Every guarded endpoint, timed.
+ *
+ * Wraps the guard above without changing what it does, and records how long it
+ * took, how much of that was the database, and how big the answer was — see
+ * ./timing.ts. A `Server-Timing` header goes on every response so the cost of a
+ * request is visible in the browser's own network panel, and anything slower
+ * than `SLOW_REQUEST_MS` is logged as a warning with its query count, which is
+ * usually the whole diagnosis: a slow route with 200 queries is an N+1, one
+ * with 3 queries and 2 seconds is a bad plan.
+ */
+export async function handleGuardedRequest<TInput, TOutput>(
+  request: Request,
+  options: GuardOptions<TInput, TOutput>,
+  routeParams?: Record<string, string>,
+) {
+  return timed(request, () => handle(request, options, routeParams));
+}
+
+/**
+ * Times any route handler the way `handleGuardedRequest` times its own.
+ *
+ * For the routes that answer to more than one permission and so cannot use the
+ * guard's one-permission-one-scope shape (the two dashboards): they still need
+ * to appear in the performance report and carry `Server-Timing`, and as the
+ * aggregation routes they are the ones most likely to need it.
+ */
+export async function timed(request: Request, run: () => Promise<Response>): Promise<Response> {
+  const started = performance.now();
+  const { result: response, timing } = await withTiming(run);
+  const totalMs = performance.now() - started;
+
+  response.headers.set('Server-Timing', serverTimingHeader(totalMs, timing));
+
+  const route = routeKey(request.method, new URL(request.url).pathname);
+  // A clone, so reading the body to size it leaves the response intact.
+  const bytes = (await response.clone().arrayBuffer()).byteLength;
+  const slow = recordRequest({
+    route,
+    status: response.status,
+    totalMs,
+    timing,
+    bytes,
+    slowMs: env.SLOW_REQUEST_MS,
+  });
+
+  if (slow) {
+    logger.warn('slow request', {
+      requestId: response.headers.get('x-request-id') ?? undefined,
+      route,
+      status: response.status,
+      durationMs: Math.round(totalMs),
+      dbMs: Math.round(timing.dbMs),
+      queries: timing.queries,
+      bytes,
+    });
+  }
+  return response;
 }

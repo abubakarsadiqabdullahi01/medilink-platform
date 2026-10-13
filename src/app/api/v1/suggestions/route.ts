@@ -19,7 +19,10 @@ export async function POST(request: Request) {
     source: 'body',
     schema: submitSuggestionSchema,
     permission: 'suggestion.submit',
-    scope: (_input, session) => ({ type: 'SELF', id: session.userId }),
+    scope: (input, session) =>
+      input.facilityId
+        ? { type: 'FACILITY', id: input.facilityId }
+        : { type: 'SELF', id: session.userId },
     action: async ({ input, session }) =>
       submitSuggestion({ userId: session.userId, area: input.area, body: input.body }),
     successStatus: 201,

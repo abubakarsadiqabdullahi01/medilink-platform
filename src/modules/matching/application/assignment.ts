@@ -41,6 +41,19 @@ export interface InvitationView {
   serviceRequestId: string;
   userId: string;
   status: InvitationStatusValue;
+  /**
+   * When the offer was made.
+   *
+   * On the view rather than only on the queue row because it belongs to the
+   * invitation: the practitioner's offers list and the facility's "who have
+   * we asked" list both want it, and the practitioner's screen was reading a
+   * field nobody returned and rendering "offered —".
+   *
+   * It is also the one date that says whether an offer is going stale. An
+   * expiry alone does not: an invitation sent an hour ago and one sent three
+   * days ago can share a deadline.
+   */
+  createdAt: Date;
   expiresAt: Date;
   respondedAt: Date | null;
   declineReason: string | null;
@@ -48,6 +61,7 @@ export interface InvitationView {
 
 function toInvitationView(row: InvitationView): InvitationView {
   return {
+    createdAt: row.createdAt,
     id: row.id,
     serviceRequestId: row.serviceRequestId,
     userId: row.userId,
@@ -575,6 +589,30 @@ export async function getAssignment(assignmentId: string): Promise<AssignmentVie
 }
 
 export type ReadScopeType = 'SELF' | 'FACILITY' | 'PLATFORM';
+
+/**
+ * How many people are booked onto each of these requests, for lists that
+ * show "2 of 3 filled".
+ *
+ * Every booking that was not cancelled counts, including ones that have since
+ * completed or ended as a no-show: the place was taken either way, which is
+ * the question a staffing board asks. `confirmAssignment` counts only live
+ * CONFIRMED rows, because it asks a different question — whether there is
+ * room for one more right now.
+ *
+ * The service-request list never carried this, and both the facility's
+ * shifts board and its fulfilment chart read a field nobody returned, so
+ * every shift showed nobody booked.
+ */
+export async function bookedCountsFor(requestIds: string[]): Promise<Map<string, number>> {
+  if (requestIds.length === 0) return new Map();
+  const rows = await prisma.assignment.groupBy({
+    by: ['serviceRequestId'],
+    where: { serviceRequestId: { in: requestIds }, status: { not: 'CANCELLED' } },
+    _count: { _all: true },
+  });
+  return new Map(rows.map((row) => [row.serviceRequestId, row._count._all]));
+}
 
 /**
  * The same assignment, but only when it is inside the scope the caller was

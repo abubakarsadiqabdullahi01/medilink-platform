@@ -5,7 +5,7 @@ import {
   publishAgreementSchema,
 } from '@/modules/audit-compliance/presentation/consent-schemas';
 import {
-  acceptAgreement,
+  acceptAgreementAs,
   currentAgreements,
   publishAgreement,
 } from '@/modules/audit-compliance/application/consent';
@@ -18,8 +18,8 @@ export async function GET(request: Request) {
     permission: 'practitioner.profile.read',
     scope: (_input, session) => ({ type: 'SELF', id: session.userId }),
     // This endpoint is the practitioner's own: it is guarded on
-    // practitioner.profile.read at SELF, and /practitioner/privacy is what
-    // renders it. A facility's terms bind the hospital, not the locum.
+    // practitioner.profile.read at SELF, and the Privacy tab of My profile
+    // (/practitioner/profile?tab=privacy) is what renders it. A facility's terms bind the hospital, not the locum.
     action: async ({ session }) => ({
       agreements: await currentAgreements(session.userId, 'PRACTITIONER'),
     }),
@@ -40,7 +40,7 @@ export async function POST(request: Request) {
     permission: 'practitioner.profile.write',
     scope: (_input, session) => ({ type: 'SELF', id: session.userId }),
     action: async ({ input, session }) =>
-      acceptAgreement({
+      acceptAgreementAs('PRACTITIONER', {
         userId: session.userId,
         versionId: input.versionId,
         ipAddress: request.headers.get('x-forwarded-for') ?? undefined,

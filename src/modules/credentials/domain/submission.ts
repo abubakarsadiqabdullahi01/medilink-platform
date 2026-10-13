@@ -17,6 +17,28 @@ export function requiredEvidenceFor(verificationMethod: string): RequiredEvidenc
   return REFERENCE_NUMBER_METHODS.has(verificationMethod) ? 'reference_number' : 'document';
 }
 
+/** Whether the credential is checked against a record by number, rather than by reading a document. */
+export function isReferenceChecked(verificationMethod: string): boolean {
+  return REFERENCE_NUMBER_METHODS.has(verificationMethod);
+}
+
+/**
+ * A National Identification Number is the one reference that must not sit in
+ * clear text in the append-only audit trail, nor stay readable once it has
+ * served its purpose: the identity record keeps only a keyed digest and the
+ * last four digits, and a credential row that kept the whole number would
+ * quietly undo that.
+ */
+export function holdsNin(verificationMethod: string): boolean {
+  return verificationMethod === 'nimc_verification';
+}
+
+/** "12345678901" → "*******8901". Keeps enough to recognise, not enough to use. */
+export function maskReference(reference: string): string {
+  const last4 = reference.slice(-4);
+  return `${'*'.repeat(Math.max(reference.length - 4, 0))}${last4}`;
+}
+
 export const REFERENCE_NUMBER_MAX_LENGTH = 100;
 export const REVIEW_NOTES_MAX_LENGTH = 1000;
 

@@ -1,4 +1,5 @@
 import { handleGuardedRequest } from '@/lib/http/guarded-handler';
+import { bookedCountsFor } from '@/modules/matching/application/assignment';
 import {
   createServiceRequestSchema,
   listServiceRequestsSchema,
@@ -33,6 +34,15 @@ export async function GET(request: Request) {
     schema: listServiceRequestsSchema,
     permission: 'service_request.read',
     scope: (input) => ({ type: input.scopeType, id: input.scopeId }),
-    action: async ({ input }) => listServiceRequests(input),
+    // Composed here rather than in the service-requests module, which does
+    // not read matching's tables: the list says how many are booked on each.
+    action: async ({ input }) => {
+      const page = await listServiceRequests(input);
+      const booked = await bookedCountsFor(page.requests.map((row) => row.id));
+      return {
+        ...page,
+        requests: page.requests.map((row) => ({ ...row, confirmedCount: booked.get(row.id) ?? 0 })),
+      };
+    },
   });
 }

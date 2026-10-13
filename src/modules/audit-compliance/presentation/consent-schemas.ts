@@ -19,6 +19,12 @@ export const emptySelfSchema = z.object({});
 
 export const acceptAgreementSchema = z.object({ versionId: uuid });
 
+/** The facility console's side: who is asking is the person, the scope is the facility. */
+export const facilityAgreementsSchema = z.object({ facilityId: uuid });
+export const acceptFacilityAgreementSchema = z.object({ facilityId: uuid, versionId: uuid });
+
+export const listVersionsSchema = z.object({});
+
 export const publishAgreementSchema = z.object({
   kind: z.enum(['PRACTITIONER_ENGAGEMENT', 'FACILITY_TERMS', 'PRIVACY_NOTICE']),
   // Stable and human-readable: the specification is explicit that the version
@@ -33,6 +39,9 @@ export const raiseRequestSchema = z.object({
   kind: z.enum(['ACCESS', 'RECTIFICATION', 'ERASURE', 'PORTABILITY', 'RESTRICTION']),
   detail: z.string().trim().max(1000).optional(),
 });
+
+/** Picking a request up. The id is the whole of it. */
+export const startRequestSchema = z.object({ id: uuid });
 
 export const closeRequestSchema = z.object({
   id: uuid,

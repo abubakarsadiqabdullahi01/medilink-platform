@@ -24,6 +24,8 @@ export interface PractitionerProfileView {
   homeStateId: string | null;
   homeLgaId: string | null;
   travelPreference: 'SAME_LGA' | 'SAME_STATE' | 'ANYWHERE';
+  /** Null until they submit for approval; see application-review.ts. */
+  submittedForReviewAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -39,6 +41,7 @@ function toView(profile: {
   homeStateId: string | null;
   homeLgaId: string | null;
   travelPreference: 'SAME_LGA' | 'SAME_STATE' | 'ANYWHERE';
+  submittedForReviewAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }): PractitionerProfileView {
@@ -53,6 +56,7 @@ function toView(profile: {
     homeStateId: profile.homeStateId,
     homeLgaId: profile.homeLgaId,
     travelPreference: profile.travelPreference,
+    submittedForReviewAt: profile.submittedForReviewAt,
     createdAt: profile.createdAt,
     updatedAt: profile.updatedAt,
   };

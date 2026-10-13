@@ -24,13 +24,18 @@ export async function POST(request: Request) {
   });
 }
 
-/** GET — a facility's own invoices. */
+/** GET — a facility's own invoices, newest period first, a page at a time, with all-time totals. */
 export async function GET(request: Request) {
   return handleGuardedRequest(request, {
     source: 'query',
     schema: listInvoicesSchema,
     permission: 'invoice.read',
     scope: (input) => ({ type: 'FACILITY', id: input.facilityId }),
-    action: async ({ input }) => ({ invoices: await listInvoices(input.facilityId) }),
+    action: async ({ input }) =>
+      listInvoices(input.facilityId, {
+        limit: input.limit,
+        cursor: input.cursor,
+        billedOnly: input.billedOnly,
+      }),
   });
 }

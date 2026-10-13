@@ -23,6 +23,12 @@ export const ROUTES: RouteDefinition[] = [
   { method: 'GET', path: '/api/v1/agreements', permission: 'practitioner.profile.read', scopeType: 'SELF' },
   { method: 'POST', path: '/api/v1/agreements', permission: 'practitioner.profile.write', scopeType: 'SELF' },
   { method: 'PATCH', path: '/api/v1/agreements', permission: 'config.manage', scopeType: 'PLATFORM' },
+  { method: 'GET', path: '/api/v1/admin/performance', permission: 'audit.read', scopeType: 'PLATFORM' },
+  { method: 'GET', path: '/api/v1/agreements/versions', permission: 'config.manage', scopeType: 'PLATFORM' },
+  // A facility's terms are accepted by a person acting for it, so the scope is
+  // the facility while the acceptance carries the person's id.
+  { method: 'GET', path: '/api/v1/agreements/facility', permission: 'facility.read', scopeType: 'FACILITY' },
+  { method: 'POST', path: '/api/v1/agreements/facility', permission: 'facility.read', scopeType: 'FACILITY' },
   // SELF only, deliberately: an officer who could export anybody would have a
   // one-request dossier on every practitioner on the platform.
   { method: 'GET', path: '/api/v1/me/export', permission: 'practitioner.profile.read', scopeType: 'SELF' },
@@ -30,6 +36,7 @@ export const ROUTES: RouteDefinition[] = [
   { method: 'GET', path: '/api/v1/me/data-requests', permission: 'practitioner.profile.read', scopeType: 'SELF' },
   { method: 'POST', path: '/api/v1/data-requests', permission: 'practitioner.profile.write', scopeType: 'SELF' },
   { method: 'GET', path: '/api/v1/data-requests', permission: 'audit.read', scopeType: 'PLATFORM' },
+  { method: 'POST', path: '/api/v1/data-requests/:id/start', permission: 'audit.read', scopeType: 'PLATFORM' },
   { method: 'POST', path: '/api/v1/data-requests/:id/close', permission: 'audit.read', scopeType: 'PLATFORM' },
 
   { method: 'GET', path: '/api/v1/audit', permission: 'audit.read', scopeType: 'PLATFORM' },

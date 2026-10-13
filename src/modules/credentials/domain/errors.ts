@@ -51,6 +51,19 @@ export const CredentialErrors = {
       409,
     ),
 
+  /**
+   * A NIN or a licence number is checked against a record, and approving it
+   * has to *record* what was found — the identity or the registration that
+   * eligibility reads. A bare "verify" would mark the submission good and
+   * leave the practitioner still blocked, with nothing to say why.
+   */
+  confirmThroughPractitioner: () =>
+    new CredentialError(
+      'confirm_through_practitioner',
+      "This is checked against a record, so confirm it from the practitioner's page: that records the identity or registration as well as approving the submission.",
+      422,
+    ),
+
   noDocumentOnSubmission: () =>
     new CredentialError('no_document_on_submission', 'This submission has no document to retrieve.', 422),
 

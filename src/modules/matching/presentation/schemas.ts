@@ -68,6 +68,14 @@ export const listAssignmentsSchema = z.object({
   /** Narrows to one shift's confirmations — the roster reads across all of
    * them; a shift's own detail page reads exactly one. */
   serviceRequestId: z.string().uuid().optional(),
+  /**
+   * Extra per-row detail to join in, comma separated: `attendance`, `timesheet`.
+   * Asked for by the lists that used to fetch it once per row.
+   */
+  include: z
+    .string()
+    .optional()
+    .transform((value) => new Set((value ?? '').split(',').map((part) => part.trim()).filter(Boolean))),
   /** Matches the practitioner's name or phone number. Meaningless, and
    * ignored, at SELF scope — a practitioner is not searching for themselves. */
   search: z.string().trim().max(120).optional(),

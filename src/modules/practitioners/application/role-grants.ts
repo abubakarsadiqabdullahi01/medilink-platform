@@ -24,15 +24,10 @@ export async function grantPractitionerRoleOnRegistration(userId: string): Promi
 
   const role = await prisma.role.findUniqueOrThrow({ where: { key: 'practitioner' } });
 
-  const already = await prisma.userRole.findUnique({
-    where: {
-      userId_roleId_scopeType_scopeId: {
-        userId,
-        roleId: role.id,
-        scopeType: 'SELF',
-        scopeId: userId,
-      },
-    },
+  // Any row, revoked included: a practitioner whose role was taken away must
+  // not get it back because the registration event was delivered again.
+  const already = await prisma.userRole.findFirst({
+    where: { userId, roleId: role.id, scopeType: 'SELF', scopeId: userId },
   });
   if (already) {
     logger.info('practitioner role already granted; retried delivery', { userId });

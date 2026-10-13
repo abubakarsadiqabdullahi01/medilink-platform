@@ -199,7 +199,10 @@ async function loadEligibilityInput(userId: string): Promise<EligibilityInput | 
  * refused with a 404 — the same lenient shape getVerificationSummary already
  * uses for a practitioner with no records at all.
  */
-export async function getEligibility(userId: string, now: Date = new Date()): Promise<EligibilityView> {
+export async function getEligibility(
+  userId: string,
+  now: Date = new Date(),
+): Promise<EligibilityView> {
   const input = await loadEligibilityInput(userId);
   const blockers: EligibilityBlocker[] = input
     ? eligibilityBlockers(input, now)

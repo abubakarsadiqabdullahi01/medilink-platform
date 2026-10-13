@@ -39,6 +39,8 @@ export interface PractitionerListEntry {
   yearsOfExperience: number | null;
   identityRecorded: boolean;
   registrationRecorded: boolean;
+  /** When they said "I am done, review me"; null while they have not. */
+  submittedForReviewAt: Date | null;
   createdAt: Date;
 }
 
@@ -50,6 +52,15 @@ export interface PractitionerDirectoryPage {
 export interface ListPractitionersQuery {
   /** Matches a name fragment or a phone number. */
   search?: string;
+  /**
+   * Which side of "I am done, review me" to show. `waiting` is the officer's
+   * work, longest-waiting first; `draft` is everybody who has not asked yet —
+   * including those with no profile at all, who are exactly the ones a
+   * definition by profile would hide. Omitted, everybody, newest first.
+   */
+  application?: 'waiting' | 'draft';
+  /** One practitioner, by id — what a link from another screen opens. */
+  userId?: string;
   limit: number;
   cursor?: string;
 }
@@ -61,6 +72,22 @@ export async function listPractitioners(
     deletedAt: null,
     roles: { some: { revokedAt: null, scopeType: 'SELF', role: { key: 'practitioner' } } },
   };
+
+  if (query.userId) where.id = query.userId;
+
+  if (query.application === 'waiting') {
+    where.practitionerProfile = { is: { submittedForReviewAt: { not: null }, deletedAt: null } };
+  } else if (query.application === 'draft') {
+    // No profile, or a profile that has not been submitted.
+    where.AND = [
+      {
+        OR: [
+          { practitionerProfile: { is: null } },
+          { practitionerProfile: { is: { submittedForReviewAt: null } } },
+        ],
+      },
+    ];
+  }
 
   if (query.search) {
     const search = query.search.trim();
@@ -81,7 +108,10 @@ export async function listPractitioners(
 
   const rows = await prisma.user.findMany({
     where,
-    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    orderBy:
+      query.application === 'waiting'
+        ? [{ practitionerProfile: { submittedForReviewAt: 'asc' } }, { id: 'asc' }]
+        : [{ createdAt: 'desc' }, { id: 'desc' }],
     take: query.limit + 1,
     ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
     select: {
@@ -91,7 +121,12 @@ export async function listPractitioners(
       status: true,
       createdAt: true,
       practitionerProfile: {
-        select: { photoObjectKey: true, professionalCategoryId: true, yearsOfExperience: true },
+        select: {
+          photoObjectKey: true,
+          professionalCategoryId: true,
+          yearsOfExperience: true,
+          submittedForReviewAt: true,
+        },
       },
       identityVerification: { select: { userId: true } },
       professionalRegistrations: {
@@ -117,6 +152,7 @@ export async function listPractitioners(
       yearsOfExperience: row.practitionerProfile?.yearsOfExperience ?? null,
       identityRecorded: Boolean(row.identityVerification),
       registrationRecorded: row.professionalRegistrations.length > 0,
+      submittedForReviewAt: row.practitionerProfile?.submittedForReviewAt ?? null,
       createdAt: row.createdAt,
     })),
   );

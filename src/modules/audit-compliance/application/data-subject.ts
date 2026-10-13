@@ -32,6 +32,12 @@ export const DataSubjectErrors = {
     ),
   alreadyClosed: () =>
     new HttpError('request_already_closed', 'That request has already been answered.', 409),
+  notWaiting: () =>
+    new HttpError(
+      'request_not_waiting',
+      'Only a request still waiting can be picked up.',
+      409,
+    ),
 };
 
 export interface RequestView {
@@ -108,6 +114,64 @@ export async function raiseRequest(input: {
   });
 
   return toView(created);
+}
+
+/**
+ * Somebody has picked this up.
+ *
+ * `IN_PROGRESS` has been in the status enum since the module was written and
+ * nothing ever set it, so the console's "In progress" tab was permanently
+ * empty — a filter that can only ever return nothing, which is worse than no
+ * filter because people try it once and stop trusting the rest.
+ *
+ * It is a work signal, not a legal one. **The statutory clock does not stop
+ * here**: the Act gives a month from the day the request arrived, and
+ * `dueBy` was fixed at creation for exactly that reason. What this changes is
+ * that a colleague opening the queue can see the request is being handled
+ * rather than starting it again — the same job the "Start reviewing" step
+ * does on a dispute.
+ *
+ * Deliberately not required before answering. A simple access request
+ * exported and answered in one sitting should not need somebody to click
+ * "start" first; the transition exists for the ones that take days.
+ */
+export async function startRequest(input: {
+  requestId: string;
+  actorId: string;
+}): Promise<RequestView> {
+  const existing = await prisma.dataSubjectRequest.findUnique({ where: { id: input.requestId } });
+  if (!existing) throw DataSubjectErrors.notFound();
+  if (existing.status === 'COMPLETED' || existing.status === 'REFUSED') {
+    throw DataSubjectErrors.alreadyClosed();
+  }
+  if (existing.status !== 'RECEIVED') throw DataSubjectErrors.notWaiting();
+
+  const updated = await prisma.$transaction(async (tx: Tx) => {
+    // Conditional on the status just read, so two officers opening the queue
+    // at once cannot both claim it.
+    const applied = await tx.dataSubjectRequest.updateMany({
+      where: { id: input.requestId, status: 'RECEIVED' },
+      data: { status: 'IN_PROGRESS', handledBy: input.actorId },
+    });
+    if (applied.count !== 1) throw DataSubjectErrors.notWaiting();
+
+    const row = await tx.dataSubjectRequest.findUniqueOrThrow({ where: { id: input.requestId } });
+
+    await recordAudit(tx, {
+      action: 'data_subject.started',
+      entityType: 'consent.data_subject_requests',
+      entityId: row.id,
+      actorId: input.actorId,
+      scopeType: 'SELF',
+      scopeId: row.userId,
+      before: { status: existing.status },
+      after: { status: row.status },
+    });
+
+    return row;
+  });
+
+  return toView(updated);
 }
 
 export async function closeRequest(input: {

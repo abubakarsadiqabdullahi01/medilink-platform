@@ -1,6 +1,7 @@
 import { handleGuardedRequest } from '@/lib/http/guarded-handler';
 import { findUserSchema } from '@/modules/auth/presentation/grant-schemas';
 import { findUserByPhone } from '@/modules/auth/application/grants';
+import { normalizeNigerianPhone } from '@/lib/phone';
 
 /**
  * GET /api/v1/grants/find — look somebody up by the number they registered
@@ -16,6 +17,9 @@ export async function GET(request: Request) {
     schema: findUserSchema,
     permission: 'role.grant',
     scope: (input) => ({ type: input.scopeType, id: input.scopeId }),
-    action: async ({ input }) => findUserByPhone(input.phone),
+    // Normalised as /users/find does: registration stores +234…, and an owner
+    // adding a colleague types the number the way it is written down. Without
+    // this, "0803 123 4567" was a 404 for somebody who plainly exists.
+    action: async ({ input }) => findUserByPhone(normalizeNigerianPhone(input.phone)),
   });
 }

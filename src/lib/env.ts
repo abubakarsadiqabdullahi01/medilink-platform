@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { deploymentProblems } from './env-rules';
 
 /**
  * Environment is validated once, at boot. A missing or malformed variable
@@ -55,14 +56,36 @@ const schema = z.object({
   MDCN_VERIFICATION_API_KEY: z.string().optional(),
 
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+
+  /** A request slower than this is logged as a warning (see lib/http/timing.ts). */
+  SLOW_REQUEST_MS: z.coerce.number().int().positive().default(500),
 });
 
-const parsed = schema.safeParse(process.env);
+/**
+ * `next build` imports every route to read its segment config, which runs
+ * this file — and the production image is built with no environment at all:
+ * .dockerignore keeps .env out, and secrets do not belong in an image. So
+ * validating here failed the image build outright; every green build until
+ * then had a developer's .env lying beside it. Nothing connects to anything
+ * while building, so the check waits for the server to start, where it runs
+ * in full.
+ */
+const building = process.env.NEXT_PHASE === 'phase-production-build';
+
+const parsed = (building ? schema.partial() : schema).safeParse(process.env);
 
 if (!parsed.success) {
   console.error('Invalid environment:', parsed.error.flatten().fieldErrors);
   throw new Error('Environment validation failed. Copy .env.example to .env and fill it in.');
 }
 
-export const env = parsed.data;
-export type Env = typeof env;
+export type Env = z.infer<typeof schema>;
+export const env = parsed.data as Env;
+
+if (!building) {
+  const problems = deploymentProblems(env, process.env.APP_ENV !== undefined);
+  if (problems.length > 0) {
+    console.error(`Refusing to start in ${env.APP_ENV}:\n- ${problems.join('\n- ')}`);
+    throw new Error('This configuration is not safe to run here. See the problems above.');
+  }
+}

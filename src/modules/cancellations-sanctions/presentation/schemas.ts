@@ -27,7 +27,10 @@ export const requestExcusalSchema = z.object({
 });
 export type RequestExcusalInput = z.infer<typeof requestExcusalSchema>;
 
-export const listExcusalsSchema = z.object({ id: uuid });
+export const listExcusalsSchema = z.object({
+  id: uuid,
+  scopeType: z.enum(['SELF', 'PLATFORM']).default('SELF'),
+});
 
 export const decideExcusalSchema = z
   .object({
