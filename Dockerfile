@@ -35,6 +35,11 @@ RUN pnpm prisma generate && pnpm build
 #   worker              node_modules/.bin/tsx src/worker/index.ts
 #   migrate             node_modules/.bin/prisma migrate deploy
 #
+# and one command run by hand, once, on a new system - there is nobody to sign
+# in as until it has been:
+#
+#   node_modules/.bin/tsx scripts/create-first-administrator.ts --phone ... --name ...
+#
 # The worker and the seed import from src/, and tsx needs tsconfig.json to
 # resolve '@/'; next start reads next.config.mjs for the security headers. None
 # of these was in the image, so the worker could not start from it and the web
@@ -55,6 +60,7 @@ COPY --from=build /app/tsconfig.json ./tsconfig.json
 COPY --from=build /app/prisma ./prisma
 COPY --from=build /app/src ./src
 COPY --from=build /app/scripts/docker-entrypoint.sh ./scripts/docker-entrypoint.sh
+COPY --from=build /app/scripts/create-first-administrator.ts ./scripts/create-first-administrator.ts
 RUN chmod +x ./scripts/docker-entrypoint.sh
 USER app
 EXPOSE 3000

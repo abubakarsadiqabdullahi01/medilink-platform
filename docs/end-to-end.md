@@ -50,7 +50,14 @@ end-to-end run unable to start: a practitioner can register through the API
 and a compliance officer cannot, because nothing grants a `PLATFORM` role and
 granting one is precisely what a `PLATFORM` role is for.
 
-Somebody has to be the first administrator. `scripts/bootstrap-demo.ts` is
+Somebody has to be the first administrator. On a real system that is
+`scripts/create-first-administrator.ts`, which is safe to run in production: it
+asks for the password at the terminal and never prints it, refuses once a super
+administrator exists, will not touch an account that is already there, and
+writes an audit row saying it was run. `--additional` is the deliberate way
+round the second refusal, for when every administrator has lost access.
+
+For local work, `scripts/bootstrap-demo.ts` is
 that somebody, for local only — it refuses to run unless `APP_ENV=local`,
 because a script that creates administrators with a known password has no
 business near production. It is idempotent, so run it as often as you like.
