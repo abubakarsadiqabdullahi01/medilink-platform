@@ -35,7 +35,7 @@ export const PERMISSIONS = {
   'timesheet.submit': 'Submit a timesheet',
   'timesheet.approve': 'Approve a timesheet',
   'invoice.read': 'View an invoice',
-  'payout.manage': 'Initiate or release a payout',
+  'payout.manage': 'Raise and issue invoices, record payment, prepare and release payouts (requires step-up auth)',
   'payout.account.change': 'Change a payout bank account (requires step-up auth)',
 
   // governance
@@ -76,6 +76,10 @@ export type Permission = keyof typeof PERMISSIONS;
  */
 export const STEP_UP_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   'payout.account.change',
+  // The money acts: issuing a bill, recording that it was paid, preparing and
+  // releasing a payout. All five routes name this one permission, and all are
+  // what an open finance session on a stolen laptop is used for.
+  'payout.manage',
   // Granting a role is how an attacker with one session gets a durable
   // second one. It is also rare enough that asking for a password again
   // costs an administrator seconds a month.

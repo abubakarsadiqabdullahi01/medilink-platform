@@ -25,6 +25,13 @@ describe('which permissions need a fresh password', () => {
     expect(requiresStepUp('role.grant')).toBe(true);
   });
 
+  it('includes the money acts', () => {
+    // BIL-12. Issuing a bill, recording that it was paid, and sending a payout
+    // are what a stolen laptop with an open finance session is used for; all
+    // five routes name this one permission.
+    expect(requiresStepUp('payout.manage')).toBe(true);
+  });
+
   it('leaves ordinary work alone', () => {
     // A prompt on everything is a prompt nobody reads. These are the daily
     // acts of the three main roles.

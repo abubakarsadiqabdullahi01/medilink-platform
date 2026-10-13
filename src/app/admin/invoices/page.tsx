@@ -22,6 +22,7 @@ import {
 import { Combobox } from '@/components/app/combobox';
 import { StatusBadge } from '@/components/app/status-badge';
 import { EmptyState, PageHeader, QueueSkeleton } from '@/components/app/page-shell';
+import { useStepUp } from '@/components/app/step-up';
 import { formatDate, formatMinutes, formatNaira } from '@/components/app/format';
 
 interface FacilitySummary {
@@ -102,6 +103,8 @@ export default function InvoicesPage() {
     void queryClient.invalidateQueries({ queryKey: ['tile'] });
   }
 
+  const stepUp = useStepUp('Issuing, and recording payment of, an invoice moves money.');
+
   const generate = useMutation({
     mutationFn: () =>
       api.post('/api/v1/invoices', {
@@ -113,7 +116,10 @@ export default function InvoicesPage() {
       toast.success('Draft raised', { description: 'Check it, then issue it.' });
       refresh();
     },
-    onError: (error) => toast.error('Nothing to bill', { description: errorMessage(error) }),
+    onError: (error) => {
+      if (stepUp.handle(error, () => generate.mutate())) return;
+      toast.error('Nothing to bill', { description: errorMessage(error) });
+    },
   });
 
   const issue = useMutation({
@@ -123,7 +129,10 @@ export default function InvoicesPage() {
       toast.success('Issued');
       refresh();
     },
-    onError: (error) => toast.error('Could not issue it', { description: errorMessage(error) }),
+    onError: (error, invoice) => {
+      if (stepUp.handle(error, () => issue.mutate(invoice))) return;
+      toast.error('Could not issue it', { description: errorMessage(error) });
+    },
   });
 
   const pay = useMutation({
@@ -135,11 +144,15 @@ export default function InvoicesPage() {
       });
       refresh();
     },
-    onError: (error) => toast.error('Could not record it', { description: errorMessage(error) }),
+    onError: (error, invoice) => {
+      if (stepUp.handle(error, () => pay.mutate(invoice))) return;
+      toast.error('Could not record it', { description: errorMessage(error) });
+    },
   });
 
   return (
     <>
+      {stepUp.dialog}
       <PageHeader
         title="Invoices"
         description="Raised from shifts a facility has already approved, so nothing here can bill for hours they did not accept."

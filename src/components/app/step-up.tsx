@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { LockKeyhole } from 'lucide-react';
 import { api, ApiError, errorMessage } from '@/lib/ui/api';
@@ -24,10 +24,9 @@ export function isStepUpRequired(error: unknown): boolean {
 /**
  * Re-entering the password before a sensitive action.
  *
- * The server has refused `role.grant` and `payout.account.change` without a
- * fresh step-up since Stage 4.8, and no screen could supply one, so both
- * permissions were unusable from the consoles. This is the one place that
- * asks; the caller decides what to retry once it succeeds.
+ * The server refuses `role.grant`, `payout.account.change` and the money acts
+ * (`payout.manage`) without a fresh step-up. This is the one place that asks;
+ * the caller decides what to retry once it succeeds - see `useStepUp`.
  */
 export function StepUpDialog({
   open,
@@ -111,4 +110,42 @@ export function StepUpDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+/**
+ * For a screen whose actions may be refused for want of a fresh password: hand
+ * `handle` the error and a way to try again, render `dialog`, and the person is
+ * asked once and the action is repeated.
+ *
+ * `handle` returns whether it was a step-up refusal; the caller shows its own
+ * error for anything else.
+ */
+export function useStepUp(purpose: string) {
+  const [open, setOpen] = useState(false);
+  const retry = useRef<(() => void) | null>(null);
+
+  const handle = (error: unknown, again: () => void): boolean => {
+    if (!isStepUpRequired(error)) return false;
+    retry.current = again;
+    setOpen(true);
+    return true;
+  };
+
+  const dialog = (
+    <StepUpDialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) retry.current = null;
+        setOpen(next);
+      }}
+      purpose={purpose}
+      onConfirmed={() => {
+        const again = retry.current;
+        retry.current = null;
+        again?.();
+      }}
+    />
+  );
+
+  return { handle, dialog };
 }

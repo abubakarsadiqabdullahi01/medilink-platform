@@ -41,6 +41,8 @@ import {
   releasePayout,
 } from '@/modules/billing-settlement/application/payout';
 import { GET as getPayoutsRoute } from '@/app/api/v1/payouts/route';
+import { POST as issueInvoiceRoute } from '@/app/api/v1/invoices/[id]/issue/route';
+import { POST as releasePayoutRoute } from '@/app/api/v1/payouts/[id]/release/route';
 import { issueSession } from '@/modules/auth/application/session-service';
 import { clearCookies } from './support/cookie-jar';
 import {
@@ -790,6 +792,60 @@ describe('paying a practitioner', () => {
     const after = await read();
     expect(after.payouts).toHaveLength(1);
     expect(after.owedKobo).toBe(await amountOwed(world.practitionerId));
+  });
+});
+
+describe('money acts need a fresh password', () => {
+  /**
+   * BIL-12. Issuing a bill and sending a payout are what an open finance
+   * session on a stolen laptop is used for. The guard already asked for a fresh
+   * password on two permissions; neither was a money act.
+   */
+  const post = (path: string, id: string, body: object) => ({
+    request: new Request(`http://localhost${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+    params: { params: Promise.resolve({ id }) },
+  });
+
+  it('refuses to issue an invoice on an ordinary session, and leaves it a draft', async () => {
+    const world = await buildWorld();
+    const invoice = await generateInvoice(period(world));
+    await issueSession({ userId: world.financeId });
+
+    const call = post(`/api/v1/invoices/${invoice.id}/issue`, invoice.id, { facilityId: world.facilityId });
+    const response = await issueInvoiceRoute(call.request, call.params);
+
+    expect(response.status).toBe(401);
+    expect(((await response.json()) as { error: { code: string } }).error.code).toBe('step_up_required');
+    expect((await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).status).toBe('DRAFT');
+  });
+
+  it('issues it once the password has been confirmed', async () => {
+    const world = await buildWorld();
+    const invoice = await generateInvoice(period(world));
+    await issueSession({ userId: world.financeId, stepUp: true });
+
+    const call = post(`/api/v1/invoices/${invoice.id}/issue`, invoice.id, { facilityId: world.facilityId });
+    const response = await issueInvoiceRoute(call.request, call.params);
+
+    expect(response.status).toBe(200);
+    expect((await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).status).toBe('ISSUED');
+  });
+
+  it('refuses to release a payout on an ordinary session, and sends nothing', async () => {
+    const world = await buildWorld();
+    await generateInvoice(period(world));
+    const payout = await preparePayout({ practitionerId: world.practitionerId, actorId: world.financeId });
+    await issueSession({ userId: world.financeId });
+
+    const call = post(`/api/v1/payouts/${payout.id}/release`, payout.id, {});
+    const response = await releasePayoutRoute(call.request, call.params);
+
+    expect(response.status).toBe(401);
+    expect((await prisma.payout.findUniqueOrThrow({ where: { id: payout.id } })).status).toBe('PREPARED');
   });
 });
 

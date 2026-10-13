@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { StatusBadge } from '@/components/app/status-badge';
 import { Detail, DetailGrid, EmptyState, PageHeader, QueueSkeleton } from '@/components/app/page-shell';
+import { useStepUp } from '@/components/app/step-up';
 import { formatNaira, formatWhen } from '@/components/app/format';
 
 interface PractitionerHit {
@@ -74,13 +75,18 @@ export default function PayoutsPage() {
     void queryClient.invalidateQueries({ queryKey: ['payouts'] });
   }
 
+  const stepUp = useStepUp('Preparing and releasing a payout moves money.');
+
   const prepare = useMutation({
     mutationFn: () => api.post('/api/v1/payouts', { practitionerId: selected!.userId }),
     onSuccess: () => {
       toast.success('Prepared', { description: 'Nothing has moved yet. Release it to pay.' });
       refresh();
     },
-    onError: (error) => toast.error('Could not prepare it', { description: errorMessage(error) }),
+    onError: (error) => {
+      if (stepUp.handle(error, () => prepare.mutate())) return;
+      toast.error('Could not prepare it', { description: errorMessage(error) });
+    },
   });
 
   const release = useMutation({
@@ -89,7 +95,10 @@ export default function PayoutsPage() {
       toast.success('Released to the gateway');
       refresh();
     },
-    onError: (error) => toast.error('The gateway refused it', { description: errorMessage(error) }),
+    onError: (error, payout) => {
+      if (stepUp.handle(error, () => release.mutate(payout))) return;
+      toast.error('The gateway refused it', { description: errorMessage(error) });
+    },
   });
 
   if (!selected) {
@@ -180,6 +189,7 @@ export default function PayoutsPage() {
 
   return (
     <>
+      {stepUp.dialog}
       <Button variant="ghost" size="sm" className="mb-4 -ml-2" onClick={() => setSelected(null)}>
         <ArrowLeft />
         Find somebody else
