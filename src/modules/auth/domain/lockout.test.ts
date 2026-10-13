@@ -79,3 +79,48 @@ describe('lockoutState', () => {
     expect(lockoutState(shuffled, NOW).locked).toBe(true);
   });
 });
+
+
+describe('lockoutState and the attempts made while locked', () => {
+  const lockedFor = (secondsAgo: number): AttemptRecord[] => failures(LOGIN_MAX_FAILURES, secondsAgo);
+
+  it('does not let a refused attempt extend the lock', () => {
+    // Each attempt made while locked is itself written down as a failure. Counted
+    // as one, every such attempt pushed the lock out by another fifteen minutes,
+    // so anybody could keep a stranger's account locked by knocking on it.
+    const refused: AttemptRecord = {
+      succeeded: false,
+      reason: 'locked_out',
+      createdAt: new Date(NOW.getTime() - 5_000),
+    };
+    const real = lockedFor(LOGIN_LOCKOUT_SECONDS - 100);
+
+    const state = lockoutState([refused, ...real], NOW);
+    expect(state.locked).toBe(true);
+    // Still about a hundred seconds, not fifteen minutes.
+    expect(state.retryAfterSeconds).toBeLessThanOrEqual(110);
+  });
+
+  it('releases the lock on schedule however many attempts were refused meanwhile', () => {
+    const refused = Array.from({ length: 20 }, (_unused, index) => ({
+      succeeded: false,
+      reason: 'locked_out',
+      createdAt: new Date(NOW.getTime() - (1 + index) * 1000),
+    }));
+    const real = lockedFor(LOGIN_LOCKOUT_SECONDS + 1);
+
+    expect(lockoutState([...refused, ...real], NOW).locked).toBe(false);
+  });
+
+  it('still counts a refused attempt as nothing at all, not as a success', () => {
+    const refused: AttemptRecord = {
+      succeeded: false,
+      reason: 'locked_out',
+      createdAt: new Date(NOW.getTime() - 1_000),
+    };
+    // Four real failures and a refusal: one short of the limit, so not locked.
+    const state = lockoutState([refused, ...failures(LOGIN_MAX_FAILURES - 1, 30)], NOW);
+    expect(state.locked).toBe(false);
+    expect(state.failuresInWindow).toBe(LOGIN_MAX_FAILURES - 1);
+  });
+});

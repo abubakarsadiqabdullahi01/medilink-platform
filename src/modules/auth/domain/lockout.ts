@@ -11,7 +11,16 @@ export const LOGIN_LOCKOUT_SECONDS = 900;
 export interface AttemptRecord {
   succeeded: boolean;
   createdAt: Date;
+  /** What the attempt was; `locked_out` marks one refused while the account was locked. */
+  reason?: string | null;
 }
+
+/**
+ * An attempt refused because the account was already locked. It is written
+ * down, as evidence, but it is not a guess: counting it extended the lock by
+ * another fifteen minutes every time anybody knocked.
+ */
+export const LOCKED_OUT_REASON = 'locked_out';
 
 export interface LockoutState {
   locked: boolean;
@@ -28,6 +37,7 @@ export function lockoutState(attempts: AttemptRecord[], now: Date = new Date()):
   const windowStart = now.getTime() - LOGIN_FAILURE_WINDOW_SECONDS * 1000;
 
   const recent = attempts
+    .filter((attempt) => attempt.reason !== LOCKED_OUT_REASON)
     .filter((attempt) => attempt.createdAt.getTime() > windowStart)
     .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 

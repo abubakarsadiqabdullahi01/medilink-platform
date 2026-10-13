@@ -36,12 +36,12 @@ export async function login(input: {
       identifier: phone,
       createdAt: { gt: new Date(now.getTime() - LOGIN_FAILURE_WINDOW_SECONDS * 1000) },
     },
-    select: { succeeded: true, createdAt: true },
+    select: { succeeded: true, createdAt: true, reason: true },
   });
 
   const lock = lockoutState(attempts, now);
   if (lock.locked) {
-    await recordAttempt({ phone, succeeded: false, reason: 'locked_out', ipAddress: input.ipAddress });
+    await recordAttempt({ phone, succeeded: false, reason: 'locked_out', ipAddress: input.ipAddress, at: now });
     throw AuthErrors.accountLocked(lock.retryAfterSeconds);
   }
 
@@ -69,21 +69,22 @@ export async function login(input: {
       succeeded: false,
       reason: !user ? 'unknown_identifier' : !user.passwordHash ? 'no_password_set' : 'bad_password',
       ipAddress: input.ipAddress,
+      at: now,
     });
     throw AuthErrors.invalidCredentials();
   }
 
   if (!user.phoneVerifiedAt) {
-    await recordAttempt({ phone, userId: user.id, succeeded: false, reason: 'phone_unverified', ipAddress: input.ipAddress });
+    await recordAttempt({ phone, userId: user.id, succeeded: false, reason: 'phone_unverified', ipAddress: input.ipAddress, at: now });
     throw AuthErrors.phoneNotVerified();
   }
 
   if (user.status === 'SUSPENDED' || user.status === 'DEACTIVATED') {
-    await recordAttempt({ phone, userId: user.id, succeeded: false, reason: `status_${user.status.toLowerCase()}`, ipAddress: input.ipAddress });
+    await recordAttempt({ phone, userId: user.id, succeeded: false, reason: `status_${user.status.toLowerCase()}`, ipAddress: input.ipAddress, at: now });
     throw AuthErrors.accountNotUsable();
   }
 
-  await recordAttempt({ phone, userId: user.id, succeeded: true, ipAddress: input.ipAddress });
+  await recordAttempt({ phone, userId: user.id, succeeded: true, ipAddress: input.ipAddress, at: now });
 
   logger.info('login succeeded', { userId: user.id });
 
@@ -114,9 +115,12 @@ async function recordAttempt(input: {
   succeeded: boolean;
   reason?: string;
   ipAddress?: string;
+  /** The clock the throttle is judging by, so the two cannot disagree about when this happened. */
+  at: Date;
 }): Promise<void> {
   await prisma.loginAttempt.create({
     data: {
+      createdAt: input.at,
       identifier: input.phone,
       userId: input.userId,
       succeeded: input.succeeded,
