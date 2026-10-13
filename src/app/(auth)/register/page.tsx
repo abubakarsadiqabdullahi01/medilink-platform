@@ -11,6 +11,7 @@ import { api, errorMessage } from '@/lib/ui/api';
 import { useZodForm } from '@/lib/ui/form';
 import { consoleFor, type SessionState } from '@/lib/ui/session';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { TextSizeControl } from '@/components/app/text-size-control';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -85,7 +86,7 @@ const passwordSchema = z
 function FieldError({ message }: { message?: string }) {
   if (!message) return null;
   return (
-    <p role="alert" className="text-xs text-destructive">
+    <p role="alert" className="text-xs text-destructive-text">
       {message}
     </p>
   );
@@ -195,10 +196,11 @@ function RegisterForm() {
   const failure = start.error ?? verify.error ?? finish.error ?? resend.error;
 
   return (
-    <main className="grid min-h-dvh lg:grid-cols-2">
+    <main className="relative grid min-h-dvh lg:grid-cols-2">
+      <TextSizeControl className="absolute right-3 top-3 z-10" />
       <div className="flex items-center justify-center px-6 py-12">
         <div className="w-full max-w-sm">
-          <p className="text-[0.7rem] font-semibold uppercase tracking-widest text-muted-foreground">
+          <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
             Medilink
           </p>
           <h1 className="mt-1 text-2xl font-semibold tracking-tight">

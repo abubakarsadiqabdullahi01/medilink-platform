@@ -185,7 +185,7 @@ export function DisputeDetail({ dispute, onBack }: { dispute: Dispute; onBack: (
             <TabsTrigger value="evidence">
               Evidence
               {evidence.data && evidence.data.length > 0 ? (
-                <span className="ml-1.5 rounded-full bg-muted px-1.5 text-[0.7rem]">
+                <span className="ml-1.5 rounded-full bg-muted px-1.5 text-xs">
                   {evidence.data.length}
                 </span>
               ) : null}

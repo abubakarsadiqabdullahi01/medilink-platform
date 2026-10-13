@@ -784,17 +784,17 @@ function Practitioners() {
                       needs something recorded. */}
                   <div className="hidden shrink-0 items-center gap-2 sm:flex">
                     {row.submittedForReviewAt ? (
-                      <span className="rounded-full bg-info/10 px-2 py-0.5 text-[0.7rem] font-medium text-info">
+                      <span className="rounded-full bg-info/10 px-2 py-0.5 text-xs font-medium text-info">
                         Submitted {formatAgo(row.submittedForReviewAt)}
                       </span>
                     ) : (
-                      <span className="rounded-full bg-muted px-2 py-0.5 text-[0.7rem] font-medium text-muted-foreground">
+                      <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
                         Not submitted
                       </span>
                     )}
                     <span
                       className={cn(
-                        'rounded-full px-2 py-0.5 text-[0.7rem] font-medium',
+                        'rounded-full px-2 py-0.5 text-xs font-medium',
                         row.identityRecorded
                           ? 'bg-success/10 text-success'
                           : 'bg-warning/10 text-warning',
@@ -804,7 +804,7 @@ function Practitioners() {
                     </span>
                     <span
                       className={cn(
-                        'rounded-full px-2 py-0.5 text-[0.7rem] font-medium',
+                        'rounded-full px-2 py-0.5 text-xs font-medium',
                         row.registrationRecorded
                           ? 'bg-success/10 text-success'
                           : 'bg-warning/10 text-warning',

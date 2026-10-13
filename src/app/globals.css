@@ -29,25 +29,31 @@
     --secondary-foreground: 40 14% 20%;
 
     --muted: 40 12% 94%;
-    --muted-foreground: 40 6% 44%;
+    --muted-foreground: 40 6% 40%;
 
     --accent: 184 40% 94%;
     --accent-foreground: 184 82% 18%;
 
     --destructive: 358 68% 46%;
     --destructive-foreground: 0 0% 100%;
+    /* Destructive as the colour of text on its own tint, which is not always the
+       colour of its fill: in dark mode a fill dark enough for white text is too
+       dark to read as text on a dark card. */
+    --destructive-text: 358 68% 46%;
 
     /* Severity and outcome colours, named for what they mean rather than for
        what they look like, so a queue badge and a chart agree. */
-    --success: 152 55% 32%;
+    --success: 152 55% 29%;
     --success-foreground: 0 0% 100%;
-    --warning: 32 88% 42%;
+    --warning: 32 90% 32%;
     --warning-foreground: 0 0% 100%;
     --info: 214 70% 44%;
     --info-foreground: 0 0% 100%;
 
     --border: 40 12% 88%;
-    --input: 40 12% 86%;
+    /* The edge of a field has to be seen, not just present: 3:1 against the page
+       and the card (WCAG 1.4.11). It was 1.31:1. */
+    --input: 40 8% 52%;
     --ring: 184 82% 30%;
 
     --radius: 0.625rem;
@@ -94,8 +100,9 @@
     --accent: 184 40% 20%;
     --accent-foreground: 184 60% 82%;
 
-    --destructive: 358 62% 54%;
+    --destructive: 358 62% 50%;
     --destructive-foreground: 0 0% 100%;
+    --destructive-text: 358 80% 72%;
 
     --success: 152 45% 46%;
     --success-foreground: 200 20% 8%;
@@ -105,7 +112,7 @@
     --info-foreground: 200 20% 8%;
 
     --border: 200 12% 20%;
-    --input: 200 12% 22%;
+    --input: 200 8% 46%;
     --ring: 184 62% 44%;
 
     --chart-1: 212 76% 56%;
@@ -125,6 +132,15 @@
 @layer base {
   * {
     @apply border-border;
+  }
+
+  /* The reader's text size (UXA-04). Everything is sized in rem, so scaling the
+     root scales the page; see src/lib/ui/text-size.ts. */
+  html[data-text-size='large'] {
+    font-size: 118.75%;
+  }
+  html[data-text-size='projector'] {
+    font-size: 137.5%;
   }
 
   body {

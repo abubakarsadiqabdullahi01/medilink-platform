@@ -9,6 +9,7 @@ import { TriangleAlert } from 'lucide-react';
 import { api, errorMessage } from '@/lib/ui/api';
 import { useZodForm } from '@/lib/ui/form';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { TextSizeControl } from '@/components/app/text-size-control';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -56,7 +57,7 @@ const resetSchema = z
 function FieldError({ message }: { message?: string }) {
   if (!message) return null;
   return (
-    <p role="alert" className="text-xs text-destructive">
+    <p role="alert" className="text-xs text-destructive-text">
       {message}
     </p>
   );
@@ -102,9 +103,10 @@ export default function ForgotPasswordPage() {
   const failure = request.error ?? confirm.error ?? resend.error;
 
   return (
-    <main className="flex min-h-dvh items-center justify-center px-6 py-12">
+    <main className="relative flex min-h-dvh items-center justify-center px-6 py-12">
+      <TextSizeControl className="absolute right-3 top-3 z-10" />
       <div className="w-full max-w-sm">
-        <p className="text-[0.7rem] font-semibold uppercase tracking-widest text-muted-foreground">
+        <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
           Medilink
         </p>
         <h1 className="mt-1 text-2xl font-semibold tracking-tight">Reset your password</h1>

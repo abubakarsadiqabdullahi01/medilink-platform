@@ -7,6 +7,7 @@ export const metadata: Metadata = {
   description: 'Verified healthcare workforce and locum management for Nigeria.',
   applicationName: 'Medilink',
   manifest: '/manifest.webmanifest',
+  icons: { apple: '/icons/apple-touch-icon.png' },
 };
 
 export const viewport: Viewport = {

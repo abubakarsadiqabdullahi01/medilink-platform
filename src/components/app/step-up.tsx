@@ -94,7 +94,7 @@ export function StepUpDialog({
             onChange={(event) => setPassword(event.target.value)}
           />
           {failure ? (
-            <p role="alert" className="text-xs text-destructive">
+            <p role="alert" className="text-xs text-destructive-text">
               {failure}
             </p>
           ) : null}

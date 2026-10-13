@@ -29,6 +29,7 @@ import {
 import { cn } from '@/lib/utils';
 import { Avatar } from '@/components/app/avatar';
 import { SuggestionDialog } from '@/components/app/suggestion-dialog';
+import { TextSizeControl } from '@/components/app/text-size-control';
 import { api } from '@/lib/ui/api';
 import { useSession } from '@/lib/ui/session';
 import { Button } from '@/components/ui/button';
@@ -216,7 +217,7 @@ export function ConsoleShell({
     <nav className="space-y-6">
       {visible.map((section) => (
         <div key={section.heading}>
-          <p className="mb-2 px-3 text-[0.7rem] font-semibold uppercase tracking-wider text-muted-foreground">
+          <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             {section.heading}
           </p>
           <ul className="space-y-0.5">
@@ -265,7 +266,7 @@ export function ConsoleShell({
       </a>
       <aside className="sticky top-0 hidden h-dvh w-64 shrink-0 flex-col border-r bg-card lg:flex">
         <div className="p-5">
-          <p className="text-[0.7rem] font-semibold uppercase tracking-widest text-muted-foreground">
+          <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
             Medilink
           </p>
           <p className="mt-0.5 font-semibold tracking-tight">{title}</p>
@@ -317,6 +318,7 @@ export function ConsoleShell({
           <p className="truncate font-semibold tracking-tight lg:hidden">{title}</p>
 
           <div className="ml-auto flex items-center gap-1">
+            <TextSizeControl />
             <Button variant="ghost" size="icon" onClick={toggleTheme} aria-label="Toggle theme">
               {dark ? <Sun /> : <Moon />}
             </Button>

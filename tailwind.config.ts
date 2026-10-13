@@ -29,7 +29,8 @@ export default {
   			},
   			destructive: {
   				DEFAULT: 'hsl(var(--destructive))',
-  				foreground: 'hsl(var(--destructive-foreground))'
+  				foreground: 'hsl(var(--destructive-foreground))',
+  				text: 'hsl(var(--destructive-text))'
   			},
   			muted: {
   				DEFAULT: 'hsl(var(--muted))',
@@ -73,6 +74,12 @@ export default {
   				border: 'hsl(var(--sidebar-border))',
   				ring: 'hsl(var(--sidebar-ring))'
   			}
+  		},
+  		// Secondary text was 12px and content 14px, too small for the pilot's readers
+  		// (UXA-01). One step up each, and nothing is set below 13px.
+  		fontSize: {
+  			xs: ['0.8125rem', { lineHeight: '1.25rem' }],
+  			sm: ['0.9375rem', { lineHeight: '1.4rem' }]
   		},
   		borderRadius: {
   			lg: 'var(--radius)',

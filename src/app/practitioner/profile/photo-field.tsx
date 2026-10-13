@@ -118,7 +118,7 @@ export function PhotoField({
             : 'Save your details first — a photograph attaches to a profile, and you do not have one yet.'}
         </p>
 
-        {problem ? <p className="mt-2 text-xs text-destructive">{problem}</p> : null}
+        {problem ? <p className="mt-2 text-xs text-destructive-text">{problem}</p> : null}
 
         <input
           ref={fileInput}

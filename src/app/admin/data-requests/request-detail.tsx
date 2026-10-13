@@ -219,7 +219,7 @@ export function RequestDetail({
             </div>
             <div className="flex items-center gap-3">
               {request.overdue ? (
-                <span className="rounded-full bg-destructive/10 px-2.5 py-1 text-xs font-medium text-destructive">
+                <span className="rounded-full bg-destructive/10 px-2.5 py-1 text-xs font-medium text-destructive-text">
                   Past its deadline
                 </span>
               ) : null}

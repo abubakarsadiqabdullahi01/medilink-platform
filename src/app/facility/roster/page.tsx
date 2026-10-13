@@ -302,7 +302,7 @@ export default function RosterPage() {
                           <Button
                             size="sm"
                             variant="ghost"
-                            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                            className="text-destructive-text hover:bg-destructive/10 hover:text-destructive-text"
                             onClick={() => {
                               setCancelling(row);
                               setReason('');

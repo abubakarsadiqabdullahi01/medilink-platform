@@ -18,6 +18,7 @@ import {
   UserRound,
 } from 'lucide-react';
 import { buttonVariants } from '@/components/ui/button';
+import { TextSizeControl } from '@/components/app/text-size-control';
 import { cn } from '@/lib/utils';
 
 /**
@@ -173,6 +174,7 @@ export default function LandingPage() {
             </a>
           </nav>
           <div className="flex shrink-0 items-center gap-2 sm:gap-4">
+            <TextSizeControl className="hidden sm:flex" />
             <Link
               href="/login"
               className="hidden text-sm font-medium text-foreground/75 underline-offset-4 hover:text-primary hover:underline sm:inline"

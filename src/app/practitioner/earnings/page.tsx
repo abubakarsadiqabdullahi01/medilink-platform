@@ -129,7 +129,7 @@ export default function EarningsPage() {
                     {row.providerReference ? ` · ref ${row.providerReference}` : ''}
                   </p>
                   {row.failureReason ? (
-                    <p className="mt-1 text-xs text-destructive">{row.failureReason}</p>
+                    <p className="mt-1 text-xs text-destructive-text">{row.failureReason}</p>
                   ) : null}
                 </div>
                 <StatusBadge status={row.status} />

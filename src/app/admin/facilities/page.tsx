@@ -240,7 +240,7 @@ export default function FacilitiesPage() {
                       belongs on the row rather than one click further in. */}
                   <span
                     className={cn(
-                      'hidden shrink-0 rounded-full px-2 py-0.5 text-[0.7rem] font-medium sm:inline',
+                      'hidden shrink-0 rounded-full px-2 py-0.5 text-xs font-medium sm:inline',
                       row.licenceObjectKey
                         ? 'bg-success/10 text-success'
                         : 'bg-warning/10 text-warning',

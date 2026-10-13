@@ -209,7 +209,7 @@ export function AvailabilitySection() {
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                      className="text-destructive-text hover:bg-destructive/10 hover:text-destructive-text"
                       onClick={() => removeSlot.mutate({ id: slot.id })}
                     >
                       <Trash2 />

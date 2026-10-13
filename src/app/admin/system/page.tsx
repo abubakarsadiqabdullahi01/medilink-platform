@@ -227,7 +227,7 @@ export default function SystemPage() {
                           {!job.enabled ? (
                             <Badge variant="outline">Switched off</Badge>
                           ) : job.lastStatus === 'FAILED' ? (
-                            <span className="text-destructive">Failed{job.lastError ? `: ${job.lastError}` : ''}</span>
+                            <span className="text-destructive-text">Failed{job.lastError ? `: ${job.lastError}` : ''}</span>
                           ) : job.lastStatus === 'SUCCEEDED' ? (
                             'Succeeded'
                           ) : (

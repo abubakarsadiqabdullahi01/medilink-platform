@@ -87,7 +87,7 @@ function Tile({
           {isPending ? (
             <Skeleton className="mt-2 h-9 w-12" />
           ) : isError ? (
-            <p className="mt-2 text-sm text-destructive">Could not load</p>
+            <p className="mt-2 text-sm text-destructive-text">Could not load</p>
           ) : (
             <p
               className={

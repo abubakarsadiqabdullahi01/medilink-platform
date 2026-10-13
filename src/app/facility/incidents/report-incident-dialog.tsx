@@ -224,7 +224,7 @@ export function ReportIncidentDialog({ facilityId }: { facilityId: string }) {
               what happened and what was done about it; compliance can ask the ward for the rest.
             </p>
             {containsPatientIdentifier(summary) ? (
-              <p role="alert" className="text-xs text-destructive">
+              <p role="alert" className="text-xs text-destructive-text">
                 This looks like it has a phone number, ID or hospital number, or an email address,
                 in it. Take it out and the report can be filed.
               </p>

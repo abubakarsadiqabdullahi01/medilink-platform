@@ -34,7 +34,7 @@ export function AmountFigure({
         {isPending ? (
           <Skeleton className="mt-2 h-9 w-32" />
         ) : isError ? (
-          <p className="mt-2 text-sm text-destructive">Could not load</p>
+          <p className="mt-2 text-sm text-destructive-text">Could not load</p>
         ) : (
           <p
             className={

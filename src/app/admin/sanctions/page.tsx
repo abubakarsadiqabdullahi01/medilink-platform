@@ -293,7 +293,7 @@ export default function SanctionsPage() {
                 placeholder="Amina Yusuf | MDCN/12345 | MDCN notice, March 2026 | 2026-03-01"
               />
               {parsed.problems.length > 0 ? (
-                <ul className="text-xs text-destructive">
+                <ul className="text-xs text-destructive-text">
                   {parsed.problems.slice(0, 5).map((problem) => (
                     <li key={problem}>{problem}</li>
                   ))}
