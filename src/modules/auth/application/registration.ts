@@ -5,7 +5,7 @@ import { publishEvent } from '@/lib/outbox';
 import { EVENTS } from '@/lib/events';
 import { hashPassword, passwordProblems } from '@/lib/password';
 import { maskPhone, normalizeNigerianPhone } from '@/lib/phone';
-import { consumeOtp, issueOtp, verifyOtp } from './otp-service';
+import { assertCanSendCode, consumeOtp, issueOtp, verifyOtp } from './otp-service';
 import { AuthErrors } from '../domain/errors';
 import { issueSetupToken, verifySetupToken } from '../domain/setup-token';
 import { grantConsentsInTx } from '@/modules/audit-compliance/application/consent';
@@ -43,6 +43,9 @@ export async function startRegistration(
   input: StartRegistrationInput,
 ): Promise<StartRegistrationResult> {
   const now = input.now ?? new Date();
+  // Before anything is written: registering makes a user row, and a refused
+  // request should leave nothing behind however many arrive.
+  await assertCanSendCode({ ipAddress: input.ipAddress, now });
   const phone = normalizeNigerianPhone(input.phone);
   const fullName = input.fullName.trim().replace(/\s+/g, ' ');
   const email = input.email?.trim().toLowerCase() || undefined;

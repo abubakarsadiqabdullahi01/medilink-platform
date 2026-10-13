@@ -191,10 +191,15 @@ model OtpCode {
   attempts   Int      @default(0)
   consumedAt DateTime? @map("consumed_at")
   createdAt  DateTime @default(now()) @map("created_at")
+  // The network address the request came from, so sends can be counted per
+  // source as well as per person. Null when the request carried none.
+  requestIp  String?  @map("request_ip")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, purpose, consumedAt])
+  @@index([requestIp, createdAt])
+  @@index([createdAt])
   @@map("otp_codes")
   @@schema("identity")
 }

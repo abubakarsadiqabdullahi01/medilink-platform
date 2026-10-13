@@ -14,6 +14,17 @@ export const OTP_TTL_SECONDS = 600;
 export const OTP_MAX_ATTEMPTS = 5;
 export const OTP_RESEND_COOLDOWN_SECONDS = 60;
 export const OTP_MAX_SENDS_PER_HOUR = 5;
+/**
+ * The limits above are per person. These are per source and overall, because a
+ * limit per phone number is no limit at all on somebody with a list of numbers:
+ * every number is a fresh allowance, and every send is an SMS Medilink pays for.
+ *
+ * Per address is generous on purpose — a ward onboarding thirty staff over one
+ * hospital connection is one address — and the overall budget is what bounds
+ * the bill if somebody rotates addresses.
+ */
+export const OTP_MAX_SENDS_PER_ADDRESS_PER_HOUR = 30;
+export const OTP_MAX_SENDS_OVERALL_PER_HOUR = 600;
 
 export type OtpPurposeKey =
   | 'PHONE_VERIFICATION'
@@ -149,6 +160,35 @@ export function evaluateResend(sentAt: Date[], now: Date = new Date()): ResendVe
     return { ok: false, reason: 'hourly_limit', retryAfterSeconds };
   }
 
+  return { ok: true };
+}
+
+export type SendBudgetVerdict =
+  | { ok: true }
+  | { ok: false; reason: 'address_limit' | 'overall_limit'; retryAfterSeconds: number };
+
+/**
+ * Whether another code may be sent, given how many went in the last hour from
+ * the same network address and in total.
+ *
+ * `fromThisAddress` is null when the request carried no address, in which case
+ * only the overall budget can apply. How long to wait is a quarter of an hour
+ * rather than an exact figure: the window slides, and an exact answer would
+ * invite somebody to time their next attempt to the second.
+ */
+export function evaluateSendBudget(counts: {
+  fromThisAddress: number | null;
+  overall: number;
+}): SendBudgetVerdict {
+  if (counts.overall >= OTP_MAX_SENDS_OVERALL_PER_HOUR) {
+    return { ok: false, reason: 'overall_limit', retryAfterSeconds: 900 };
+  }
+  if (
+    counts.fromThisAddress !== null &&
+    counts.fromThisAddress >= OTP_MAX_SENDS_PER_ADDRESS_PER_HOUR
+  ) {
+    return { ok: false, reason: 'address_limit', retryAfterSeconds: 900 };
+  }
   return { ok: true };
 }
 

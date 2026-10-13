@@ -7,6 +7,7 @@ import { logger } from '@/lib/logger';
 import {
   evaluateOtp,
   evaluateResend,
+  evaluateSendBudget,
   generateOtpCode,
   hashOtpCode,
   otpExpiry,
@@ -21,6 +22,36 @@ import { AuthErrors } from '../domain/errors';
  * Issuing and verifying one-time codes. The policy lives in ../domain/otp and
  * is unit-tested without a database; this layer only persists and delivers.
  */
+
+/**
+ * Whether another code may be sent from this address, and at all.
+ *
+ * Counted from the codes themselves rather than from a separate table or from
+ * process memory: Medilink runs more than one web container, and a counter in
+ * memory resets on deploy and is bypassed by spreading requests across
+ * instances. It runs before anything is created, so a refused request leaves
+ * nothing behind — registration calls it before it makes a user row.
+ *
+ * The address is whatever the edge forwards. Where the platform does not
+ * overwrite X-Forwarded-For, a caller can rotate it to dodge the per-address
+ * limit, and the overall budget is what is left standing.
+ */
+export async function assertCanSendCode(input: { ipAddress?: string; now?: Date }): Promise<void> {
+  const since = new Date((input.now ?? new Date()).getTime() - 3600 * 1000);
+
+  const [fromThisAddress, overall] = await Promise.all([
+    input.ipAddress
+      ? prisma.otpCode.count({ where: { requestIp: input.ipAddress, createdAt: { gt: since } } })
+      : Promise.resolve(null),
+    prisma.otpCode.count({ where: { createdAt: { gt: since } } }),
+  ]);
+
+  const verdict = evaluateSendBudget({ fromThisAddress, overall });
+  if (!verdict.ok) {
+    logger.warn('one-time code budget exhausted', { reason: verdict.reason });
+    throw AuthErrors.otpThrottled(verdict.retryAfterSeconds);
+  }
+}
 
 /**
  * Codes are delivered after the transaction commits, not inside it. Holding a
@@ -38,6 +69,8 @@ export async function issueOtp(input: {
 }): Promise<{ expiresAt: Date; sendsRemainingThisHour: number }> {
   const now = input.now ?? new Date();
   const purpose = input.purpose;
+
+  await assertCanSendCode({ ipAddress: input.ipAddress, now });
 
   const recent = await prisma.otpCode.findMany({
     where: {
@@ -69,7 +102,7 @@ export async function issueOtp(input: {
     });
 
     await tx.otpCode.create({
-      data: { userId: input.userId, purpose, codeHash, expiresAt },
+      data: { userId: input.userId, purpose, codeHash, expiresAt, requestIp: input.ipAddress },
     });
 
     await recordAudit(tx, {
