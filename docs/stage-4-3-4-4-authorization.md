@@ -109,3 +109,61 @@ assertion about status codes would catch it.
   land.
 - **Rate limiting a caller who is probing scopes.** Refusals are logged at
   warn, and a burst of them is an attack, but nothing acts on that yet.
+
+## Every route that takes an identifier is attacked from another tenant (AUT-10)
+
+The guard proves that a caller holds a permission over the scope they *name*.
+Whether the record they name lies inside that scope is each route's own
+business, and a route that forgets is invisible to every test that only calls it
+as its rightful owner. That is how the owner of one hospital could revoke
+another's staff with a single identifier (AUT-01): nothing ever called the
+route as somebody else.
+
+`tests/integration/cross-tenant.test.ts` is the answer, and it is a pattern, not
+a patch. Two verified hospitals are built side by side
+(`support/tenant-world.ts`, one of everything a route can name: shifts,
+bookings, invitations, timesheets, disputes and their evidence, incidents,
+invoices, payouts, credentials, availability, access grants). A caller from
+hospital A then tries every route against hospital B's records, and each attempt
+must come to:
+
+- **refused, and only refused** - 403 or 404. A 409 or 422 is the route reaching
+  the record and complaining about its state, which tells the caller it exists
+  in somebody else's hospital; a 200 is the bug;
+- **changed nothing** - a hash of every mutable table before and after;
+- **given nothing away** - the answer holds no identifier, name or number of B's.
+
+For every attack there is a control, the rightful caller making the same request
+and not being refused, so a request built wrongly cannot pass by being refused
+for the wrong reason. Routes that take a facility in their input are attacked
+twice: naming the other tenant's facility (the guard must refuse) and naming
+their own with the other tenant's identifier (the route must refuse, which is
+what AUT-01 was).
+
+**A new route has to say where it stands.** A second test lists every
+`route.ts` under `src/app/api/v1` and fails if one is neither in the table nor
+in `NO_TENANT_IDENTIFIER` with the reason it takes no identifier. To add one:
+
+- a route on a hospital's records - `onFacility(...)`, one line giving the
+  request;
+- a practitioner's own records - `onSelf(...)`;
+- only the platform may call it - `onPlatform(...)`;
+- it names a scope in its query or body - add it to `SCOPED` (reads; a listing
+  is also checked to show only the caller's own) or `SCOPED_WRITES`.
+
+If the new route needs something the world does not have, add it to
+`buildTenant`; both hospitals get it, so either can be the attacker.
+
+Run it on its own database when other sessions share the stack:
+`TEST_DATABASE_URL=...medilink_something_test pnpm test:integration
+tests/integration/cross-tenant.test.ts` (the name must end in `_test`).
+
+What this found when it was first run: opening a dispute, and withdrawing one,
+answered somebody on neither side with a 409 listing what was wrong with the
+shift. That confirmed the shift existed and what state its attendance was in.
+Both now answer "not found", as the evidence routes already did.
+
+Known and *not* fixed by it (the harness records the current behaviour, which is
+a refusal, and the control for these uses the practitioner): a hospital's owner
+cannot reach the dispute evidence routes at all, because they are guarded on the
+caller's own scope (DSP-04).

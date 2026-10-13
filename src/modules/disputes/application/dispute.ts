@@ -192,6 +192,13 @@ export async function raiseDispute(input: RaiseDisputeParams): Promise<DisputeVi
     facilityMember,
   });
 
+  // Before anything about the shift is said. Somebody on neither side used to be
+  // told "cannot be opened: not_a_party, not_yet_decided, …" - a 409 that
+  // confirmed the shift exists and listed what state its attendance was in. The
+  // evidence routes already answer an outsider as if the id did not exist; this
+  // is the same rule for the door in front of them (AUT-10).
+  if (party === null) throw DisputeErrors.assignmentNotFound();
+
   const attendance = await getAttendance(input.assignmentId);
   const live = await prisma.dispute.count({
     where: { assignmentId: input.assignmentId, status: { in: LIVE } },
@@ -390,6 +397,11 @@ export async function withdrawDispute(input: {
   actorId: string;
 }): Promise<DisputeView> {
   const { row, assignment } = await loadCase(input.disputeId);
+
+  // Somebody with no part in the case is told it does not exist, not that it
+  // "cannot be withdrawn": a party who did not raise it still gets the specific
+  // answer below, an outsider gets nothing to learn from (AUT-10).
+  if ((await sideOnCase(input.actorId, assignment)) === null) throw DisputeErrors.notFound();
 
   const blockers = withdrawBlockers({
     status: row.status as DisputeStatusValue,
