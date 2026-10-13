@@ -6,11 +6,15 @@ import { publishEvent } from '@/lib/outbox';
 import { EVENTS } from '@/lib/events';
 import { createDownloadUrl, createUploadUrl, headObject } from '@/lib/storage/tigris';
 import {
+  approvalBlockers,
   canPublish,
-  normaliseCacNumber,
+  normaliseRegistrationReference,
   publishBlockers,
+  registrationReferenceProblem,
+  type ApprovalChecks,
   type FacilityStatusValue,
   type PublishBlocker,
+  type RegistrationKind,
 } from '../domain/facility';
 import { FacilityErrors } from '../domain/errors';
 
@@ -24,6 +28,8 @@ export interface FacilityView {
   id: string;
   name: string;
   facilityTypeId: string;
+  /** Which register `cacNumber` is from; the number itself is a CAC number only for a CAC. */
+  registrationKind: RegistrationKind;
   cacNumber: string;
   stateId: string;
   lgaId: string | null;
@@ -38,6 +44,8 @@ export interface FacilityView {
   verifiedBy: string | null;
   verifiedAt: Date | null;
   reviewNotes: string | null;
+  /** What the officer confirmed before approving, if it has been approved. */
+  verificationChecks: ApprovalChecks | null;
   /**
    * Derived, never stored. Stage 6 will call canPublish() itself on the way
    * into publishing; surfacing it here is what lets a facility administrator
@@ -53,6 +61,7 @@ interface FacilityRow {
   id: string;
   name: string;
   facilityTypeId: string;
+  registrationKind: RegistrationKind;
   cacNumber: string;
   stateId: string;
   lgaId: string | null;
@@ -67,6 +76,7 @@ interface FacilityRow {
   verifiedBy: string | null;
   verifiedAt: Date | null;
   reviewNotes: string | null;
+  verificationChecks: unknown;
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
@@ -77,6 +87,7 @@ function toView(facility: FacilityRow, now: Date = new Date()): FacilityView {
     id: facility.id,
     name: facility.name,
     facilityTypeId: facility.facilityTypeId,
+    registrationKind: facility.registrationKind,
     cacNumber: facility.cacNumber,
     stateId: facility.stateId,
     lgaId: facility.lgaId,
@@ -91,6 +102,7 @@ function toView(facility: FacilityRow, now: Date = new Date()): FacilityView {
     verifiedBy: facility.verifiedBy,
     verifiedAt: facility.verifiedAt,
     reviewNotes: facility.reviewNotes,
+    verificationChecks: (facility.verificationChecks as ApprovalChecks | null) ?? null,
     canPublish: canPublish(facility, now),
     publishBlockers: publishBlockers(facility, now),
     createdAt: facility.createdAt,
@@ -152,6 +164,9 @@ async function confirmLicenceUpload(
 export interface CreateFacilityParams {
   name: string;
   facilityTypeId: string;
+  /** Defaults to a CAC registration. */
+  registrationKind?: RegistrationKind;
+  /** The registration reference: a CAC number for a company, a ministry or board reference otherwise. */
   cacNumber: string;
   stateId: string;
   lgaId?: string;
@@ -194,14 +209,21 @@ export async function createFacility(input: CreateFacilityParams): Promise<Facil
 
   const role = await prisma.role.findUniqueOrThrow({ where: { key: 'facility_owner' } });
 
+  // Whoever calls this gets the same normalisation and the same rule, not only the
+  // callers that went through a schema.
+  const registrationKind = input.registrationKind ?? 'CAC';
+  const reference = normaliseRegistrationReference(registrationKind, input.cacNumber);
+  const referenceProblem = registrationReferenceProblem(registrationKind, reference);
+  if (referenceProblem) throw FacilityErrors.invalidRegistrationReference(referenceProblem);
+
   try {
     return await prisma.$transaction(async (tx) => {
       const created = await tx.facility.create({
         data: {
           name: input.name,
           facilityTypeId: input.facilityTypeId,
-          // Whoever calls this gets the same normalisation, not only the callers that went through a schema.
-          cacNumber: normaliseCacNumber(input.cacNumber),
+          registrationKind,
+          cacNumber: reference,
           stateId: input.stateId,
           lgaId: input.lgaId,
           addressLine: input.addressLine,
@@ -332,6 +354,8 @@ export interface UpdateFacilityParams {
   licenceExpiresAt?: Date;
   /** Only for a refused facility: correct the registration number. */
   cacNumber?: string;
+  /** Only with a corrected number: it was registered under the wrong register. */
+  registrationKind?: RegistrationKind;
   /**
    * Send a refused facility back to compliance with these corrections. Explicit
    * rather than implied by any edit, so an owner tidying an address while
@@ -355,8 +379,21 @@ export async function updateFacility(input: UpdateFacilityParams): Promise<Facil
   // be swapped for another by an edit, and a pending one is what compliance is
   // looking at; it can be corrected only after a refusal, which is when it is
   // most often the thing that was wrong.
-  const cacNumber = input.cacNumber === undefined ? undefined : normaliseCacNumber(input.cacNumber);
-  if (cacNumber !== undefined && existing.status !== 'REJECTED') throw FacilityErrors.cacLocked();
+  const registrationKind = input.registrationKind ?? existing.registrationKind;
+  const cacNumber =
+    input.cacNumber === undefined
+      ? undefined
+      : normaliseRegistrationReference(registrationKind, input.cacNumber);
+  if (
+    (cacNumber !== undefined || input.registrationKind !== undefined) &&
+    existing.status !== 'REJECTED'
+  ) {
+    throw FacilityErrors.cacLocked();
+  }
+  if (cacNumber !== undefined) {
+    const problem = registrationReferenceProblem(registrationKind, cacNumber);
+    if (problem) throw FacilityErrors.invalidRegistrationReference(problem);
+  }
 
   /**
    * Resubmitting a refused facility. Verification needed a PENDING facility and
@@ -372,6 +409,7 @@ export async function updateFacility(input: UpdateFacilityParams): Promise<Facil
 
     const changed =
       (cacNumber !== undefined && cacNumber !== existing.cacNumber) ||
+      (input.registrationKind !== undefined && input.registrationKind !== existing.registrationKind) ||
       (input.name !== undefined && input.name !== existing.name) ||
       (input.addressLine !== undefined && input.addressLine !== existing.addressLine) ||
       (input.lgaId !== undefined && input.lgaId !== existing.lgaId) ||
@@ -401,6 +439,7 @@ export async function updateFacility(input: UpdateFacilityParams): Promise<Facil
         where: { id: existing.id },
         data: {
           name: input.name,
+          registrationKind: input.registrationKind,
           cacNumber,
           addressLine: input.addressLine,
           lgaId: input.lgaId,
@@ -455,6 +494,42 @@ export interface VerifyFacilityParams {
   verifierId: string;
   decision: 'approve' | 'reject';
   reviewNotes?: string;
+  /** What the officer confirmed, kept on the facility. Required by `reviewFacility` to approve. */
+  checks?: ApprovalChecks;
+}
+
+const APPROVAL_BLOCKER_WORDS = {
+  no_licence_document: 'no licence document has been uploaded',
+  no_licence_number: 'no licence number is recorded',
+  checks_incomplete:
+    'the checks have not all been confirmed (licence seen, licence matches the facility, registration checked)',
+  checked_with_missing: 'say how the registration was checked',
+} as const;
+
+/**
+ * Approves or refuses a facility the way an officer does: approval needs the
+ * licence document and number on file and every check confirmed, with how the
+ * registration was checked in words (UXO-02). "Verify" was a live button whether
+ * or not a licence was on file, and recorded only a free-text note.
+ *
+ * `verifyFacility` below does no such check and stays as it was, because the
+ * seed and the tests build worlds of verified facilities with no document to
+ * show; this is the path a person takes.
+ */
+export async function reviewFacility(input: VerifyFacilityParams): Promise<FacilityView> {
+  if (input.decision === 'approve') {
+    const existing = await prisma.facility.findFirst({
+      where: { id: input.facilityId, deletedAt: null },
+      select: { licenceObjectKey: true, licenceNumber: true },
+    });
+    if (!existing) throw FacilityErrors.facilityNotFound();
+
+    const blockers = approvalBlockers(existing, input.checks);
+    if (blockers.length > 0) {
+      throw FacilityErrors.approvalBlocked(blockers.map((blocker) => APPROVAL_BLOCKER_WORDS[blocker]));
+    }
+  }
+  return verifyFacility(input);
 }
 
 export async function verifyFacility(input: VerifyFacilityParams): Promise<FacilityView> {
@@ -483,6 +558,7 @@ export async function verifyFacility(input: VerifyFacilityParams): Promise<Facil
         verifiedBy: input.verifierId,
         verifiedAt: now,
         reviewNotes: input.reviewNotes,
+        ...(approved && input.checks ? { verificationChecks: { ...input.checks } } : {}),
       },
     });
     if (applied.count !== 1) throw FacilityErrors.alreadyVerified();
@@ -501,7 +577,7 @@ export async function verifyFacility(input: VerifyFacilityParams): Promise<Facil
       scopeId: updated.id,
       reason: input.reviewNotes,
       before: toView(existing),
-      after: toView(updated),
+      after: { ...toView(updated), ...(approved && input.checks ? { checks: input.checks } : {}) },
     });
 
     // No event on reject — none exists in the vocabulary, and the audit row

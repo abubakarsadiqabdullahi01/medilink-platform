@@ -161,7 +161,7 @@ export default function FacilityDashboard() {
           <AlertDescription className="space-y-1">
             {facility.data?.status === 'PENDING' ? (
               <p>
-                <strong>Waiting for verification.</strong> Medilink checks the CAC registration
+                <strong>Waiting for verification.</strong> Medilink checks the registration
                 and licence before this facility can publish shifts. You can set up rates and
                 staff in the meantime.
               </p>

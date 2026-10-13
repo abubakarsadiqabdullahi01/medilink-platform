@@ -79,7 +79,33 @@ async function callPatch(id: string, body: unknown): Promise<ApiResult> {
   return { status: response.status, body: await response.json() };
 }
 
-async function callVerify(id: string, body: unknown): Promise<ApiResult> {
+/** What an officer confirms before approving. */
+const APPROVAL_CHECKS = {
+  licenceDocumentSeen: true,
+  licenceMatchesFacility: true,
+  registrationChecked: true,
+  checkedWith: 'Called the registry; the reference is on the register.',
+};
+
+/**
+ * Approving needs the licence on file and the checks confirmed (UXO-02), so a test
+ * that approves supplies both unless it is about their absence.
+ */
+async function callVerify(id: string, input: unknown): Promise<ApiResult> {
+  let body = input as { decision?: string; checks?: unknown };
+  if (body.decision === 'approve' && body.checks === undefined) {
+    const facility = await prisma.facility.findUnique({ where: { id } });
+    if (facility) {
+      await prisma.facility.update({
+        where: { id },
+        data: {
+          licenceObjectKey: facility.licenceObjectKey ?? `facility-licence/${id}/licence.pdf`,
+          licenceNumber: facility.licenceNumber ?? 'LIC/TEST/1',
+        },
+      });
+    }
+    body = { ...body, checks: APPROVAL_CHECKS };
+  }
   const response = await verifyRoute(
     jsonRequest(`http://localhost/api/v1/facilities/${id}/verify`, body),
     { params: Promise.resolve({ id }) },

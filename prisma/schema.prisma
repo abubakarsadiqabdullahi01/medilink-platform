@@ -567,9 +567,13 @@ model Facility {
   id             String  @id @default(uuid()) @db.Uuid
   name           String
   facilityTypeId String  @map("facility_type_id") @db.Uuid
-  // Unique at the database level, not checked in application code: step 5.4
-  // asks for a duplicate to be refused "on the constraint, not in code".
-  cacNumber      String  @unique @map("cac_number")
+  // What the facility is registered under, and which register that is. The column
+  // is still called cac_number and still holds a CAC number for a company; for a
+  // government facility it holds the ministry's or the board's reference.
+  // Unique per kind at the database level, not checked in application code: step
+  // 5.4 asks for a duplicate to be refused "on the constraint, not in code".
+  registrationKind RegistrationKind @default(CAC) @map("registration_kind")
+  cacNumber      String  @map("cac_number")
 
   stateId     String  @map("state_id") @db.Uuid
   lgaId       String? @map("lga_id") @db.Uuid
@@ -594,6 +598,9 @@ model Facility {
   verifiedBy  String?   @map("verified_by") @db.Uuid
   verifiedAt  DateTime? @map("verified_at")
   reviewNotes String?   @map("review_notes")
+  /// What the officer confirmed before approving: the licence seen, matching, the
+  /// registration checked, and how.
+  verificationChecks Json? @map("verification_checks")
 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
@@ -614,7 +621,19 @@ model Facility {
   @@index([status])
   @@index([stateId, status])
   @@index([representativeUserId])
+  @@unique([registrationKind, cacNumber])
   @@map("facilities")
+  @@schema("facilities")
+}
+
+/// Which register a facility's reference is from. A company has a CAC number; a
+/// government hospital or primary health centre has a ministry or state board
+/// reference instead.
+enum RegistrationKind {
+  CAC
+  GOVERNMENT
+  OTHER
+
   @@schema("facilities")
 }
 

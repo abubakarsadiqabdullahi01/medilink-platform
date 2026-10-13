@@ -6,9 +6,11 @@ import { Building2, ChevronLeft, ChevronRight, Search, TriangleAlert } from 'luc
 import { cn } from '@/lib/utils';
 import { api } from '@/lib/ui/api';
 import { useReference } from '@/lib/ui/reference';
+import { useCan } from '@/lib/ui/session';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { NewFacilityDialog } from './new-facility-dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -44,6 +46,7 @@ const PAGE_SIZE = 20;
 
 export default function FacilitiesPage() {
   const reference = useReference();
+  const canCreate = useCan('facility.write');
 
   const [status, setStatus] = useState<string>('PENDING');
   const [search, setSearch] = useState('');
@@ -94,6 +97,7 @@ export default function FacilitiesPage() {
       <PageHeader
         title="Facilities"
         description="A facility cannot publish a shift until it is verified — and changing the licence of a verified one sends it straight back to this queue."
+        action={canCreate ? <NewFacilityDialog /> : undefined}
       />
 
       <Tabs
@@ -124,7 +128,7 @@ export default function FacilitiesPage() {
             }}
           >
             <div className="min-w-[240px] flex-1 space-y-1.5">
-              <Label htmlFor="facility-search">Search by name or CAC number</Label>
+              <Label htmlFor="facility-search">Search by name or registration number</Label>
               <Input
                 id="facility-search"
                 value={search}
@@ -206,7 +210,7 @@ export default function FacilitiesPage() {
           }
           description={
             applied || stateId !== 'all'
-              ? 'Try part of the name, or the CAC number on their paperwork.'
+              ? 'Try part of the name, or the registration number on their paperwork.'
               : status === 'PENDING'
                 ? 'Every facility has been decided. New ones appear the moment a hospital registers.'
                 : undefined

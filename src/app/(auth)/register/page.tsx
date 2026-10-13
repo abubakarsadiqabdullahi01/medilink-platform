@@ -540,7 +540,7 @@ function RegisterForm() {
             <>
               <Card className="border-white/15 bg-white/10 text-primary-foreground shadow-none">
                 <CardHeader className="p-4">
-                  <CardTitle className="text-sm">Your facility is checked against its CAC registration</CardTitle>
+                  <CardTitle className="text-sm">Your facility is checked against its registration</CardTitle>
                   <CardDescription className="text-primary-foreground/75">
                     You can set it up and add colleagues straight away — it just cannot offer a
                     shift to anybody until compliance has confirmed it is real.

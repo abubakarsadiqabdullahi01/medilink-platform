@@ -21,13 +21,18 @@ import {
 } from '@/components/ui/select';
 import { Combobox } from '@/components/app/combobox';
 import { PageHeader } from '@/components/app/page-shell';
+import {
+  REGISTRATION_KIND_OPTIONS,
+  registrationOption,
+  type RegistrationKind,
+} from '@/lib/ui/registration';
 
 /**
  * A hospital signing itself up.
  *
  * The form says plainly what happens next, because the thing people want to
  * know is when they can start using it — and the honest answer is "after
- * somebody has checked your CAC registration", not "immediately".
+ * somebody has checked your registration", not "immediately".
  */
 export default function RegisterFacilityPage() {
   const router = useRouter();
@@ -36,7 +41,9 @@ export default function RegisterFacilityPage() {
 
   const [name, setName] = useState('');
   const [facilityTypeId, setFacilityTypeId] = useState('');
+  const [registrationKind, setRegistrationKind] = useState<RegistrationKind>('CAC');
   const [cacNumber, setCacNumber] = useState('');
+  const registration = registrationOption(registrationKind);
   const [stateId, setStateId] = useState('');
   const [lgaId, setLgaId] = useState('');
   const [addressLine, setAddressLine] = useState('');
@@ -51,6 +58,7 @@ export default function RegisterFacilityPage() {
       api.post('/api/v1/facilities/register', {
         name: name.trim(),
         facilityTypeId,
+        registrationKind,
         cacNumber: cacNumber.trim(),
         stateId,
         lgaId: lgaId || undefined,
@@ -88,7 +96,7 @@ export default function RegisterFacilityPage() {
     <>
       <PageHeader
         title="Register your facility"
-        description="Tell us who you are and where. A compliance officer checks the details against your CAC registration before the facility can publish anything."
+        description="Tell us who you are and where. A compliance officer checks the details against your registration before the facility can publish anything."
       />
 
       <Alert variant="info" className="mb-6">
@@ -115,7 +123,7 @@ export default function RegisterFacilityPage() {
                 id="name"
                 value={name}
                 onChange={(event) => setName(event.target.value)}
-                placeholder="As it appears on your CAC certificate"
+                placeholder="As it appears on your registration certificate"
               />
             </div>
 
@@ -136,13 +144,33 @@ export default function RegisterFacilityPage() {
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="cac">CAC registration number</Label>
+              <Label htmlFor="registration-kind">What is the facility registered as?</Label>
+              <Select
+                value={registrationKind}
+                onValueChange={(value) => setRegistrationKind(value as RegistrationKind)}
+              >
+                <SelectTrigger id="registration-kind">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {REGISTRATION_KIND_OPTIONS.map((row) => (
+                    <SelectItem key={row.value} value={row.value}>
+                      {row.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="cac">{registration.referenceLabel}</Label>
               <Input
                 id="cac"
                 value={cacNumber}
                 onChange={(event) => setCacNumber(event.target.value)}
-                placeholder="RC1234567"
+                placeholder={registration.placeholder}
               />
+              <p className="text-xs text-muted-foreground">{registration.help}</p>
             </div>
 
             <div className="space-y-1.5">

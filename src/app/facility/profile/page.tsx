@@ -11,7 +11,19 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import {
+  REGISTRATION_KIND_OPTIONS,
+  registrationOption,
+  type RegistrationKind,
+} from '@/lib/ui/registration';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { DocumentUpload, type UploadedDocument } from '@/components/app/document-upload';
 import { StatusBadge } from '@/components/app/status-badge';
@@ -21,6 +33,7 @@ import { PageHeader } from '@/components/app/page-shell';
 interface FacilityRecord {
   id: string;
   name: string;
+  registrationKind: RegistrationKind;
   cacNumber: string;
   addressLine: string;
   contactPhone: string;
@@ -67,6 +80,7 @@ export default function FacilityProfilePage() {
   const [licenceNumber, setLicenceNumber] = useState('');
   const [licenceExpiresAt, setLicenceExpiresAt] = useState('');
   const [cacNumber, setCacNumber] = useState('');
+  const [registrationKind, setRegistrationKind] = useState<RegistrationKind>('CAC');
   const [licence, setLicence] = useState<UploadedDocument | null>(null);
 
   // Filled from the record once it arrives, and again after a save.
@@ -78,6 +92,7 @@ export default function FacilityProfilePage() {
     setLicenceNumber(record.licenceNumber ?? '');
     setLicenceExpiresAt(dateOnly(record.licenceExpiresAt));
     setCacNumber(record.cacNumber);
+    setRegistrationKind(record.registrationKind);
     setLicence(null);
   }, [record]);
 
@@ -97,6 +112,9 @@ export default function FacilityProfilePage() {
       out.licenceExpiresAt = licenceExpiresAt;
     }
     if (licence) out.licenceObjectKey = licence.objectKey;
+    if (refused && registrationKind !== record.registrationKind) {
+      out.registrationKind = registrationKind;
+    }
     if (refused && cacNumber.trim() && cacNumber.trim().toUpperCase() !== record.cacNumber) {
       out.cacNumber = cacNumber.trim();
     }
@@ -174,7 +192,7 @@ export default function FacilityProfilePage() {
       ) : record.status === 'PENDING' ? (
         <Alert variant="warning" className="mb-6">
           <AlertDescription>
-            Waiting for verification. Medilink checks the CAC registration and licence before this
+            Waiting for verification. Medilink checks the registration and licence before this
             facility can publish shifts.
           </AlertDescription>
         </Alert>
@@ -193,12 +211,28 @@ export default function FacilityProfilePage() {
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="cac">CAC registration number</Label>
+              <Label htmlFor="cac">{registrationOption(registrationKind).referenceLabel}</Label>
               {refused && canEdit ? (
                 <>
+                  <Select
+                    value={registrationKind}
+                    onValueChange={(value) => setRegistrationKind(value as RegistrationKind)}
+                  >
+                    <SelectTrigger aria-label="What the facility is registered as">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {REGISTRATION_KIND_OPTIONS.map((row) => (
+                        <SelectItem key={row.value} value={row.value}>
+                          {row.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <Input id="cac" value={cacNumber} onChange={(event) => setCacNumber(event.target.value)} />
                   <p className="text-xs text-muted-foreground">
-                    Correct it if it was mistyped. It cannot be changed once the facility is verified.
+                    Correct it if it was mistyped or filed under the wrong kind. It cannot be changed
+                    once the facility is verified.
                   </p>
                 </>
               ) : (

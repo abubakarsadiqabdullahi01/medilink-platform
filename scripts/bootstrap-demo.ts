@@ -193,7 +193,7 @@ async function main() {
   // end-to-end walk does that.
   const operations = actors.find((actor) => actor.key === 'operations');
   const facility = await prisma.facility.upsert({
-    where: { cacNumber: DEMO_FACILITY.cacNumber },
+    where: { registrationKind_cacNumber: { registrationKind: 'CAC', cacNumber: DEMO_FACILITY.cacNumber } },
     update: { status: 'VERIFIED' },
     create: {
       name: DEMO_FACILITY.name,

@@ -29,8 +29,19 @@ export const FacilityErrors = {
   duplicateCacNumber: () =>
     new FacilityError(
       'duplicate_cac_number',
-      'A facility with that CAC registration number already exists.',
+      'A facility with that registration number already exists.',
       409,
+    ),
+
+  invalidRegistrationReference: (problem: string) =>
+    new FacilityError('invalid_registration_reference', problem, 422),
+
+  /** Everything missing, in words, so it is fixed once rather than discovered a refusal at a time. */
+  approvalBlocked: (reasons: string[]) =>
+    new FacilityError(
+      'approval_blocked',
+      `This facility cannot be approved yet: ${reasons.join('; ')}.`,
+      422,
     ),
 
   alreadyVerified: () =>
