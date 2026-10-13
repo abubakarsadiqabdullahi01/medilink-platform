@@ -48,6 +48,17 @@ export const FacilityErrors = {
       403,
     ),
 
+  /**
+   * 403, not 409: the caller holds `role.grant`, and what stops them is that
+   * the facility has not earned what that permission gives out.
+   */
+  staffNeedsVerifiedFacility: () =>
+    new FacilityError(
+      'staff_requires_verified_facility',
+      'You can add staff once Medilink has verified this facility.',
+      403,
+    ),
+
   noLicenceOnFacility: () =>
     new FacilityError('no_licence_on_facility', 'This facility has no licence document.', 422),
 
