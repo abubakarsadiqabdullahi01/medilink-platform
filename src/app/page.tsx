@@ -18,6 +18,7 @@ import {
   UserRound,
 } from 'lucide-react';
 import { buttonVariants } from '@/components/ui/button';
+import { SupportContact } from '@/components/app/support-contact';
 import { TextSizeControl } from '@/components/app/text-size-control';
 import { cn } from '@/lib/utils';
 
@@ -140,6 +141,9 @@ const assurances = [
     icon: History,
   },
 ];
+
+// The contact line is configuration read at request time, not baked in at build.
+export const dynamic = 'force-dynamic';
 
 export default function LandingPage() {
   return (
@@ -469,7 +473,20 @@ export default function LandingPage() {
             <Link href="/register" className="hover:text-white">
               Create an account
             </Link>
+            <Link href="/terms" className="hover:text-white">
+              Terms
+            </Link>
+            <Link href="/privacy" className="hover:text-white">
+              Privacy notice
+            </Link>
+            <Link href="/contact" className="hover:text-white">
+              Contact
+            </Link>
           </nav>
+        </div>
+        {/* Shown only when a line has been configured: nothing here invents one. */}
+        <div className="mx-auto mt-6 max-w-7xl">
+          <SupportContact tone="dark" />
         </div>
         <div className="mx-auto mt-8 max-w-7xl border-t border-white/10 pt-6 text-xs">
           © {new Date().getFullYear()} Medilink

@@ -4,6 +4,7 @@ import { recordAudit } from '@/lib/audit';
 import { publishEvent } from '@/lib/outbox';
 import { EVENTS } from '@/lib/events';
 import { getFacility } from '@/modules/facilities/application/facility';
+import { assertFacilityTermsAccepted } from '@/modules/audit-compliance/application/consent';
 import {
   cancelBookingsForRequest,
   withdrawOutstandingInvitations,
@@ -220,6 +221,10 @@ export async function publishServiceRequest(
 ): Promise<ServiceRequestView> {
   const request = await loadForFacility(input.requestId, input.facilityId);
   const facility = await getFacility(input.facilityId);
+
+  // A hospital that has not accepted its terms cannot put a shift in front of
+  // practitioners: the fee and the rules cannot bind somebody who never agreed.
+  await assertFacilityTermsAccepted(input.facilityId);
 
   // Re-checked at publish, because a floor can move between drafting and
   // publishing and the published rate is the one that counts.

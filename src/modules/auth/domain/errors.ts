@@ -18,6 +18,13 @@ export class AuthError extends HttpError {
 }
 
 export const AuthErrors = {
+  termsNotAccepted: () =>
+    new AuthError(
+      'terms_not_accepted',
+      'Please read and accept the privacy notice to create an account.',
+      422,
+    ),
+
   invalidCredentials: () =>
     new AuthError('invalid_credentials', 'That phone number or password is not correct.', 401),
 

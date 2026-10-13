@@ -127,6 +127,21 @@ export default function LoginPage() {
           </p>
 
           <p className="mt-2 text-sm text-muted-foreground">
+            Stuck?{' '}
+            <Link href="/contact" className="font-medium text-primary underline-offset-4 hover:underline">
+              Contact a person
+            </Link>
+            {' · '}
+            <Link href="/terms" className="font-medium text-primary underline-offset-4 hover:underline">
+              Terms
+            </Link>
+            {' · '}
+            <Link href="/privacy" className="font-medium text-primary underline-offset-4 hover:underline">
+              Privacy notice
+            </Link>
+          </p>
+
+          <p className="mt-2 text-sm text-muted-foreground">
             Represent a hospital or clinic?{' '}
             <Link
               href="/register?as=facility"

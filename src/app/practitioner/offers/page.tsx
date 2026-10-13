@@ -1,6 +1,8 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
+import { useQuery } from '@tanstack/react-query';
 import { Inbox, TriangleAlert } from 'lucide-react';
 import { api } from '@/lib/ui/api';
 import { useQueue, useQueueAction } from '@/lib/ui/queue';
@@ -73,6 +75,15 @@ export default function OffersPage() {
     (body) => (body as { invitations?: Invitation[] }).invitations ?? [],
   );
 
+  // What has to be accepted before an offer can be: the server refuses an
+  // acceptance without it, so say so up front rather than after the press.
+  const agreements = useQuery({
+    queryKey: ['agreements'],
+    queryFn: () =>
+      api.get<{ agreements: { id: string; title: string; acceptedAt: string | null }[] }>('/api/v1/agreements'),
+  });
+  const outstanding = (agreements.data?.agreements ?? []).filter((row) => !row.acceptedAt);
+
   const [reasons, setReasons] = useState<Record<string, string>>({});
   const [showAllAnswered, setShowAllAnswered] = useState(false);
 
@@ -108,6 +119,19 @@ export default function OffersPage() {
         title="Offers"
         description="Accepting is not the same as being confirmed — the facility confirms, and only then is the shift yours. Nothing is committed until they do."
       />
+
+      {outstanding.length > 0 ? (
+        <Alert variant="warning" className="mb-6">
+          <TriangleAlert />
+          <AlertDescription>
+            <strong>You need to accept {outstanding.map((row) => row.title).join(' and ')}</strong>{' '}
+            before you can accept an offer. You can still decline.{' '}
+            <Link href="/practitioner/profile?tab=privacy" className="font-medium underline">
+              Read and accept
+            </Link>
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
       {queue.isPending ? (
         <QueueSkeleton />

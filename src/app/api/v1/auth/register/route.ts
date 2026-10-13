@@ -17,7 +17,9 @@ export async function POST(request: Request) {
         phone: input.phone,
         fullName: input.fullName,
         email: input.email,
+        acceptedTerms: input.acceptedTerms,
         ipAddress: context.ipAddress,
+        userAgent: request.headers.get('user-agent') ?? undefined,
       });
       return {
         status: 'code_sent',

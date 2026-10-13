@@ -168,7 +168,7 @@ def main():
     prac_phone = f"+234803{stamp:07d}"[:14]
     prac = Client("practitioner")
     status, body = prac.call(
-        "POST", "/api/v1/auth/register", {"phone": prac_phone, "fullName": "E2E Practitioner"}
+        "POST", "/api/v1/auth/register", {"phone": prac_phone, "fullName": "E2E Practitioner", "acceptedTerms": True}
     )
     check("a practitioner registers", status in (200, 201, 202), f"{status} {str(body)[:160]}")
 

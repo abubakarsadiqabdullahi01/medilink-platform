@@ -233,7 +233,7 @@ def main():
     prac = Client("practitioner")
 
     status, body = prac.call(
-        "POST", "/api/v1/auth/register", {"phone": phone, "fullName": "Simulated Practitioner"}
+        "POST", "/api/v1/auth/register", {"phone": phone, "fullName": "Simulated Practitioner", "acceptedTerms": True}
     )
     check("registers with a phone and a name", status in (200, 201, 202), f"{status} {str(body)[:140]}")
 
@@ -630,7 +630,7 @@ def main():
     # anybody work in it — every scheduler had to be made by a script.
     ward = Client("ward manager")
     ward_phone = unique_phone()
-    ward.call("POST", "/api/v1/auth/register", {"phone": ward_phone, "fullName": "Simulated Ward Manager"})
+    ward.call("POST", "/api/v1/auth/register", {"phone": ward_phone, "fullName": "Simulated Ward Manager", "acceptedTerms": True})
     ward_code = otp_from_logs(ward_phone)
     if ward_code:
         _, ward_verified = ward.call("POST", "/api/v1/auth/verify-phone", {"phone": ward_phone, "code": ward_code})

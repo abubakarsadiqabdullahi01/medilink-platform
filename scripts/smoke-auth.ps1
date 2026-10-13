@@ -74,7 +74,7 @@ Write-Host "Stage 4.2 auth smoke test  ($phone)" -ForegroundColor Cyan
 Write-Host ""
 
 # --- registration -----------------------------------------------------------
-$r = Call Post "register" @{ phone = $phone; fullName = "Smoke Test User" }
+$r = Call Post "register" @{ phone = $phone; fullName = "Smoke Test User"; acceptedTerms = $true }
 Check "register accepts a new number (202)" ($r.Status -eq 202) $r.Body
 
 $r = Call Post "register" @{ phone = "0803123456"; fullName = "Bad Phone" }

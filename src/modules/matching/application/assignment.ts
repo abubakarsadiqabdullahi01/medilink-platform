@@ -5,6 +5,7 @@ import { publishEvent } from '@/lib/outbox';
 import { EVENTS } from '@/lib/events';
 import { HttpError } from '@/lib/http/errors';
 import { rateTermsFor } from '@/modules/rates-contracts/application/rate-card';
+import { assertAgreementsAccepted } from '@/modules/audit-compliance/application/consent';
 import {
   DEFAULT_INVITATION_HOURS,
   canTransitionAssignment,
@@ -284,6 +285,9 @@ export async function respondToInvitation(input: RespondParams): Promise<Invitat
   // or not at all.
   let termsAccepted: Prisma.InputJsonValue | undefined;
   if (accepted) {
+    // The engagement terms and the privacy notice in force, accepted by this person.
+    await assertAgreementsAccepted(input.userId, 'PRACTITIONER');
+
     const request = await prisma.serviceRequest.findFirst({
       where: { id: invitation.serviceRequestId, deletedAt: null },
       select: {

@@ -8,7 +8,11 @@ import { maskPhone, normalizeNigerianPhone } from '@/lib/phone';
 import { assertCanSendCode, consumeOtp, issueOtp, verifyOtp } from './otp-service';
 import { AuthErrors } from '../domain/errors';
 import { issueSetupToken, verifySetupToken } from '../domain/setup-token';
-import { grantConsentsInTx } from '@/modules/audit-compliance/application/consent';
+import {
+  grantConsentsInTx,
+  privacyNoticeInForce,
+  recordAcceptanceInTx,
+} from '@/modules/audit-compliance/application/consent';
 import { CONSENT_AT_REGISTRATION } from '@/modules/audit-compliance/domain/consent';
 
 /**
@@ -22,7 +26,10 @@ export interface StartRegistrationInput {
   phone: string;
   fullName: string;
   email?: string;
+  /** That the privacy notice in force has been read and accepted. */
+  acceptedTerms?: boolean;
   ipAddress?: string;
+  userAgent?: string;
   now?: Date;
 }
 
@@ -49,6 +56,12 @@ export async function startRegistration(
   const phone = normalizeNigerianPhone(input.phone);
   const fullName = input.fullName.trim().replace(/\s+/g, ' ');
   const email = input.email?.trim().toLowerCase() || undefined;
+
+  // Asked before anything about the number is looked at, and of everybody, so the
+  // answer cannot tell somebody which numbers are already registered. Once a
+  // privacy notice is in force nobody gets an account without having accepted it.
+  const notice = await privacyNoticeInForce();
+  if (notice && !input.acceptedTerms) throw AuthErrors.termsNotAccepted();
 
   const existing = await prisma.user.findUnique({
     where: { phone },
@@ -87,6 +100,17 @@ export async function startRegistration(
       after: { phone: maskPhone(phone), hasEmail: Boolean(email) },
       ipAddress: input.ipAddress,
     });
+
+    // What they accepted, and from where: the evidence an "I never agreed to
+    // that" is settled with.
+    if (notice) {
+      await recordAcceptanceInTx(tx, {
+        userId: created.id,
+        version: notice,
+        ipAddress: input.ipAddress,
+        userAgent: input.userAgent,
+      });
+    }
 
     return created;
   });

@@ -55,6 +55,13 @@ const schema = z.object({
   MDCN_VERIFICATION_PROVIDER: z.enum(['none', 'sandbox', 'live']).default('none'),
   MDCN_VERIFICATION_API_KEY: z.string().optional(),
 
+  // How a person reaches Medilink (UXW-03). Read by lib/support-contact.ts, which
+  // validates what it finds; declared here so the set is in one place.
+  SUPPORT_PHONE: z.string().optional(),
+  SUPPORT_WHATSAPP: z.string().optional(),
+  SUPPORT_EMAIL: z.string().optional(),
+  SUPPORT_HOURS: z.string().optional(),
+
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 
   /** A request slower than this is logged as a warning (see lib/http/timing.ts). */

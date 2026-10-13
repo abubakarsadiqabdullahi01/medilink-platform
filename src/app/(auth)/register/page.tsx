@@ -57,6 +57,12 @@ const detailsSchema = z.object({
     // wrong before a round trip.
     .regex(/^[\d\s+()-]{10,}$/, "That does not look like a Nigerian mobile number."),
   email: z.union([z.literal(''), z.string().email('That email address is not valid.')]),
+  // Recorded against the privacy notice in force. Always asked, so what somebody
+  // sees does not depend on whether a notice has been published yet; the server
+  // refuses without it once one has.
+  acceptTerms: z.literal(true, {
+    errorMap: () => ({ message: 'Please read and accept the privacy notice to continue.' }),
+  }),
 });
 
 const codeSchema = z.object({
@@ -111,7 +117,7 @@ function RegisterForm() {
   const [sharing, setSharing] = useState(false);
 
   const details = useZodForm(detailsSchema, {
-    defaultValues: { fullName: '', phone: '', email: '' },
+    defaultValues: { fullName: '', phone: '', email: '', acceptTerms: undefined as unknown as true },
   });
   const codeForm = useZodForm(codeSchema, { defaultValues: { code: '' } });
   const passwordForm = useZodForm(passwordSchema, {
@@ -131,6 +137,7 @@ function RegisterForm() {
         phone: values.phone,
         fullName: values.fullName,
         email: values.email.trim() || undefined,
+        acceptedTerms: values.acceptTerms,
       }),
     onSuccess: () => setStep(1),
   });
@@ -315,6 +322,29 @@ function RegisterForm() {
                       Your phone is how you sign in and how you recover your account. Medilink does
                       not send email yet — an address here is kept on your record for when it does.
                     </p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="flex items-start gap-3 text-sm">
+                      <input
+                        type="checkbox"
+                        {...details.register('acceptTerms')}
+                        className="mt-1 size-5 shrink-0 rounded border-input accent-primary"
+                        aria-invalid={Boolean(details.formState.errors.acceptTerms) || undefined}
+                      />
+                      <span>
+                        I have read the{' '}
+                        <Link href="/privacy" target="_blank" className="font-medium underline">
+                          privacy notice
+                        </Link>{' '}
+                        and the{' '}
+                        <Link href="/terms" target="_blank" className="font-medium underline">
+                          terms
+                        </Link>{' '}
+                        and I accept them.
+                      </span>
+                    </label>
+                    <FieldError message={details.formState.errors.acceptTerms?.message} />
                   </div>
 
                   {/* Not disabled until the schema is satisfied. A button
