@@ -34,9 +34,12 @@ for (const [path, heading] of [
   ['/practitioner/shifts', 'My shifts'],
   ['/practitioner/timesheets', 'Timesheets'],
   ['/practitioner/earnings', 'Earnings'],
-  ['/practitioner/credentials', 'Credentials'],
-  ['/practitioner/profile', 'Profile'],
-  ['/practitioner/availability', 'Availability'],
+  // Four tabs and a wizard in one page: the likeliest thing here to push the
+  // page sideways, so each way in is checked.
+  ['/practitioner/profile', /^(My profile|Set up your profile)$/],
+  ['/practitioner/profile?tab=credentials', 'My profile'],
+  ['/practitioner/profile?tab=availability', 'My profile'],
+  ['/practitioner/profile?tab=privacy', 'My profile'],
 ] as const) {
   test(`${path} fits a phone`, async ({ page }) => {
     await signIn(page, world().practitioner);

@@ -13,6 +13,7 @@ import { STEP_UP_WINDOW_SECONDS } from '@/modules/auth/domain/session';
 import { issueSession, stepUpSession } from '@/modules/auth/application/session-service';
 import { clearCookies } from './support/cookie-jar';
 import { createUser, grant } from './support/fixtures';
+import { GET as findGrantee } from '@/app/api/v1/grants/find/route';
 
 /**
  * Step 4.8 — step-up authentication *enforced*.
@@ -220,5 +221,31 @@ describe('stepping up', () => {
     // else. Freshness belongs to the session, not the account.
     const otherRow = await prisma.session.findUniqueOrThrow({ where: { id: other.sessionId } });
     expect(otherRow.stepUpAt).toBeNull();
+  });
+});
+
+describe('finding somebody to give access to', () => {
+  it('finds them by the number as it is written down, not only as stored', async () => {
+    await signedInHolder({ stepUp: true });
+    const colleague = await createUser({ fullName: 'Hauwa Abdullahi' });
+    // Stored as +234803…; an owner types 0803 … with spaces.
+    const local = `0${colleague.phone.slice(4, 7)} ${colleague.phone.slice(7, 10)} ${colleague.phone.slice(10)}`;
+
+    const response = await findGrantee(
+      new Request(`http://localhost/api/v1/grants/find?scopeType=PLATFORM&phone=${encodeURIComponent(local)}`),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ id: colleague.id, fullName: 'Hauwa Abdullahi' });
+  });
+
+  it('says what is wrong with a number that is not one', async () => {
+    await signedInHolder({ stepUp: true });
+
+    const response = await findGrantee(
+      new Request('http://localhost/api/v1/grants/find?scopeType=PLATFORM&phone=12345678'),
+    );
+
+    expect(response.status).toBe(422);
   });
 });

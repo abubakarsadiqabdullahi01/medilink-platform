@@ -24,6 +24,8 @@ import {
   triageSuggestion,
 } from '@/modules/suggestions/application/suggestion';
 import { ROUTES } from '@/modules/suggestions/routes';
+import { POST as postSuggestion } from '@/app/api/v1/suggestions/route';
+import { issueSession } from '@/modules/auth/application/session-service';
 import { clearCookies } from './support/cookie-jar';
 import {
   createFacilityType,
@@ -343,5 +345,61 @@ describe('the route table', () => {
     // A facility reading every practitioner's complaints about it is not what
     // anybody agreed to.
     expect(ROUTES.some((route) => route.scopeType === 'FACILITY')).toBe(false);
+  });
+});
+
+describe('sending one from a console', () => {
+  async function send(body: Record<string, unknown>) {
+    const response = await postSuggestion(
+      new Request('http://localhost/api/v1/suggestions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    );
+    return response.status;
+  }
+
+  it('accepts hospital staff, who hold the permission at their facility', async () => {
+    const facilityId = '00000000-0000-4000-8000-0000000fac01';
+    const staff = await createUser({ fullName: 'Hauwa Abdullahi' });
+    await grant({
+      userId: staff.id,
+      roleKey: 'facility_administrator',
+      permissions: ['suggestion.submit'],
+      scopeType: 'FACILITY',
+      scopeId: facilityId,
+    });
+    clearCookies();
+    await issueSession({ userId: staff.id });
+
+    const text = 'Let us copy last week s rota forward instead of publishing each shift again.';
+    // Without the facility it was refused: they hold nothing at SELF.
+    expect(await send({ area: 'SCHEDULING', body: text })).toBe(403);
+    expect(await send({ area: 'SCHEDULING', body: text, facilityId })).toBe(201);
+
+    const row = await prisma.suggestion.findFirstOrThrow({ where: { raisedBy: staff.id } });
+    expect(row.area).toBe('SCHEDULING');
+  });
+
+  it('will not let somebody file under a facility they do not belong to', async () => {
+    const staff = await createUser({ fullName: 'Hauwa Abdullahi' });
+    await grant({
+      userId: staff.id,
+      roleKey: 'facility_administrator',
+      permissions: ['suggestion.submit'],
+      scopeType: 'FACILITY',
+      scopeId: '00000000-0000-4000-8000-0000000fac02',
+    });
+    clearCookies();
+    await issueSession({ userId: staff.id });
+
+    expect(
+      await send({
+        area: 'OTHER',
+        body: 'Somebody else s facility entirely.',
+        facilityId: '00000000-0000-4000-8000-0000000fac03',
+      }),
+    ).toBe(403);
   });
 });

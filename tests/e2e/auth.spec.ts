@@ -33,13 +33,19 @@ test('a practitioner signs up in three steps and lands in their own console', as
   await expect(page.getByText('Set a password', { exact: true })).toBeVisible();
   await page.getByLabel('Password', { exact: true }).fill(world().password);
   await page.getByLabel('Confirm password').fill(world().password);
+  // Consent to be shown to hospitals is asked with the account, and the
+  // button waits for it.
+  await expect(page.getByRole('button', { name: 'Create my account' })).toBeDisabled();
+  await page.getByRole('checkbox', { name: /Show my verified credentials/ }).check();
   await page.getByRole('button', { name: 'Create my account' }).click();
 
   // The practitioner grant arrives through the outbox worker; the form waits
   // for it, so landing with a working sidebar proves the worker ran too.
   await expect(page).toHaveURL(/\/practitioner$/, { timeout: 30_000 });
   await expect(page.getByRole('heading', { name: 'Hello, Chika' })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Credentials' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'My profile' })).toBeVisible();
+  // A brand-new account has nothing set up, so the overview offers the way in.
+  await expect(page.getByRole('link', { name: /Start setup/ })).toBeVisible();
 });
 
 test('a wrong code is refused and the account stays unverified', async ({ page }) => {

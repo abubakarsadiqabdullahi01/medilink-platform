@@ -8,14 +8,17 @@ vi.mock('next/headers', async () => {
 import { prisma } from '@/lib/db';
 import {
   acceptAgreement,
+  acceptAgreementAs,
   currentAgreements,
   currentConsent,
+  listAgreementVersions,
   publishAgreement,
   recordConsent,
 } from '@/modules/audit-compliance/application/consent';
 import {
   assessErasure,
   closeRequest,
+  startRequest,
   exportSubjectData,
   listRequests,
   raiseRequest,
@@ -256,6 +259,68 @@ describe('data subject requests', () => {
     ).rejects.toThrow(/already been answered/);
   });
 
+  it('picks a request up, which is what fills the In-progress tab', async () => {
+    // `IN_PROGRESS` sat in the status enum unwritten, so the console's tab
+    // for it could only ever be empty.
+    const user = await createUser({ fullName: 'Rukayat Adebisi' });
+    const request = await raiseRequest({ userId: user.id, kind: 'ERASURE' });
+    const officer = await createUser({ fullName: 'Musa Ibrahim Danjuma' });
+
+    const started = await startRequest({ requestId: request.id, actorId: officer.id });
+
+    expect(started.status).toBe('IN_PROGRESS');
+    // The statutory month runs from arrival, so picking it up must not move
+    // the deadline — that is the whole reason dueBy is set at creation.
+    expect(started.dueBy.getTime()).toBe(request.dueBy.getTime());
+  });
+
+  it('will not let two officers claim the same request', async () => {
+    const user = await createUser({ fullName: 'Rukayat Adebisi' });
+    const request = await raiseRequest({ userId: user.id, kind: 'ACCESS' });
+    const first = await createUser({ fullName: 'First Officer' });
+    const second = await createUser({ fullName: 'Second Officer' });
+
+    await startRequest({ requestId: request.id, actorId: first.id });
+
+    await expect(
+      startRequest({ requestId: request.id, actorId: second.id }),
+    ).rejects.toMatchObject({ code: 'request_not_waiting' });
+  });
+
+  it('refuses to pick up one that has already been answered', async () => {
+    const user = await createUser({ fullName: 'Rukayat Adebisi' });
+    const request = await raiseRequest({ userId: user.id, kind: 'ACCESS' });
+    const officer = await createUser({ fullName: 'Musa Ibrahim Danjuma' });
+
+    await closeRequest({
+      requestId: request.id,
+      actorId: officer.id,
+      status: 'COMPLETED',
+      outcome: 'Export generated and sent to the registered number.',
+    });
+
+    await expect(
+      startRequest({ requestId: request.id, actorId: officer.id }),
+    ).rejects.toMatchObject({ code: 'request_already_closed' });
+  });
+
+  it('can still be answered without being picked up first', async () => {
+    // A simple access request done in one sitting should not need somebody to
+    // click "start" before they are allowed to answer it.
+    const user = await createUser({ fullName: 'Chidi Okeke' });
+    const request = await raiseRequest({ userId: user.id, kind: 'ACCESS' });
+    const officer = await createUser({ fullName: 'Musa Ibrahim Danjuma' });
+
+    const closed = await closeRequest({
+      requestId: request.id,
+      actorId: officer.id,
+      status: 'COMPLETED',
+      outcome: 'Export generated and sent to the registered number.',
+    });
+
+    expect(closed.status).toBe('COMPLETED');
+  });
+
   it('queues the closest deadline first', async () => {
     const user = await createUser({ fullName: 'Yusuf Garba' });
     await raiseRequest({ userId: user.id, kind: 'ACCESS' });
@@ -339,5 +404,57 @@ describe('erasure', () => {
     // Said whether or not it can proceed, because it is the part people are
     // surprised by and being surprised later is worse.
     expect(assessment.whatErasureDoes).toContain('cannot be deleted');
+  });
+});
+
+describe('publishing and accepting from the consoles', () => {
+  async function publishAs(
+    kind: 'PRACTITIONER_ENGAGEMENT' | 'FACILITY_TERMS' | 'PRIVACY_NOTICE',
+    identifier: string,
+  ) {
+    const officer = await createUser({ fullName: 'Config Officer' });
+    return publishAgreement({
+      kind,
+      identifier,
+      title: 'Terms',
+      body: 'B'.repeat(80),
+      actorId: officer.id,
+    });
+  }
+
+  it('refuses a reused identifier with a reason instead of a crash', async () => {
+    const identifier = `facility-terms-${Date.now()}`;
+    await publishAs('FACILITY_TERMS', identifier);
+    await expect(publishAs('FACILITY_TERMS', identifier)).rejects.toThrow(/already exists/);
+  });
+
+  it('lists every version with how many accepted it', async () => {
+    const stamp = Date.now();
+    const first = await publishAs('FACILITY_TERMS', `facility-terms-a-${stamp}`);
+    const owner = await createUser({ fullName: 'Ngozi Okonkwo-Bello' });
+    await acceptAgreementAs('FACILITY', { userId: owner.id, versionId: first.id });
+    await publishAs('FACILITY_TERMS', `facility-terms-b-${stamp}`);
+
+    const versions = (await listAgreementVersions()).filter((row) => row.kind === 'FACILITY_TERMS');
+    const retired = versions.find((row) => row.id === first.id);
+    expect(retired?.retiredAt).not.toBeNull();
+    expect(retired?.acceptances).toBe(1);
+    expect(versions.filter((row) => !row.retiredAt)).toHaveLength(1);
+  });
+
+  it('lets hospital staff accept facility terms, and only those', async () => {
+    const stamp = Date.now();
+    const facilityTerms = await publishAs('FACILITY_TERMS', `facility-terms-c-${stamp}`);
+    const engagement = await publishAs('PRACTITIONER_ENGAGEMENT', `engagement-c-${stamp}`);
+    const owner = await createUser({ fullName: 'Ngozi Okonkwo-Bello' });
+
+    await acceptAgreementAs('FACILITY', { userId: owner.id, versionId: facilityTerms.id });
+    const current = await currentAgreements(owner.id, 'FACILITY');
+    expect(current.find((row) => row.id === facilityTerms.id)?.acceptedAt).not.toBeNull();
+
+    // The facility route cannot be used to sign a practitioner's terms.
+    await expect(
+      acceptAgreementAs('FACILITY', { userId: owner.id, versionId: engagement.id }),
+    ).rejects.toThrow(/does not exist/);
   });
 });

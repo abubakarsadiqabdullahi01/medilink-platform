@@ -221,8 +221,9 @@ describe('step 6.1 — the rate floor', () => {
     expect(created.status).toBe(422);
     expect(created.body).toMatchObject({ error: { code: 'below_rate_floor' } });
     // A facility told only "too low" has to guess, and will guess low again.
+    // In naira, as a scheduler would say it, not the kobo it is stored in.
     expect(String((created.body.error as { message: string }).message)).toContain(
-      String(NIGHT_FLOOR_KOBO),
+      `₦${(NIGHT_FLOOR_KOBO / 100).toLocaleString('en-NG')}`,
     );
   });
 
@@ -276,7 +277,8 @@ describe('the Stage 5.10 gate condition, finally testable', () => {
 
     expect(published.status).toBe(409);
     expect(published.body).toMatchObject({ error: { code: 'facility_cannot_publish' } });
-    expect(String((published.body.error as { message: string }).message)).toContain('not_verified');
+    // Said in words, not the blocker code the facility module returns.
+    expect(String((published.body.error as { message: string }).message)).toContain('not verified');
   });
 
   it('publishes for a verified facility and announces it', async () => {

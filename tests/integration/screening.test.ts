@@ -21,7 +21,10 @@ import {
   createProfessionalCategory,
   createSanctionedEntry,
   createUser,
+  grant,
 } from './support/fixtures';
+import { GET as getScreeningRoute, POST as clearScreeningRoute } from '@/app/api/v1/practitioners/screening/route';
+import { issueSession } from '@/modules/auth/application/session-service';
 import { clearCookies } from './support/cookie-jar';
 
 /**
@@ -214,5 +217,88 @@ describe('answering a flag', () => {
     await expect(
       clearScreeningFlag({ userId: user.id, actorId: officer.id, notes: 'Nothing to clear.' }),
     ).rejects.toThrow(/not flagged/);
+  });
+});
+
+describe('answering a flag from the compliance console', () => {
+  async function officer() {
+    const user = await createUser({ fullName: 'Compliance Officer' });
+    await grant({
+      userId: user.id,
+      roleKey: 'administrator',
+      permissions: ['credential.review'],
+      scopeType: 'PLATFORM',
+    });
+    return user;
+  }
+
+  async function call(userId: string, request: Request, handler: (request: Request) => Promise<Response>) {
+    clearCookies();
+    await issueSession({ userId });
+    const response = await handler(request);
+    return { status: response.status, body: (await response.json()) as Record<string, unknown> };
+  }
+
+  it('shows the entry the name matched, so the officer can compare', async () => {
+    const practitioner = await practitionerWithProfile('Amina Yusuf');
+    await createSanctionedEntry({ fullName: 'Amina Yusuf', folioNumber: 'MDCN/R/99999', reason: 'Struck off, 2024' });
+    await screenPractitioner(practitioner.id);
+    const reviewer = await officer();
+
+    const result = await call(
+      reviewer.id,
+      new Request(`http://localhost/api/v1/practitioners/screening?userId=${practitioner.id}`),
+      getScreeningRoute,
+    );
+
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({
+      screening: { status: 'FLAGGED' },
+      matchedEntry: { fullName: 'Amina Yusuf', reason: 'Struck off, 2024' },
+    });
+  });
+
+  it('clears a false positive with a reason, and refuses one without', async () => {
+    const practitioner = await practitionerWithProfile('Amina Yusuf');
+    await createSanctionedEntry({ fullName: 'Amina Yusuf' });
+    await screenPractitioner(practitioner.id);
+    const reviewer = await officer();
+
+    const post = (notes: string) =>
+      new Request('http://localhost/api/v1/practitioners/screening', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ userId: practitioner.id, notes }),
+      });
+
+    expect((await call(reviewer.id, post('Different person.'), clearScreeningRoute)).status).toBe(422);
+
+    const cleared = await call(
+      reviewer.id,
+      post('Folio MDCN/R/58213 on the register belongs to her; the listed entry is a different, older registrant.'),
+      clearScreeningRoute,
+    );
+    expect(cleared.status).toBe(200);
+    expect((await getScreeningResult(practitioner.id))?.status).toBe('CLEAR');
+  });
+
+  it('is never the practitioner s to read or answer', async () => {
+    const practitioner = await practitionerWithProfile('Amina Yusuf');
+    await createSanctionedEntry({ fullName: 'Amina Yusuf' });
+    await screenPractitioner(practitioner.id);
+    await grant({
+      userId: practitioner.id,
+      roleKey: 'practitioner',
+      permissions: ['practitioner.profile.read'],
+      scopeType: 'SELF',
+      scopeId: practitioner.id,
+    });
+
+    const result = await call(
+      practitioner.id,
+      new Request(`http://localhost/api/v1/practitioners/screening?userId=${practitioner.id}`),
+      getScreeningRoute,
+    );
+    expect(result.status).toBe(403);
   });
 });

@@ -34,6 +34,8 @@ import {
   requestExcusal,
 } from '@/modules/cancellations-sanctions/application/excusal';
 import { ROUTES } from '@/modules/cancellations-sanctions/routes';
+import { GET as listExcusalsRoute } from '@/app/api/v1/assignments/[id]/excusals/route';
+import { issueSession } from '@/modules/auth/application/session-service';
 import { clearCookies } from './support/cookie-jar';
 import {
   createFacilityType,
@@ -552,5 +554,71 @@ describe('the route table', () => {
       (route) => route.method === 'POST' && route.path.endsWith('/excusals'),
     );
     expect(request?.scopeType).toBe('SELF');
+  });
+});
+
+describe('reading excusal requests over HTTP', () => {
+  /** Signed in as `userId`, asking for this assignment's requests. */
+  async function listAs(userId: string, assignmentId: string, platform = false) {
+    clearCookies();
+    await issueSession({ userId });
+    const response = await listExcusalsRoute(
+      new Request(
+        `http://localhost/api/v1/assignments/${assignmentId}/excusals${platform ? '?scopeType=PLATFORM' : ''}`,
+      ),
+      { params: Promise.resolve({ id: assignmentId }) },
+    );
+    return { status: response.status, body: (await response.json()) as { excusals?: unknown[] } };
+  }
+
+  async function asPractitioner(userId: string) {
+    await grant({
+      userId,
+      roleKey: 'practitioner',
+      permissions: ['attendance.record'],
+      scopeType: 'SELF',
+      scopeId: userId,
+    });
+  }
+
+  it("will not hand one practitioner another's reasons", async () => {
+    const world = await buildWorld();
+    await asPractitioner(world.practitionerId);
+    await requestExcusal({
+      assignmentId: world.assignmentId,
+      userId: world.practitionerId,
+      reason: 'My son was admitted to the children s emergency unit that morning.',
+    });
+
+    // Somebody else entirely, holding the same permission at their own SELF
+    // scope: the guard alone was satisfied by that, and the reasons came back.
+    const outsider = await createUser({ fullName: 'Another Practitioner' });
+    await asPractitioner(outsider.id);
+
+    const result = await listAs(outsider.id, world.assignmentId);
+    expect(result.status).toBe(404);
+    expect(result.body.excusals).toBeUndefined();
+  });
+
+  it('gives the practitioner their own, and the officer anybody s', async () => {
+    const world = await buildWorld();
+    await asPractitioner(world.practitionerId);
+    await requestExcusal({
+      assignmentId: world.assignmentId,
+      userId: world.practitionerId,
+      reason: 'I was unwell that morning and could not travel.',
+    });
+
+    const own = await listAs(world.practitionerId, world.assignmentId);
+    expect(own.status).toBe(200);
+    expect(own.body.excusals).toHaveLength(1);
+
+    const officer = await listAs(world.officerId, world.assignmentId, true);
+    expect(officer.status).toBe(200);
+    expect(officer.body.excusals).toHaveLength(1);
+
+    // And the practitioner cannot borrow the officer's door.
+    const borrowed = await listAs(world.practitionerId, world.assignmentId, true);
+    expect(borrowed.status).toBe(403);
   });
 });

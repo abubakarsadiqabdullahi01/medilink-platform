@@ -67,6 +67,26 @@ async function callUploadUrl(body: unknown = {}): Promise<ApiResult> {
   return { status: response.status, body: await response.json() };
 }
 
+/**
+ * A waiting submission of a document-reviewed credential — the kind an officer
+ * approves in one click. The tests of review *mechanics* (one winner among
+ * concurrent reviews, no reviewing your own, the resupply round trip) use this
+ * rather than a NIN: a NIN or a licence number is confirmed through the
+ * practitioner's page instead, because approving it has to record the identity
+ * or registration too. That path is in confirm-from-submission.test.ts.
+ */
+async function submitDocumentCredential(options: { expires?: boolean; reviewDays?: number } = {}) {
+  const credentialType = await createCredentialType({
+    verificationMethod: 'document_review',
+    ...options,
+  });
+  const upload = await callUploadUrl();
+  return callSubmit({
+    credentialTypeId: credentialType.id,
+    documentObjectKey: upload.body.objectKey,
+  });
+}
+
 async function callReview(id: string, body: unknown): Promise<ApiResult> {
   const response = await postReview(
     await jsonRequest(`http://localhost/api/v1/credentials/${id}/review`, body),
@@ -281,12 +301,7 @@ describe('submitting a credential', () => {
 describe('reviewing a submission', () => {
   it('lets a compliance officer approve a different practitioner’s submission', async () => {
     const practitioner = await loginAsPractitioner();
-    const credentialType = await createCredentialType({
-      verificationMethod: 'nimc_verification',
-      expires: true,
-      reviewDays: 30,
-    });
-    const submitted = await callSubmit({ credentialTypeId: credentialType.id, referenceNumber: 'A1' });
+    const submitted = await submitDocumentCredential({ expires: true, reviewDays: 30 });
 
     clearCookies();
     const officer = await loginAsComplianceOfficer();
@@ -346,8 +361,7 @@ describe('reviewing a submission', () => {
 
   it('refuses to review an already-reviewed submission', async () => {
     await loginAsPractitioner();
-    const credentialType = await createCredentialType({ verificationMethod: 'nimc_verification' });
-    const submitted = await callSubmit({ credentialTypeId: credentialType.id, referenceNumber: 'A1' });
+    const submitted = await submitDocumentCredential();
 
     clearCookies();
     await loginAsComplianceOfficer();
@@ -360,8 +374,7 @@ describe('reviewing a submission', () => {
 
   it('allows exactly one concurrent review of a pending submission', async () => {
     await loginAsPractitioner();
-    const credentialType = await createCredentialType({ verificationMethod: 'nimc_verification' });
-    const submitted = await callSubmit({ credentialTypeId: credentialType.id, referenceNumber: 'A1' });
+    const submitted = await submitDocumentCredential();
 
     clearCookies();
     await loginAsComplianceOfficer();
@@ -523,12 +536,18 @@ describe('step 5.7 — requesting more information', () => {
   });
 
   it('can then be approved, completing the round trip', async () => {
-    const { practitioner, submissionId } = await pendingSubmission();
+    // A document-reviewed credential, so "approved" is the officer's one click;
+    // see submitDocumentCredential for why a NIN is not used here.
+    const practitioner = await loginAsPractitioner();
+    const submitted = await submitDocumentCredential();
+    const submissionId = submitted.body.id as string;
+
     await loginAsComplianceOfficer();
-    await callReview(submissionId, { decision: 'request_info', reviewNotes: 'Wrong number.' });
+    await callReview(submissionId, { decision: 'request_info', reviewNotes: 'Not legible.' });
 
     await issueSession({ userId: practitioner.id });
-    await callResupply(submissionId, { referenceNumber: 'B22222222' });
+    const replacement = await callUploadUrl();
+    await callResupply(submissionId, { documentObjectKey: replacement.body.objectKey });
 
     const officer = await loginAsComplianceOfficer();
     const approved = await callReview(submissionId, { decision: 'approve' });

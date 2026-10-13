@@ -211,3 +211,40 @@ describe('un-appointing', () => {
     expect(revoked.revokedAt).not.toBeNull();
   });
 });
+
+describe('giving access back', () => {
+  it('re-grants a facility role that was revoked, and keeps the old grant as history', async () => {
+    const facilityId = '00000000-0000-4000-8000-00000000fa01';
+    const owner = await createUser({ fullName: 'Ngozi Okonkwo-Bello' });
+    const colleague = await createUser({ fullName: 'Hauwa Abdullahi' });
+    const appoint = () =>
+      grantRole({
+        userId: colleague.id,
+        roleKey: 'facility_administrator',
+        scopeType: 'FACILITY',
+        scopeId: facilityId,
+        actorId: owner.id,
+        actorPermissions: OWNER,
+      });
+
+    const first = await appoint();
+    await revokeGrant({
+      grantId: first.id,
+      actorId: owner.id,
+      reason: 'Moved to the night rota at our other site.',
+      actorPermissions: OWNER,
+    });
+
+    // Used to be a 500: the table-wide unique counted the revoked row.
+    const second = await appoint();
+    expect(second.id).not.toBe(first.id);
+
+    const rows = await prisma.userRole.findMany({ where: { userId: colleague.id }, orderBy: { createdAt: 'asc' } });
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.revokedAt).not.toBeNull();
+    expect(rows[1]?.revokedAt).toBeNull();
+
+    // And one live grant is still the limit.
+    await expect(appoint()).rejects.toMatchObject({ code: 'already_granted' });
+  });
+});

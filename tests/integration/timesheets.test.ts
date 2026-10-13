@@ -24,6 +24,7 @@ import {
 import { reliabilityFrom } from '@/modules/matching/domain/reliability';
 import { recordManualAttendance } from '@/modules/attendance/application/attendance';
 import {
+  computeAndSaveTimesheet,
   correctTimesheet,
   getTimesheet,
   reviewTimesheet,
@@ -587,5 +588,26 @@ describe("somebody else's shift", () => {
     });
     expect(record.status).not.toBe('SUBMITTED');
     expect(record.submittedBy).toBeNull();
+  });
+});
+
+describe('two callers pricing the same shift at once', () => {
+  it('both succeed and leave one timesheet', async () => {
+    const world = await buildWorld();
+
+    // The ShiftCompleted handler and a practitioner pressing Submit straight
+    // after checking out. Read-then-create let one of them hit the unique
+    // attendance_record_id and fail.
+    const results = await Promise.allSettled([
+      computeAndSaveTimesheet(world.assignmentId),
+      computeAndSaveTimesheet(world.assignmentId),
+      computeAndSaveTimesheet(world.assignmentId),
+    ]);
+
+    expect(results.every((result) => result.status === 'fulfilled')).toBe(true);
+    const assignment = await prisma.attendanceRecord.findUniqueOrThrow({
+      where: { assignmentId: world.assignmentId },
+    });
+    expect(await prisma.timesheet.count({ where: { attendanceRecordId: assignment.id } })).toBe(1);
   });
 });

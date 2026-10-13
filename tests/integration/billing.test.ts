@@ -265,7 +265,7 @@ describe('invoicing approved work', () => {
     const world = await buildWorld();
     await generateInvoice(period(world));
 
-    const [invoice] = await listInvoices(world.facilityId);
+    const [invoice] = (await listInvoices(world.facilityId)).invoices;
     expect(invoice!.lines[0]).toMatchObject({
       practitionerId: world.practitionerId,
       practitionerName: 'Aisha Bello',
