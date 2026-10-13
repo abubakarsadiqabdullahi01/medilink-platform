@@ -45,6 +45,7 @@ export const PERMISSIONS = {
   'incident.manage': 'Manage a clinical incident, including suspension',
   'audit.read': 'Read the audit trail',
   'config.manage': 'Edit controlled vocabularies and rate floors',
+  'system.manage': 'See failures in background work and replay an event that gave up',
 
   // Module 18, the pilot's suggestion log. These two are the only keys added
   // to Section 8.8's catalogue by this codebase, and the reason is that no
@@ -182,7 +183,7 @@ const ADMINISTRATOR: Permission[] = [
   'service_request.read', 'assignment.confirm', 'assignment.cancel',
   'invoice.read', 'payout.manage',
   'dispute.manage', 'sanction.apply', 'incident.manage',
-  'audit.read',
+  'audit.read', 'system.manage',
   'suggestion.submit', 'suggestion.triage',
 ];
 

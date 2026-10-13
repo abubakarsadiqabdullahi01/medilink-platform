@@ -18,6 +18,7 @@ import {
   FileSignature,
   Gauge,
   CalendarDays,
+  Activity,
 } from 'lucide-react';
 import { SessionProvider, type SessionState } from '@/lib/ui/session';
 import { ConsoleShell, type NavSection } from '@/components/app/console-shell';
@@ -118,6 +119,7 @@ const SECTIONS: NavSection[] = [
     items: [
       { href: '/admin/staff', label: 'Staff', icon: UsersRound, permission: 'role.grant' },
       { href: '/admin/performance', label: 'Performance', icon: Gauge, permission: 'audit.read' },
+      { href: '/admin/system', label: 'System health', icon: Activity, permission: 'audit.read' },
       {
         href: '/admin/agreements',
         label: 'Terms and notices',
