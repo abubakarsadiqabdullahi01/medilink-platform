@@ -493,6 +493,51 @@ describe('paying a practitioner', () => {
     ).rejects.toThrow(/not owed anything/);
   });
 
+  it('prepares one payout, not two, when the button is pressed twice at once', async () => {
+    // Each press used to read the same balance and the same empty in-flight
+    // total, and both created a payout of the full amount.
+    const world = await buildWorld();
+    await generateInvoice(period(world));
+
+    const press = () =>
+      preparePayout({ practitionerId: world.practitionerId, actorId: world.financeId });
+    const results = await Promise.allSettled([press(), press(), press()]);
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    for (const result of results) {
+      if (result.status === 'rejected') expect(result.reason).toMatchObject({ code: 'nothing_owed' });
+    }
+    const payouts = await prisma.payout.findMany({ where: { practitionerId: world.practitionerId } });
+    expect(payouts).toHaveLength(1);
+    expect(payouts[0]!.amountKobo).toBe(4_000_000);
+  });
+
+  it('will not release more than the practitioner is owed by the time it is released', async () => {
+    const world = await buildWorld();
+    await generateInvoice(period(world));
+    const payout = await preparePayout({
+      practitionerId: world.practitionerId,
+      actorId: world.financeId,
+    });
+
+    // The balance falls between preparing and releasing: money goes out some
+    // other way (here, a second payout settling first).
+    const transactionId = '00000000-0000-0000-0000-00000000b04a';
+    await prisma.ledgerEntry.createMany({
+      data: [
+        { transactionId, account: 'PRACTITIONER_EARNINGS', amountKobo: 1_000_000, subjectId: world.practitionerId, memo: 'test: paid some other way' },
+        { transactionId, account: 'CASH', amountKobo: -1_000_000, memo: 'test: paid some other way' },
+      ],
+    });
+
+    await expect(
+      releasePayout({ payoutId: payout.id, actorId: world.financeId }),
+    ).rejects.toMatchObject({ code: 'payout_exceeds_balance' });
+    expect((await prisma.payout.findUniqueOrThrow({ where: { id: payout.id } })).status).toBe(
+      'PREPARED',
+    );
+  });
+
   it('will not pay somebody who is owed nothing', async () => {
     const world = await buildWorld();
     await expect(

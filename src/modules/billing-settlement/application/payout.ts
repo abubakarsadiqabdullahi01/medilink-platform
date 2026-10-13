@@ -21,6 +21,12 @@ export const PayoutErrors = {
   notFound: () => new HttpError('payout_not_found', 'That payout does not exist.', 404),
   nothingOwed: () =>
     new HttpError('nothing_owed', 'That practitioner is not owed anything right now.', 409),
+  exceedsBalance: () =>
+    new HttpError(
+      'payout_exceeds_balance',
+      'This payout is larger than what the practitioner is owed now. Prepare a new one.',
+      409,
+    ),
   wrongStatus: (from: string, to: string) =>
     new HttpError('payout_wrong_status', `A ${from} payout cannot become ${to}.`, 409),
   gatewayUnavailable: (message: string) =>
@@ -52,8 +58,11 @@ function toView(row: PayoutView): PayoutView {
  * negative of the balance. Derived rather than stored, so it cannot drift
  * from the entries it came from.
  */
-export async function amountOwed(practitionerId: string): Promise<number> {
-  const result = await prisma.ledgerEntry.aggregate({
+export async function amountOwed(
+  practitionerId: string,
+  db: Pick<Tx, 'ledgerEntry'> = prisma,
+): Promise<number> {
+  const result = await db.ledgerEntry.aggregate({
     where: { account: 'PRACTITIONER_EARNINGS', subjectId: practitionerId },
     _sum: { amountKobo: true },
   });
@@ -62,6 +71,19 @@ export async function amountOwed(practitionerId: string): Promise<number> {
   // `0` under Object.is — which is the comparison a caller reaching for
   // strict equality will get. Normalised here rather than at every call site.
   return balance === 0 ? 0 : -balance;
+}
+
+/**
+ * Serialises everything that decides how much a practitioner may be paid.
+ *
+ * Preparing reads the balance and the money already in flight and then writes
+ * a payout; two presses at once both read the same figures and both wrote a
+ * payout for the whole amount. Held to the end of the transaction and keyed on
+ * the practitioner, so different people never wait on each other. The prefix
+ * keeps this key apart from the booking locks, which hash a bare user id.
+ */
+async function lockPayouts(tx: Tx, practitionerId: string): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`payout:${practitionerId}`}, 0))`;
 }
 
 /**
@@ -75,19 +97,24 @@ export async function preparePayout(input: {
   practitionerId: string;
   actorId: string;
 }): Promise<PayoutView> {
-  const owed = await amountOwed(input.practitionerId);
-  if (owed <= 0) throw PayoutErrors.nothingOwed();
-
-  // Anything already prepared or released is money in flight; subtract it or
-  // a second press of the button pays the same work twice.
-  const inFlight = await prisma.payout.aggregate({
-    where: { practitionerId: input.practitionerId, status: { in: ['PREPARED', 'RELEASED'] } },
-    _sum: { amountKobo: true },
-  });
-  const amountKobo = owed - (inFlight._sum.amountKobo ?? 0);
-  if (amountKobo <= 0) throw PayoutErrors.nothingOwed();
-
   return prisma.$transaction(async (tx: Tx) => {
+    // The balance and the money in flight are read under the lock, in the same
+    // transaction as the write, so a second press waits and then sees the first.
+    await lockPayouts(tx, input.practitionerId);
+
+    const owed = await amountOwed(input.practitionerId, tx);
+    if (owed <= 0) throw PayoutErrors.nothingOwed();
+
+    // Anything already prepared or released is money in flight; subtract it or
+    // a second press of the button pays the same work twice. A FAILED payout is
+    // not in flight: the gateway refused it and nothing moved.
+    const inFlight = await tx.payout.aggregate({
+      where: { practitionerId: input.practitionerId, status: { in: ['PREPARED', 'RELEASED'] } },
+      _sum: { amountKobo: true },
+    });
+    const amountKobo = owed - (inFlight._sum.amountKobo ?? 0);
+    if (amountKobo <= 0) throw PayoutErrors.nothingOwed();
+
     const payout = await tx.payout.create({
       data: { practitionerId: input.practitionerId, amountKobo },
     });
@@ -125,12 +152,27 @@ export async function releasePayout(input: {
   }
 
   // Compare-and-set before the send, so two officers releasing at once cannot
-  // both reach the gateway with the same payout.
-  const claimed = await prisma.payout.updateMany({
-    where: { id: input.payoutId, status: 'PREPARED' },
-    data: { status: 'RELEASED', releasedBy: input.actorId, releasedAt: new Date() },
+  // both reach the gateway with the same payout. The balance is asked again
+  // under the same lock preparing takes: the amount was right when it was
+  // prepared, and what is owed can fall between then and now.
+  await prisma.$transaction(async (tx: Tx) => {
+    await lockPayouts(tx, existing.practitionerId);
+
+    const owed = await amountOwed(existing.practitionerId, tx);
+    const alreadyOut = await tx.payout.aggregate({
+      where: { practitionerId: existing.practitionerId, status: 'RELEASED', id: { not: existing.id } },
+      _sum: { amountKobo: true },
+    });
+    if (existing.amountKobo > owed - (alreadyOut._sum.amountKobo ?? 0)) {
+      throw PayoutErrors.exceedsBalance();
+    }
+
+    const claimed = await tx.payout.updateMany({
+      where: { id: input.payoutId, status: 'PREPARED' },
+      data: { status: 'RELEASED', releasedBy: input.actorId, releasedAt: new Date() },
+    });
+    if (claimed.count !== 1) throw PayoutErrors.wrongStatus(existing.status, 'RELEASED');
   });
-  if (claimed.count !== 1) throw PayoutErrors.wrongStatus(existing.status, 'RELEASED');
 
   let result;
   try {
