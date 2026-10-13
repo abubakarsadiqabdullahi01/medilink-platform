@@ -12,6 +12,8 @@ import {
   type AssignmentStatusValue,
   type InvitationStatusValue,
 } from '../domain/assignment';
+import { isContactOpen } from '../domain/contact';
+import { initialsOf } from '@/lib/names';
 import type { AssignmentOutcomes } from '../domain/reliability';
 import { recordDeclineAsSuggestion } from '@/modules/suggestions/application/suggestion';
 
@@ -867,9 +869,18 @@ export async function listInvitationsForRequest(input: {
     : [];
   const names = new Map(users.map((user) => [user.id, user.fullName]));
 
+  // Whoever has said yes is named, because the facility has to confirm them. Whoever
+  // has only been invited (or declined, or let it lapse) is initials: an offer is not a
+  // booking, and a name is what a booking releases. The decline reason is not returned
+  // at all — the practitioner's screen promises it "reaches the platform without your
+  // name", and an API that hands it to the facility breaks that whatever the page renders.
   return rows.map((row) => ({
     ...toInvitationView(row),
-    practitionerName: names.get(row.userId) ?? 'Unknown practitioner',
+    declineReason: null,
+    practitionerName:
+      row.status === 'ACCEPTED'
+        ? (names.get(row.userId) ?? 'Unknown practitioner')
+        : initialsOf(names.get(row.userId) ?? ''),
   }));
 }
 
@@ -927,12 +938,9 @@ export async function listAssignments(query: ListAssignmentsQuery): Promise<Assi
 
   if (query.scopeType === 'FACILITY' && query.search) {
     const search = query.search.trim();
-    where.user = {
-      OR: [
-        { fullName: { contains: search, mode: 'insensitive' } },
-        { phone: { contains: search } },
-      ],
-    };
+    // By name only. Searching by number would let a facility test whether a number it
+    // already holds belongs to somebody on its roster, which defeats withholding it.
+    where.user = { fullName: { contains: search, mode: 'insensitive' } };
   }
 
   const rows = await prisma.assignment.findMany({
@@ -953,10 +961,16 @@ export async function listAssignments(query: ListAssignmentsQuery): Promise<Assi
   });
 
   const page = rows.slice(0, limit);
+  const now = new Date();
   const assignments = page.map((row) => ({
     ...toAssignmentView(row),
     practitionerName: row.user.fullName,
-    practitionerPhone: row.user.phone,
+    // Their own number is always theirs. A facility sees it only around the shift.
+    practitionerPhone:
+      query.scopeType === 'SELF' ||
+      isContactOpen({ status: row.status, startsAt: row.startsAt, endsAt: row.endsAt, now })
+        ? row.user.phone
+        : '',
     facilityName: row.serviceRequest.facility.name,
     shiftType: row.serviceRequest.shiftType,
     hourlyRateKobo: row.serviceRequest.hourlyRateKobo,

@@ -238,7 +238,7 @@ function ranked(body: Record<string, unknown>) {
 }
 
 function excluded(body: Record<string, unknown>) {
-  return body.excluded as { userId: string; reasons: string[]; practitionerName: string }[];
+  return body.excluded as { reasons: string[] }[];
 }
 
 beforeEach(() => {
@@ -260,7 +260,12 @@ describe('running a match', () => {
     expect(ranked(result.body)[0]?.factors).toHaveLength(4);
   });
 
-  it('names every candidate, ranked and excluded — a reviewer decides on a person, not a uuid', async () => {
+  it('shows a ranked candidate by initials and gives no phone number to anybody', async () => {
+    /**
+     * A match result goes to every facility user, nationwide. A phone number in
+     * it is a directory anyone can download, and it lets two people skip the
+     * platform entirely. Contact details are for a booking, not for browsing.
+     */
     const world = await buildWorld();
     const eligible = await eligiblePractitioner(world, { fullName: 'Amaka Eze' });
     const ineligible = await createUser({ fullName: 'Yusuf Bello' });
@@ -272,15 +277,39 @@ describe('running a match', () => {
     await issueSession({ userId: world.schedulerId });
 
     const result = await callMatch(world.requestId, world.facilityId);
+    const wire = JSON.stringify(result.body);
 
-    expect(ranked(result.body)[0]).toMatchObject({
-      userId: eligible.id,
-      practitionerName: 'Amaka Eze',
-    });
-    expect(excluded(result.body)[0]).toMatchObject({
+    // The rank is still attributable, because the facility must be able to offer it.
+    expect(ranked(result.body)[0]).toMatchObject({ userId: eligible.id, practitionerName: 'A. E.' });
+
+    // But nothing that identifies or reaches a person.
+    expect(wire).not.toContain('practitionerPhone');
+    for (const person of [eligible, ineligible]) {
+      expect(wire).not.toContain(person.phone);
+      expect(wire).not.toContain(person.phone.replace('+234', '0'));
+    }
+    for (const name of ['Amaka', 'Eze', 'Yusuf', 'Bello']) expect(wire).not.toContain(name);
+  });
+
+  it('does not identify an excluded candidate, only why somebody was excluded', async () => {
+    /**
+     * "Blocked" and "already assigned" are statements about a named person's
+     * calendar. Anonymous, they still tell a facility why its pool is thin.
+     */
+    const world = await buildWorld();
+    const ineligible = await createUser({ fullName: 'Yusuf Bello' });
+    await createProfile({
       userId: ineligible.id,
-      practitionerName: 'Yusuf Bello',
+      professionalCategoryId: world.categoryId,
+      yearsOfExperience: 1,
     });
+    await issueSession({ userId: world.schedulerId });
+
+    const result = await callMatch(world.requestId, world.facilityId);
+
+    expect(excluded(result.body)).toHaveLength(1);
+    expect(excluded(result.body)[0]).toEqual({ reasons: expect.arrayContaining(['not_eligible']) });
+    expect(JSON.stringify(excluded(result.body))).not.toContain(ineligible.id);
   });
 
   it('excludes an ineligible practitioner, naming the Stage 5 rule', async () => {
@@ -298,7 +327,6 @@ describe('running a match', () => {
     // Rule 5 of the README, reached through the eligibility invariant.
     expect(ranked(result.body)).toHaveLength(0);
     expect(excluded(result.body)[0]).toMatchObject({
-      userId: user.id,
       reasons: expect.arrayContaining(['not_eligible']),
     });
   });

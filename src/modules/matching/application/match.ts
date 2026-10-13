@@ -9,9 +9,9 @@ import {
   proximityTier,
   WEIGHTS,
   type CandidateInput,
-  type ExcludedCandidate,
   type RankedCandidate,
 } from '../domain/engine';
+import { initialsOf } from '@/lib/names';
 import { reliabilityFrom } from '../domain/reliability';
 import { assignmentOutcomesFor } from './assignment';
 
@@ -34,14 +34,26 @@ import { assignmentOutcomesFor } from './assignment';
 /** Hours before a shift that count toward the fatigue factor. */
 const FATIGUE_WINDOW_HOURS = 7 * 24;
 
+/**
+ * What a facility sees of a ranked candidate: enough to offer them the shift
+ * and to review why they ranked where they did, and nothing that identifies or
+ * reaches them. The name is initials only, and there is no phone number — a
+ * match is returned to every facility user, nationwide, so anything in it is
+ * public to all of them. Contact details are released by a booking.
+ */
 export interface RankedCandidateView extends RankedCandidate {
+  /** Initials only ("A. E."). The field keeps its old name; its content does not. */
   practitionerName: string;
-  practitionerPhone: string;
 }
 
-export interface ExcludedCandidateView extends ExcludedCandidate {
-  practitionerName: string;
-  practitionerPhone: string;
+/**
+ * An excluded candidate is anonymous: only the reasons survive. "Blocked" and
+ * "already assigned" are statements about one named person's calendar, and a
+ * facility needs to know why its pool is thin, not whose diary is full. The
+ * full list, with identities, is stored with the run for those who may read it.
+ */
+export interface ExcludedCandidateView {
+  reasons: string[];
 }
 
 export interface MatchRunView {
@@ -151,31 +163,24 @@ export async function runMatch(input: RunMatchParams): Promise<MatchRunView> {
   );
 
   // The engine works in ids, by design — see `engine.ts`, pure and
-  // database-free. A reviewer deciding who to offer a shift to needs a name
-  // against every one of them, ranked and excluded alike, so that is added
-  // here, at the boundary, rather than inside the scoring itself.
-  const involvedIds = [
-    ...new Set([...result.ranked.map((c) => c.userId), ...result.excluded.map((c) => c.userId)]),
-  ];
-  const people = involvedIds.length
+  // database-free. A reviewer deciding who to offer a shift to needs something
+  // to tell the ranked candidates apart by, so that is added here, at the
+  // boundary: initials, never the name and never a phone number.
+  const rankedIds = result.ranked.map((candidate) => candidate.userId);
+  const people = rankedIds.length
     ? await prisma.user.findMany({
-        where: { id: { in: involvedIds } },
-        select: { id: true, fullName: true, phone: true },
+        where: { id: { in: rankedIds } },
+        select: { id: true, fullName: true },
       })
     : [];
   const byId = new Map(people.map((person) => [person.id, person]));
-  const nameFor = (userId: string) => byId.get(userId)?.fullName ?? 'Unknown practitioner';
-  const phoneFor = (userId: string) => byId.get(userId)?.phone ?? '';
 
   const ranked: RankedCandidateView[] = result.ranked.map((candidate) => ({
     ...candidate,
-    practitionerName: nameFor(candidate.userId),
-    practitionerPhone: phoneFor(candidate.userId),
+    practitionerName: initialsOf(byId.get(candidate.userId)?.fullName ?? ''),
   }));
   const excluded: ExcludedCandidateView[] = result.excluded.map((candidate) => ({
-    ...candidate,
-    practitionerName: nameFor(candidate.userId),
-    practitionerPhone: phoneFor(candidate.userId),
+    reasons: candidate.reasons,
   }));
 
   return prisma.$transaction(async (tx: Tx) => {

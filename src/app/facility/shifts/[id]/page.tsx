@@ -48,15 +48,13 @@ interface Ranked {
   rank: number;
   score: number;
   factors: Factor[];
+  /** Initials only. A match result is not a directory; a booking releases the name. */
   practitionerName: string;
-  practitionerPhone: string;
 }
 
+/** Anonymous by design: why somebody was left out, never who. */
 interface Excluded {
-  userId: string;
   reasons: string[];
-  practitionerName: string;
-  practitionerPhone: string;
 }
 
 interface MatchRun {
@@ -85,6 +83,15 @@ interface Assignment {
   endsAt: string;
   practitionerName: string;
   practitionerPhone: string;
+}
+
+/** How many candidates each reason accounts for. One person can have several. */
+function countReasons(rows: Excluded[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const row of rows) {
+    for (const reason of row.reasons) counts[reason] = (counts[reason] ?? 0) + 1;
+  }
+  return counts;
 }
 
 /**
@@ -260,9 +267,15 @@ export default function ShiftDetailPage() {
                   >
                     <div className="min-w-0">
                       <p className="truncate">{row.practitionerName}</p>
-                      <p className="truncate font-mono text-xs text-muted-foreground">
-                        {row.practitionerPhone}
-                      </p>
+                      {row.practitionerPhone ? (
+                        <p className="truncate font-mono text-xs text-muted-foreground">
+                          {row.practitionerPhone}
+                        </p>
+                      ) : (
+                        <p className="truncate text-xs text-muted-foreground">
+                          Phone shown from 2 days before the shift
+                        </p>
+                      )}
                     </div>
                     <StatusBadge status={row.status} />
                   </div>
@@ -341,6 +354,7 @@ export default function ShiftDetailPage() {
                     return (
                       <button
                         key={candidate.userId}
+                        data-testid={`candidate-${candidate.userId}`}
                         onClick={() => toggle(candidate.userId)}
                         className={cn(
                           'w-full rounded-lg border p-4 text-left transition-colors',
@@ -411,20 +425,19 @@ export default function ShiftDetailPage() {
               {matchRun && matchRun.excluded.length > 0 ? (
                 <details className="mt-6">
                   <summary className="cursor-pointer text-sm text-muted-foreground">
-                    {matchRun.excluded.length} excluded, and why
+                    {matchRun.excluded.length} left out, and why
                   </summary>
-                  <div className="mt-3 space-y-1.5">
-                    {matchRun.excluded.map((row) => (
-                      <div key={row.userId} className="flex flex-wrap items-center gap-2 text-xs">
-                        <span>{row.practitionerName}</span>
-                        {row.reasons.map((reason) => (
-                          <Badge key={reason} variant="secondary">
-                            {humanise(reason)}
-                          </Badge>
-                        ))}
-                      </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+                    {Object.entries(countReasons(matchRun.excluded)).map(([reason, count]) => (
+                      <Badge key={reason} variant="secondary">
+                        {humanise(reason)} · {count}
+                      </Badge>
                     ))}
                   </div>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    People are not named here: this list explains why the pool is the size it is,
+                    not who is busy or unverified.
+                  </p>
                 </details>
               ) : null}
             </CardContent>

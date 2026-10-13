@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import { formatWhen } from '../../src/components/app/format';
 import { signIn, switchTo } from './support/session';
 import { card, choose, expectToast, lagosLocal, section } from './support/ui';
+import { initialsOf } from '../../src/lib/names';
 import { world } from './support/world';
 
 /**
@@ -62,15 +63,17 @@ test('the engine ranks the cleared nurse and the scheduler offers her the shift'
   await page.getByRole('button', { name: 'Find candidates' }).click();
   await expectToast(page, /practitioners are eligible/);
 
-  // A ranking changes nothing until a person picks from it.
-  const candidate = page.getByRole('button').filter({ hasText: nurse.fullName });
+  // A ranking changes nothing until a person picks from it. A match shows
+  // initials, not names, so the card is found by the person it stands for.
+  const candidate = page.getByTestId(`candidate-${nurse.id}`);
   await expect(candidate).toBeVisible();
   await candidate.click();
   await expect(candidate.getByText('Selected')).toBeVisible();
 
   await page.getByRole('button', { name: 'Offer to 1 selected' }).click();
   await expectToast(page, 'Offered to 1 practitioner');
-  await expect(section(page, 'Offered').getByText(nurse.fullName)).toBeVisible();
+  // Offered, not yet accepted: still initials.
+  await expect(section(page, 'Offered').getByText(initialsOf(nurse.fullName))).toBeVisible();
 });
 
 test('the nurse accepts the offer from her own console', async ({ page }) => {

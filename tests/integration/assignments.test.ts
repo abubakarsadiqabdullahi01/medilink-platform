@@ -876,6 +876,77 @@ describe('the schedule list', () => {
     expect(theirs.assignments[0]?.practitionerName).toBe(user.fullName);
   });
 
+  it("gives a facility a practitioner's phone only around the shift, never weeks ahead", async () => {
+    /**
+     * Once somebody is booked the ward needs to reach them — but only around the
+     * shift. A roster that shows every number permanently turns the platform into
+     * a staff directory that nobody has to come back to.
+     */
+    const confirm = async (world: Awaited<ReturnType<typeof buildWorld>>, userId: string) => {
+      await acceptedInvitation(world, userId);
+      await confirmAssignment({
+        requestId: world.requestId,
+        facilityId: world.facilityId,
+        userId,
+        actorId: world.schedulerId,
+      });
+    };
+
+    const far = await buildWorld(); // starts in two weeks
+    const farUser = await practitioner('Amina Yusuf');
+    await confirm(far, farUser.id);
+
+    const soonStart = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const soon = await buildWorld(1, {
+      startsAt: soonStart,
+      endsAt: new Date(soonStart.getTime() + 8 * 60 * 60 * 1000),
+    });
+    const soonUser = await practitioner('Bisi Adeyemi');
+    await confirm(soon, soonUser.id);
+
+    const farRoster = await listAssignments({ scopeType: 'FACILITY', scopeId: far.facilityId });
+    expect(farRoster.assignments[0]).toMatchObject({
+      practitionerName: 'Amina Yusuf',
+      practitionerPhone: '',
+    });
+
+    const soonRoster = await listAssignments({ scopeType: 'FACILITY', scopeId: soon.facilityId });
+    expect(soonRoster.assignments[0]).toMatchObject({
+      practitionerName: 'Bisi Adeyemi',
+      practitionerPhone: soonUser.phone,
+    });
+
+    // The practitioner always has their own number.
+    const mine = await listAssignments({ scopeType: 'SELF', scopeId: farUser.id });
+    expect(mine.assignments[0]?.practitionerPhone).toBe(farUser.phone);
+  });
+
+  it('cannot be used to look a phone number up while it is withheld', async () => {
+    const world = await buildWorld();
+    const user = await practitioner('Amina Yusuf');
+    await acceptedInvitation(world, user.id);
+    await confirmAssignment({
+      requestId: world.requestId,
+      facilityId: world.facilityId,
+      userId: user.id,
+      actorId: world.schedulerId,
+    });
+
+    const byNumber = await listAssignments({
+      scopeType: 'FACILITY',
+      scopeId: world.facilityId,
+      search: user.phone.slice(-6),
+    });
+    expect(byNumber.assignments).toHaveLength(0);
+
+    const byName = await listAssignments({
+      scopeType: 'FACILITY',
+      scopeId: world.facilityId,
+      search: 'Amina',
+    });
+    expect(byName.assignments).toHaveLength(1);
+  });
+
   it('narrows the facility roster by a start-date range', async () => {
     const soon = await buildWorld();
     const soonUser = await practitioner('Amina Yusuf');
@@ -1055,10 +1126,41 @@ describe("a facility reading one shift's offers", () => {
       facilityId: world.facilityId,
     });
 
+    // Whoever has said yes is named, because the facility must confirm them. Whoever
+    // has only been invited is initials: an offer is not a booking, and a name is
+    // what a booking releases.
     expect(rows.map((row) => [row.practitionerName, row.status])).toEqual([
       ['Amina Yusuf', 'ACCEPTED'],
-      ['Bisi Adeyemi', 'INVITED'],
+      ['B. A.', 'INVITED'],
     ]);
+  });
+
+  it('never hands the facility the reason somebody declined', async () => {
+    // The practitioner's screen promises the reason "reaches the platform without
+    // your name". A facility API that returns it beside the invitation breaks that
+    // promise whether or not the page renders it.
+    const world = await buildWorld();
+    const user = await practitioner('Chidi Okeke');
+    const [invitation] = await invitePractitioners({
+      requestId: world.requestId,
+      facilityId: world.facilityId,
+      userIds: [user.id],
+      actorId: world.schedulerId,
+    });
+    await respondToInvitation({
+      invitationId: invitation!.id,
+      userId: user.id,
+      decision: 'decline',
+      reason: 'The rate is too low for a night shift.',
+    });
+
+    const [row] = await listInvitationsForRequest({
+      requestId: world.requestId,
+      facilityId: world.facilityId,
+    });
+
+    expect(row).toMatchObject({ status: 'DECLINED', practitionerName: 'C. O.', declineReason: null });
+    expect(JSON.stringify(row)).not.toContain('too low');
   });
 
   it("treats another facility's shift as absent", async () => {

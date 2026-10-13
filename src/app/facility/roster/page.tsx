@@ -146,7 +146,7 @@ export default function RosterPage() {
                 id="roster-search"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Amina, or 0803 123 4567"
+                placeholder="Search by name"
               />
             </div>
 
@@ -215,7 +215,7 @@ export default function RosterPage() {
           title={filtered ? 'Nothing matches that' : `Nothing ${humanise(status).toLowerCase()}`}
           description={
             filtered
-              ? 'Try part of a name, a phone number, or a different date range.'
+              ? 'Try part of a name, or a different date range.'
               : status === 'CONFIRMED'
                 ? 'Confirm somebody onto a published shift and they appear here.'
                 : undefined
@@ -241,9 +241,15 @@ export default function RosterPage() {
                   <TableRow key={row.id}>
                     <TableCell>
                       <p className="font-medium">{row.practitionerName}</p>
-                      <p className="font-mono text-xs text-muted-foreground">
-                        {row.practitionerPhone}
-                      </p>
+                      {row.practitionerPhone ? (
+                        <p className="font-mono text-xs text-muted-foreground">
+                          {row.practitionerPhone}
+                        </p>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">
+                          Phone shown from 2 days before the shift
+                        </p>
+                      )}
                     </TableCell>
                     <TableCell className="whitespace-nowrap text-xs">
                       <p>{formatWhen(row.startsAt)}</p>
