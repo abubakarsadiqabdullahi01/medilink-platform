@@ -1058,6 +1058,12 @@ model Invitation {
   respondedAt      DateTime?        @map("responded_at")
   declineReason    String?          @map("decline_reason")
   invitedBy        String?          @map("invited_by") @db.Uuid
+  // What the practitioner was shown when they accepted: cancellation terms,
+  // notes, address, rate and times, copied at that moment. The request's own
+  // columns can be read later but they are not what was agreed if anything
+  // moved in between. Null until accepted, and cleared when an offer is made
+  // again, so one acceptance cannot stand for the next offer.
+  termsAccepted    Json?            @map("terms_accepted")
   createdAt        DateTime         @default(now()) @map("created_at")
   updatedAt        DateTime         @updatedAt @map("updated_at")
 

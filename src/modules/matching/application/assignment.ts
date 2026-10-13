@@ -181,6 +181,8 @@ export async function invitePractitioners(input: InviteParams): Promise<Invitati
             expiresAt,
             respondedAt: null,
             declineReason: null,
+            // An acceptance of the earlier offer does not stand for this one.
+            termsAccepted: Prisma.DbNull,
             invitedBy: input.actorId,
             matchRunId: input.matchRunId ?? existing.matchRunId,
           },
@@ -279,12 +281,36 @@ export async function respondToInvitation(input: RespondParams): Promise<Invitat
   // practitioner still eligible, in the profession and consenting. Otherwise a
   // lapsed licence is accepted onto the shift and discovered at confirmation —
   // or not at all.
+  let termsAccepted: Prisma.InputJsonValue | undefined;
   if (accepted) {
     const request = await prisma.serviceRequest.findFirst({
       where: { id: invitation.serviceRequestId, deletedAt: null },
-      select: { status: true, startsAt: true, professionalCategoryId: true },
+      select: {
+        status: true,
+        startsAt: true,
+        endsAt: true,
+        professionalCategoryId: true,
+        hourlyRateKobo: true,
+        cancellationTerms: true,
+        notes: true,
+        facility: { select: { name: true, addressLine: true } },
+      },
     });
     if (!request || request.status !== 'PUBLISHED') throw AssignmentErrors.invitationClosed();
+
+    // What they were shown, copied at the moment they said yes. A dispute about
+    // a late cancellation turns on what was agreed, and the request's own
+    // columns say only what they say now.
+    termsAccepted = {
+      acceptedAt: now.toISOString(),
+      facilityName: request.facility.name,
+      addressLine: request.facility.addressLine,
+      startsAt: request.startsAt.toISOString(),
+      endsAt: request.endsAt.toISOString(),
+      hourlyRateKobo: request.hourlyRateKobo,
+      cancellationTerms: request.cancellationTerms,
+      notes: request.notes,
+    };
     if (request.startsAt.getTime() <= now.getTime()) throw AssignmentErrors.shiftStarted();
     if ((await bookingBlockers(input.userId, request.professionalCategoryId, now)).length > 0) {
       throw AssignmentErrors.cannotAccept();
@@ -298,6 +324,7 @@ export async function respondToInvitation(input: RespondParams): Promise<Invitat
         status: accepted ? 'ACCEPTED' : 'DECLINED',
         respondedAt: now,
         declineReason: accepted ? null : input.reason,
+        ...(termsAccepted ? { termsAccepted } : {}),
       },
     });
     if (applied.count !== 1) throw AssignmentErrors.invitationClosed();
@@ -978,6 +1005,11 @@ export interface InvitationQueueRow extends InvitationView {
   urgency: string;
   startsAt: Date;
   endsAt: Date;
+  /** What a dispute turns on, shown before the practitioner says yes. */
+  cancellationTerms: string;
+  notes: string | null;
+  addressLine: string;
+  headcount: number;
 }
 
 /**
@@ -1009,7 +1041,10 @@ export async function listInvitationsFor(userId: string): Promise<InvitationQueu
           urgency: true,
           startsAt: true,
           endsAt: true,
-          facility: { select: { name: true } },
+          cancellationTerms: true,
+          notes: true,
+          headcount: true,
+          facility: { select: { name: true, addressLine: true } },
         },
       })
     : [];
@@ -1031,6 +1066,10 @@ export async function listInvitationsFor(userId: string): Promise<InvitationQueu
         urgency: request.urgency,
         startsAt: request.startsAt,
         endsAt: request.endsAt,
+        cancellationTerms: request.cancellationTerms,
+        notes: request.notes,
+        addressLine: request.facility.addressLine,
+        headcount: request.headcount,
       },
     ];
   });

@@ -38,6 +38,11 @@ interface Invitation {
   urgency: string;
   startsAt: string;
   endsAt: string;
+  /** What a dispute turns on: shown before the practitioner says yes, and kept when they do. */
+  cancellationTerms: string;
+  notes: string | null;
+  addressLine: string;
+  headcount: number;
 }
 
 /** Answered offers shown before "show all". */
@@ -150,7 +155,38 @@ export default function OffersPage() {
                     <Detail label="Ends">{formatWhen(row.endsAt)}</Detail>
                     <Detail label="Rate">{formatNaira(row.hourlyRateKobo)}/hour</Detail>
                     <Detail label="Answer by">{formatWhen(row.expiresAt)}</Detail>
+                    <Detail label="Places">
+                      {row.headcount === 1 ? '1 practitioner' : `${row.headcount} practitioners`}
+                    </Detail>
                   </DetailGrid>
+
+                  {/* The two things an agreement turns on, read before the
+                      button rather than found afterwards. Accepting keeps a
+                      copy of exactly what is on this card. */}
+                  <div className="space-y-3 rounded-md border bg-muted/30 p-3 text-sm">
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Where
+                      </p>
+                      <p className="mt-0.5">
+                        {row.facilityName}, {row.addressLine}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Cancellation terms
+                      </p>
+                      <p className="mt-0.5">{row.cancellationTerms}</p>
+                    </div>
+                    {row.notes ? (
+                      <div>
+                        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                          From the facility — ward, who to report to, what to bring
+                        </p>
+                        <p className="mt-0.5 whitespace-pre-line">{row.notes}</p>
+                      </div>
+                    ) : null}
+                  </div>
 
                   {lapsed ? (
                     <Alert variant="warning">
@@ -179,6 +215,11 @@ export default function OffersPage() {
                           }
                         />
                       </div>
+
+                      <p className="text-xs text-muted-foreground">
+                        By accepting you agree to the cancellation terms above, and a record is kept
+                        of what you were shown.
+                      </p>
 
                       <div className="flex flex-wrap gap-2">
                         <Button
