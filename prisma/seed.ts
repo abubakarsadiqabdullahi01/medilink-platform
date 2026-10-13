@@ -6,13 +6,14 @@
  *
  * The geography is complete: all 36 states, the FCT and all 774 LGAs, in
  * `data/nigeria.ts`, with the counts asserted here rather than trusted. The
- * holiday list is still partial — the moveable Islamic and Christian dates
- * are announced each year and cannot be hard-coded for the ones after this,
- * which is a real limitation rather than an omission.
+ * holiday list holds the fixed dates and Good Friday and Easter Monday for the
+ * years ahead; the Islamic holidays are declared each year and are entered by
+ * a person through /api/v1/holidays when they are (see the domain module).
  */
 import { PrismaClient } from '@prisma/client';
 import { syncRoles } from '../src/lib/authz/sync-roles';
 import { JOB_DEFINITIONS } from '../src/worker/jobs';
+import { loadStatutoryHolidays } from '../src/modules/rates-contracts/application/holiday';
 
 const prisma = new PrismaClient();
 
@@ -250,24 +251,11 @@ async function seedStates() {
   }
 }
 
-async function seedHolidays() {
-  const holidays = [
-    { date: '2026-01-01', name: "New Year's Day" },
-    { date: '2026-05-01', name: "Workers' Day" },
-    { date: '2026-06-12', name: 'Democracy Day' },
-    { date: '2026-10-01', name: 'Independence Day' },
-    { date: '2026-12-25', name: 'Christmas Day' },
-    { date: '2026-12-26', name: 'Boxing Day' },
-  ];
+/** Five years ahead of the first one the platform was built for; the coverage check says when to add more. */
+const HOLIDAY_YEARS = [2026, 2027, 2028, 2029, 2030];
 
-  for (const holiday of holidays) {
-    const date = new Date(holiday.date);
-    await prisma.publicHoliday.upsert({
-      where: { date_name: { date, name: holiday.name } },
-      update: { year: date.getUTCFullYear(), owner: OWNER_OPERATIONS },
-      create: { date, name: holiday.name, year: date.getUTCFullYear(), owner: OWNER_OPERATIONS },
-    });
-  }
+async function seedHolidays() {
+  await loadStatutoryHolidays(prisma, HOLIDAY_YEARS);
 }
 
 async function seedRateFloors() {

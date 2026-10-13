@@ -17,6 +17,7 @@ import {
   UsersRound,
   FileSignature,
   Gauge,
+  CalendarDays,
 } from 'lucide-react';
 import { SessionProvider, type SessionState } from '@/lib/ui/session';
 import { ConsoleShell, type NavSection } from '@/components/app/console-shell';
@@ -121,6 +122,12 @@ const SECTIONS: NavSection[] = [
         href: '/admin/agreements',
         label: 'Terms and notices',
         icon: FileSignature,
+        permission: 'config.manage',
+      },
+      {
+        href: '/admin/holidays',
+        label: 'Public holidays',
+        icon: CalendarDays,
         permission: 'config.manage',
       },
     ],

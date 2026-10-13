@@ -54,4 +54,8 @@ export const MUTABLE_CONFIG_TABLES = [
   // an unrelated practitioner ineligible in the next — which is exactly how
   // this was found.
   'config.credential_requirements',
+  // Holidays are written by the maintenance route and read by every timesheet,
+  // so a date left behind by one case would turn an unrelated shift in the next
+  // into a holiday.
+  'config.public_holidays',
 ] as const;
