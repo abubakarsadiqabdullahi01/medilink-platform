@@ -676,6 +676,22 @@ export async function getAssignment(assignmentId: string): Promise<AssignmentVie
   return row ? toAssignmentView(row) : null;
 }
 
+/**
+ * Whether this facility has booked this person: a live, finished or no-show
+ * assignment, but not one that was cancelled — a cancelled booking is a person
+ * who never turned up on the ward.
+ *
+ * For modules that must not let a facility name just anybody (an incident
+ * report can end in a suspension) and may not read `matching.assignments`
+ * themselves.
+ */
+export async function isKnownToFacility(userId: string, facilityId: string): Promise<boolean> {
+  const count = await prisma.assignment.count({
+    where: { userId, facilityId, status: { in: ['CONFIRMED', 'COMPLETED', 'NO_SHOW'] } },
+  });
+  return count > 0;
+}
+
 export type ReadScopeType = 'SELF' | 'FACILITY' | 'PLATFORM';
 
 /**

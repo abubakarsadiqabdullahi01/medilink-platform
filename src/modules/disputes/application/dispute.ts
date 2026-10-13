@@ -4,6 +4,7 @@ import { recordAudit } from '@/lib/audit';
 import { publishEvent } from '@/lib/outbox';
 import { EVENTS } from '@/lib/events';
 import { HttpError } from '@/lib/http/errors';
+import { isAuthorized, loadGrants } from '@/lib/authz/guard';
 import { getAssignment } from '@/modules/matching/application/assignment';
 import {
   closeDispute,
@@ -124,6 +125,37 @@ async function loadCase(disputeId: string) {
   if (!assignment) throw DisputeErrors.assignmentNotFound();
 
   return { row, assignment };
+}
+
+export type CaseSide = 'PRACTITIONER' | 'FACILITY' | 'ADJUDICATOR';
+
+/**
+ * Where somebody stands on one case, or `null` if they stand nowhere.
+ *
+ * `dispute.manage` is held by practitioners (at SELF), facility owners and
+ * approvers (at FACILITY) and officers (at PLATFORM), so on its own it says
+ * nothing about *this* case — the route guard proves the permission and the
+ * scope the caller named, not that the case is in it. Everything that reads a
+ * case or what is attached to it asks here, and a `null` is answered as "not
+ * found" so the id is not confirmed to exist.
+ *
+ * The practitioner side is the assignee by identity, the facility side is a
+ * grant over *this* shift's facility, and the adjudicator side is a PLATFORM
+ * grant. Order matters: a PLATFORM grant satisfies every scope, so it is
+ * recognised before the facility check and not mistaken for one.
+ */
+export async function sideOnCase(
+  viewerId: string,
+  assignment: { userId: string; facilityId: string },
+): Promise<CaseSide | null> {
+  if (viewerId === assignment.userId) return 'PRACTITIONER';
+
+  const grants = await loadGrants(viewerId);
+  if (isAuthorized(grants, 'dispute.manage', { type: 'PLATFORM' })) return 'ADJUDICATOR';
+  if (isAuthorized(grants, 'dispute.manage', { type: 'FACILITY', id: assignment.facilityId })) {
+    return 'FACILITY';
+  }
+  return null;
 }
 
 /** Open, or being worked. Both are live cases as far as every rule here goes. */
@@ -405,10 +437,21 @@ export async function getDispute(disputeId: string): Promise<DisputeView> {
   return toView(row, assignment.userId, assignment.facilityId);
 }
 
-/** Every case over this shift, oldest first — withdrawn and dismissed included. */
-export async function listDisputesFor(assignmentId: string): Promise<DisputeView[]> {
+/**
+ * Every case over this shift, oldest first — withdrawn and dismissed included.
+ *
+ * Only for the two sides of the shift and the adjudicator. The route's scope
+ * is whatever the caller declared, so a practitioner naming their own SELF
+ * scope with somebody else's assignment id passed the guard and was handed
+ * that person's complaint.
+ */
+export async function listDisputesFor(
+  assignmentId: string,
+  viewerId: string,
+): Promise<DisputeView[]> {
   const assignment = await getAssignment(assignmentId);
   if (!assignment) throw DisputeErrors.assignmentNotFound();
+  if ((await sideOnCase(viewerId, assignment)) === null) throw DisputeErrors.assignmentNotFound();
 
   const rows = await prisma.dispute.findMany({
     where: { assignmentId },

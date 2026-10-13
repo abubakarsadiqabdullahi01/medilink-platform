@@ -222,6 +222,15 @@ export async function presentCheckInToken(
   input: PresentTokenParams,
 ): Promise<AttendanceView> {
   const assignment = await loadAssignment(input.assignmentId);
+
+  // The code is read out on the ward, so everybody within earshot knows it.
+  // Hearing it is not holding the shift: only the person booked onto it can
+  // present it, and the refusal is a 404 so it does not confirm that the id
+  // belongs to somebody else's shift.
+  if (assignment.userId !== input.userId) throw AttendanceErrors.assignmentNotFound();
+  // A shift cancelled after the code was issued is not one to check in to.
+  if (assignment.status !== 'CONFIRMED') throw AttendanceErrors.assignmentNotConfirmed();
+
   const record = await prisma.attendanceRecord.findUnique({
     where: { assignmentId: input.assignmentId },
   });

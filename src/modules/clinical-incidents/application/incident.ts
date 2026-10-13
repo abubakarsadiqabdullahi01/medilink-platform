@@ -4,7 +4,7 @@ import { recordAudit } from '@/lib/audit';
 import { publishEvent } from '@/lib/outbox';
 import { EVENTS } from '@/lib/events';
 import { HttpError } from '@/lib/http/errors';
-import { getAssignment } from '@/modules/matching/application/assignment';
+import { getAssignment, isKnownToFacility } from '@/modules/matching/application/assignment';
 import {
   closeBlockers,
   outcomeSuspends,
@@ -50,6 +50,20 @@ export const IncidentErrors = {
     ),
 
   notOpen: () => new HttpError('incident_not_open', 'That incident is already closed.', 409),
+
+  subjectUnknown: () =>
+    new HttpError(
+      'incident_subject_unknown',
+      'That practitioner has no booking at this facility, so a report cannot name them.',
+      422,
+    ),
+
+  subjectMismatch: () =>
+    new HttpError(
+      'incident_subject_mismatch',
+      'That practitioner was not the one booked onto the shift named.',
+      422,
+    ),
 
   noSubject: () =>
     new HttpError(
@@ -145,8 +159,20 @@ export async function reportIncident(input: ReportIncidentParams): Promise<Incid
     const assignment = await getAssignment(input.assignmentId);
     if (!assignment) throw IncidentErrors.assignmentNotFound();
     if (assignment.facilityId !== input.facilityId) throw IncidentErrors.wrongFacility();
-    // The shift names the practitioner, so a report that gives one need not.
-    subjectUserId = subjectUserId ?? assignment.userId;
+    // The shift names the practitioner, so a report that gives one need not —
+    // and one that does give one has to agree. A report that pairs this shift
+    // with somebody who was not on it would be evidence against the wrong person.
+    if (subjectUserId && subjectUserId !== assignment.userId) {
+      throw IncidentErrors.subjectMismatch();
+    }
+    subjectUserId = assignment.userId;
+  } else if (subjectUserId) {
+    // A report can end in a suspension, so naming somebody is not free: a
+    // facility may only name a practitioner it has booked. Without this any
+    // facility could file against any practitioner on the platform by id.
+    if (!(await isKnownToFacility(subjectUserId, input.facilityId))) {
+      throw IncidentErrors.subjectUnknown();
+    }
   }
 
   return prisma.$transaction(async (tx: Tx) => {

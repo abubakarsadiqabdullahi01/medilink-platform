@@ -29,6 +29,10 @@ import {
 } from '@/modules/attendance/application/attendance';
 import { qrPayload } from '@/modules/attendance/domain/check-in-token';
 import { ROUTES } from '@/modules/attendance/routes';
+import { issueSession } from '@/modules/auth/application/session-service';
+import { POST as presentRoute } from '@/app/api/v1/assignments/[id]/attendance/present/route';
+import { POST as issueTokenRoute } from '@/app/api/v1/assignments/[id]/attendance/token/route';
+import { POST as manualRoute } from '@/app/api/v1/assignments/[id]/attendance/manual/route';
 import { clearCookies } from './support/cookie-jar';
 import {
   createFacilityType,
@@ -539,3 +543,152 @@ describe('the route table', () => {
   });
 });
 
+
+describe('whose shift it is', () => {
+  /**
+   * The guard proves who is calling and which scope they hold. Neither says
+   * the shift named in the path is theirs, and attendance is the record pay
+   * is computed from.
+   */
+  async function post(
+    route: (request: Request, props: { params: Promise<{ id: string }> }) => Promise<Response>,
+    suffix: string,
+    assignmentId: string,
+    body: Record<string, unknown>,
+  ) {
+    const response = await route(
+      new Request(`http://localhost/api/v1/assignments/${assignmentId}/attendance/${suffix}`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+      { params: Promise.resolve({ id: assignmentId }) },
+    );
+    return { status: response.status, body: await response.json() };
+  }
+
+  it('does not let one practitioner check in on another\'s shift', async () => {
+    const world = await buildWorld();
+    const colleague = await createUser({ fullName: 'Bisi Adeyemi' });
+    const token = await issueCheckInToken({
+      assignmentId: world.assignmentId,
+      purpose: 'CHECK_IN',
+      actorId: world.schedulerId,
+    });
+
+    // The code is read out on the ward, so a colleague hears it too.
+    await expect(
+      presentCheckInToken({
+        assignmentId: world.assignmentId,
+        purpose: 'CHECK_IN',
+        code: token.code,
+        userId: colleague.id,
+      }),
+    ).rejects.toMatchObject({ code: 'assignment_not_found', status: 404 });
+
+    const record = await prisma.attendanceRecord.findUniqueOrThrow({
+      where: { assignmentId: world.assignmentId },
+    });
+    expect(record.status).toBe('CHECK_IN_PENDING');
+    // The code was not spent either: the real practitioner can still use it.
+    await expect(
+      presentCheckInToken({
+        assignmentId: world.assignmentId,
+        purpose: 'CHECK_IN',
+        code: token.code,
+        userId: world.practitionerId,
+      }),
+    ).resolves.toMatchObject({ status: 'CHECKED_IN' });
+  });
+
+  it('refuses a check-in on a shift that has since been cancelled', async () => {
+    const world = await buildWorld();
+    const token = await issueCheckInToken({
+      assignmentId: world.assignmentId,
+      purpose: 'CHECK_IN',
+      actorId: world.schedulerId,
+    });
+    await prisma.assignment.update({
+      where: { id: world.assignmentId },
+      data: { status: 'CANCELLED' },
+    });
+
+    await expect(
+      presentCheckInToken({
+        assignmentId: world.assignmentId,
+        purpose: 'CHECK_IN',
+        code: token.code,
+        userId: world.practitionerId,
+      }),
+    ).rejects.toMatchObject({ code: 'assignment_not_confirmed' });
+  });
+
+  it('refuses another practitioner over the route, with their own SELF scope', async () => {
+    const world = await buildWorld();
+    const colleague = await createUser({ fullName: 'Bisi Adeyemi' });
+    await grant({
+      userId: colleague.id,
+      roleKey: `practitioner_self_${colleague.id}`,
+      permissions: ['attendance.record'],
+      scopeType: 'SELF',
+      scopeId: colleague.id,
+    });
+    const token = await issueCheckInToken({
+      assignmentId: world.assignmentId,
+      purpose: 'CHECK_IN',
+      actorId: world.schedulerId,
+    });
+
+    await issueSession({ userId: colleague.id });
+    const result = await post(presentRoute, 'present', world.assignmentId, {
+      purpose: 'CHECK_IN',
+      code: token.code,
+    });
+    expect(result.status).toBe(404);
+  });
+
+  it('does not let a facility issue a code for another facility\'s shift', async () => {
+    const mine = await buildWorld();
+    const theirs = await buildWorld();
+
+    await issueSession({ userId: mine.schedulerId });
+    const refused = await post(issueTokenRoute, 'token', theirs.assignmentId, {
+      facilityId: mine.facilityId,
+      purpose: 'CHECK_IN',
+    });
+    expect(refused.status).toBe(404);
+    expect(await prisma.checkInToken.count()).toBe(0);
+
+    const own = await post(issueTokenRoute, 'token', mine.assignmentId, {
+      facilityId: mine.facilityId,
+      purpose: 'CHECK_IN',
+    });
+    expect(own.status).toBe(201);
+  });
+
+  it('does not let a facility write the hours of another facility\'s shift', async () => {
+    const mine = await buildWorld();
+    const theirs = await buildWorld();
+
+    await issueSession({ userId: mine.schedulerId });
+    const refused = await post(manualRoute, 'manual', theirs.assignmentId, {
+      facilityId: mine.facilityId,
+      checkedInAt: PAST_START.toISOString(),
+      checkedOutAt: PAST_END.toISOString(),
+      reason: 'The ward network was down for the whole shift; taken from the paper log.',
+    });
+    expect(refused.status).toBe(404);
+
+    const record = await prisma.attendanceRecord.findUnique({
+      where: { assignmentId: theirs.assignmentId },
+    });
+    expect(record?.status ?? null).not.toBe('MANUALLY_CORRECTED');
+
+    const own = await post(manualRoute, 'manual', mine.assignmentId, {
+      facilityId: mine.facilityId,
+      checkedInAt: PAST_START.toISOString(),
+      checkedOutAt: PAST_END.toISOString(),
+      reason: 'The ward network was down for the whole shift; taken from the paper log.',
+    });
+    expect(own.status).toBe(200);
+  });
+});

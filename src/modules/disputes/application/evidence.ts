@@ -3,7 +3,8 @@ import { env } from '@/lib/env';
 import { recordAudit } from '@/lib/audit';
 import { HttpError } from '@/lib/http/errors';
 import { assertUploadAllowed, createDownloadUrl, createUploadUrl } from '@/lib/storage/tigris';
-import { DisputeErrors } from './dispute';
+import { getAssignment } from '@/modules/matching/application/assignment';
+import { DisputeErrors, sideOnCase, type CaseSide } from './dispute';
 
 /**
  * Evidence attached to a case.
@@ -31,6 +32,40 @@ export const EvidenceErrors = {
 
   notFound: () => new HttpError('evidence_not_found', 'That evidence does not exist.', 404),
 };
+
+/**
+ * The case, if the viewer has any part in it.
+ *
+ * `dispute.manage` alone says nothing about *this* case, so every function
+ * below asks where the caller stands on it first. Somebody with no part gets
+ * "not found" — the answer an id that does not exist would get — rather than a
+ * 403 that confirms the case is there.
+ */
+async function caseFor(disputeId: string, viewerId: string) {
+  const dispute = await prisma.dispute.findUnique({ where: { id: disputeId } });
+  if (!dispute) throw DisputeErrors.notFound();
+
+  const assignment = await getAssignment(dispute.assignmentId);
+  if (!assignment) throw DisputeErrors.notFound();
+
+  const side: CaseSide | null = await sideOnCase(viewerId, assignment);
+  if (side === null) throw DisputeErrors.notFound();
+
+  return { dispute, side };
+}
+
+/**
+ * A case somebody may add evidence to: they are one of its two sides, and it
+ * is still being argued. The adjudicator can see everything and is refused
+ * here by name — they weigh the evidence, they do not produce it, and
+ * `attachedBySide` below has only two values because of it.
+ */
+async function caseOpenToEvidence(disputeId: string, userId: string) {
+  const { dispute, side } = await caseFor(disputeId, userId);
+  if (side === 'ADJUDICATOR') throw EvidenceErrors.notAParty();
+  if (dispute.status !== 'OPEN' && dispute.status !== 'UNDER_REVIEW') throw EvidenceErrors.notLive();
+  return dispute;
+}
 
 export interface EvidenceView {
   id: string;
@@ -73,9 +108,7 @@ export async function requestEvidenceUploadUrl(input: {
 }): Promise<EvidenceUploadUrl> {
   assertUploadAllowed(input.contentType, input.sizeBytes);
 
-  const dispute = await prisma.dispute.findUnique({ where: { id: input.disputeId } });
-  if (!dispute) throw DisputeErrors.notFound();
-  if (dispute.status !== 'OPEN' && dispute.status !== 'UNDER_REVIEW') throw EvidenceErrors.notLive();
+  await caseOpenToEvidence(input.disputeId, input.userId);
 
   const { objectKey, url, expiresInSeconds } = await createUploadUrl({
     purpose: 'dispute_evidence',
@@ -125,9 +158,7 @@ export async function attachEvidence(input: {
   objectKey: string;
   note?: string;
 }): Promise<EvidenceView> {
-  const dispute = await prisma.dispute.findUnique({ where: { id: input.disputeId } });
-  if (!dispute) throw DisputeErrors.notFound();
-  if (dispute.status !== 'OPEN' && dispute.status !== 'UNDER_REVIEW') throw EvidenceErrors.notLive();
+  await caseOpenToEvidence(input.disputeId, input.userId);
 
   const stored = await prisma.storedObject.findUnique({ where: { objectKey: input.objectKey } });
   if (!stored || stored.purpose !== 'dispute_evidence') throw EvidenceErrors.notFound();
@@ -184,6 +215,9 @@ export interface EvidenceItem extends EvidenceView {
   attachedBySide: 'PRACTITIONER' | 'FACILITY';
 }
 
+/**
+ * Callers authorise first — both routes that reach it are PLATFORM-scoped.
+ */
 export async function listEvidence(disputeId: string): Promise<EvidenceItem[]> {
   const [rows, dispute] = await Promise.all([
     prisma.disputeEvidence.findMany({
@@ -224,10 +258,18 @@ export async function listEvidence(disputeId: string): Promise<EvidenceItem[]> {
  * letter — and a permanent URL would outlive any reason to hold it.
  */
 export async function requestEvidenceDownloadUrl(input: {
+  disputeId: string;
   evidenceId: string;
   viewerId: string;
 }): Promise<{ url: string }> {
-  const row = await prisma.disputeEvidence.findUnique({ where: { id: input.evidenceId } });
+  // Either side of the shift or an adjudicator, and the evidence has to be on
+  // the case named: the path carries both ids so a caller cannot name their
+  // own case and somebody else's photograph.
+  await caseFor(input.disputeId, input.viewerId);
+
+  const row = await prisma.disputeEvidence.findFirst({
+    where: { id: input.evidenceId, disputeId: input.disputeId },
+  });
   if (!row) throw EvidenceErrors.notFound();
 
   const url = await createDownloadUrl(row.objectKey);

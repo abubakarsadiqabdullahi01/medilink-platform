@@ -35,6 +35,14 @@ import {
   resolveDispute,
   withdrawDispute,
 } from '@/modules/disputes/application/dispute';
+import {
+  attachEvidence,
+  requestEvidenceDownloadUrl,
+  requestEvidenceUploadUrl,
+} from '@/modules/disputes/application/evidence';
+import { issueSession } from '@/modules/auth/application/session-service';
+import { GET as listForAssignmentRoute } from '@/app/api/v1/assignments/[id]/disputes/route';
+import { POST as evidenceUrlRoute } from '@/app/api/v1/disputes/[id]/evidence/[evidenceId]/url/route';
 import { DISPUTE_WINDOW_DAYS } from '@/modules/disputes/domain/dispute';
 import { ROUTES } from '@/modules/disputes/routes';
 import { clearCookies } from './support/cookie-jar';
@@ -635,7 +643,7 @@ describe('withdrawing, and disputing again', () => {
     });
     expect(second.status).toBe('OPEN');
 
-    const all = await listDisputesFor(world.assignmentId);
+    const all = await listDisputesFor(world.assignmentId, world.officerId);
     expect(all.map((row) => row.status)).toEqual(['RESOLVED', 'OPEN']);
     expect(all[0]!.outcome).toBe('DISMISSED');
   });
@@ -698,3 +706,207 @@ describe('the route table', () => {
   });
 });
 
+
+describe('who may see a case and what is attached to it', () => {
+  /**
+   * `dispute.manage` is held by practitioners (at SELF), facility owners and
+   * approvers (at FACILITY) and officers (at PLATFORM). The permission alone
+   * says nothing about *this* case, and the evidence is the most sensitive
+   * thing the module holds — a ward photograph, a medical letter. Everything
+   * below is about the case a person has no part in.
+   */
+  const PHOTO = { filename: 'ward-log.jpg', contentType: 'image/jpeg', sizeBytes: 120_000 };
+
+  async function selfGrant(userId: string) {
+    await grant({
+      userId,
+      roleKey: `practitioner_self_${userId}`,
+      permissions: ['dispute.manage'],
+      scopeType: 'SELF',
+      scopeId: userId,
+    });
+  }
+
+  /** A case with one photograph attached by the practitioner. */
+  async function caseWithEvidence() {
+    const world = await buildWorld();
+    await approved(world);
+    await selfGrant(world.practitionerId);
+    const dispute = await raiseDispute({
+      assignmentId: world.assignmentId,
+      actorId: world.practitionerId,
+      category: 'HOURS',
+      reason: COMPLAINT,
+    });
+    const upload = await requestEvidenceUploadUrl({
+      disputeId: dispute.id,
+      userId: world.practitionerId,
+      ...PHOTO,
+    });
+    const evidence = await attachEvidence({
+      disputeId: dispute.id,
+      userId: world.practitionerId,
+      objectKey: upload.objectKey,
+      note: 'The ward log, photographed.',
+    });
+    return { world, dispute, evidence };
+  }
+
+  /** Somebody at another facility, and another practitioner, both with dispute.manage. */
+  async function outsiders() {
+    const other = await buildWorld();
+    await selfGrant(other.practitionerId);
+    return { otherPractitioner: other.practitionerId, otherReviewer: other.reviewerId };
+  }
+
+  it('lets the practitioner and the facility attach evidence', async () => {
+    const { world, dispute } = await caseWithEvidence();
+
+    const facilityUpload = await requestEvidenceUploadUrl({
+      disputeId: dispute.id,
+      userId: world.reviewerId,
+      ...PHOTO,
+    });
+    await expect(
+      attachEvidence({
+        disputeId: dispute.id,
+        userId: world.reviewerId,
+        objectKey: facilityUpload.objectKey,
+      }),
+    ).resolves.toMatchObject({ attachedBy: world.reviewerId });
+  });
+
+  it('answers "not found" to an upload URL request from somebody on neither side of the shift', async () => {
+    const { dispute } = await caseWithEvidence();
+    const { otherPractitioner, otherReviewer } = await outsiders();
+
+    for (const userId of [otherPractitioner, otherReviewer]) {
+      await expect(
+        requestEvidenceUploadUrl({ disputeId: dispute.id, userId, ...PHOTO }),
+      ).rejects.toMatchObject({ status: 404 });
+    }
+    // Nothing was recorded on their behalf.
+    expect(await prisma.storedObject.count({ where: { ownerUserId: otherReviewer } })).toBe(0);
+  });
+
+  it('refuses an outsider attaching their own file to somebody else\'s case', async () => {
+    const { dispute } = await caseWithEvidence();
+    const { otherPractitioner } = await outsiders();
+    // They can ask storage for a URL for a case of their own, so they hold a
+    // genuine object of the right purpose — it is the case that is not theirs.
+    const stored = await prisma.storedObject.create({
+      data: {
+        bucket: 'test',
+        objectKey: `dispute_evidence/test/${otherPractitioner}/x.jpg`,
+        contentType: 'image/jpeg',
+        sizeBytes: 100,
+        purpose: 'dispute_evidence',
+        ownerUserId: otherPractitioner,
+        scopeType: 'SELF',
+        scopeId: otherPractitioner,
+      },
+    });
+
+    await expect(
+      attachEvidence({
+        disputeId: dispute.id,
+        userId: otherPractitioner,
+        objectKey: stored.objectKey,
+      }),
+    ).rejects.toMatchObject({ status: 404 });
+    expect(await prisma.disputeEvidence.count({ where: { disputeId: dispute.id } })).toBe(1);
+  });
+
+  it('does not let the adjudicator attach evidence — they weigh it, they do not produce it', async () => {
+    const { world, dispute } = await caseWithEvidence();
+    await expect(
+      requestEvidenceUploadUrl({ disputeId: dispute.id, userId: world.officerId, ...PHOTO }),
+    ).rejects.toMatchObject({ code: 'dispute_not_a_party' });
+  });
+
+  it('gives each party and the adjudicator a link to the evidence, and nobody else', async () => {
+    const { world, dispute, evidence } = await caseWithEvidence();
+    const { otherPractitioner, otherReviewer } = await outsiders();
+
+    for (const viewerId of [world.practitionerId, world.reviewerId, world.officerId]) {
+      await expect(
+        requestEvidenceDownloadUrl({ disputeId: dispute.id, evidenceId: evidence.id, viewerId }),
+      ).resolves.toHaveProperty('url');
+    }
+    for (const viewerId of [otherPractitioner, otherReviewer]) {
+      await expect(
+        requestEvidenceDownloadUrl({ disputeId: dispute.id, evidenceId: evidence.id, viewerId }),
+      ).rejects.toMatchObject({ status: 404 });
+    }
+    // The refusals left no "read" in the audit trail to suggest a download happened.
+    expect(
+      await prisma.auditLog.count({
+        where: {
+          action: 'dispute.evidence_read',
+          actorId: { in: [otherPractitioner, otherReviewer] },
+        },
+      }),
+    ).toBe(0);
+  });
+
+  it('will not serve evidence from a different case under this case\'s path', async () => {
+    const first = await caseWithEvidence();
+    const second = await caseWithEvidence();
+
+    // The second case's own practitioner, naming their own case id but the
+    // first case's evidence id.
+    await expect(
+      requestEvidenceDownloadUrl({
+        disputeId: second.dispute.id,
+        evidenceId: first.evidence.id,
+        viewerId: second.world.practitionerId,
+      }),
+    ).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('shows the cases over a shift to its parties and the adjudicator only', async () => {
+    const { world } = await caseWithEvidence();
+    const { otherPractitioner, otherReviewer } = await outsiders();
+
+    for (const viewerId of [world.practitionerId, world.reviewerId, world.officerId]) {
+      await expect(listDisputesFor(world.assignmentId, viewerId)).resolves.toHaveLength(1);
+    }
+    for (const viewerId of [otherPractitioner, otherReviewer]) {
+      await expect(listDisputesFor(world.assignmentId, viewerId)).rejects.toMatchObject({
+        status: 404,
+      });
+    }
+  });
+
+  it('refuses a stranger over the routes, whatever scope they name', async () => {
+    const { world, dispute, evidence } = await caseWithEvidence();
+    const { otherPractitioner } = await outsiders();
+
+    const list = (scope: string) =>
+      listForAssignmentRoute(
+        new Request(
+          `http://localhost/api/v1/assignments/${world.assignmentId}/disputes?scopeType=${scope}`,
+        ),
+        { params: Promise.resolve({ id: world.assignmentId }) },
+      );
+    const link = () =>
+      evidenceUrlRoute(
+        new Request(
+          `http://localhost/api/v1/disputes/${dispute.id}/evidence/${evidence.id}/url`,
+          { method: 'POST', body: '{}' },
+        ),
+        { params: Promise.resolve({ id: dispute.id, evidenceId: evidence.id }) },
+      );
+
+    await issueSession({ userId: otherPractitioner });
+    // Their own SELF scope passes the guard — and the application says no.
+    expect((await list('SELF')).status).toBe(404);
+    expect((await link()).status).toBe(404);
+
+    await issueSession({ userId: world.practitionerId });
+    const own = await list('SELF');
+    expect(own.status).toBe(200);
+    expect((await own.json()).disputes).toHaveLength(1);
+    expect((await link()).status).toBe(200);
+  });
+});

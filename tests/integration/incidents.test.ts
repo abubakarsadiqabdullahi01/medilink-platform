@@ -207,6 +207,81 @@ describe('reporting', () => {
     expect(incident.status).toBe('REPORTED');
   });
 
+  it('will not name a practitioner who has never worked at the facility', async () => {
+    // A report can lead to a suspension. Without this check any facility could
+    // file one against any practitioner on the platform by pasting their id.
+    const world = await buildWorld();
+    const stranger = await createUser({ fullName: 'Chidi Okeke' });
+
+    await expect(
+      reportIncident({
+        facilityId: world.facilityId,
+        actorId: world.reporterId,
+        subjectUserId: stranger.id,
+        occurredAt: OCCURRED,
+        severity: 'MODERATE',
+        category: 'CONDUCT',
+        summary: SUMMARY,
+      }),
+    ).rejects.toMatchObject({ code: 'incident_subject_unknown', status: 422 });
+    expect(await prisma.clinicalIncident.count()).toBe(0);
+  });
+
+  it('accepts somebody who has worked there, with no shift named', async () => {
+    const world = await buildWorld();
+
+    const incident = await reportIncident({
+      facilityId: world.facilityId,
+      actorId: world.reporterId,
+      subjectUserId: world.practitionerId,
+      occurredAt: OCCURRED,
+      severity: 'MINOR',
+      category: 'DOCUMENTATION',
+      summary: SUMMARY,
+    });
+    expect(incident.subjectUserId).toBe(world.practitionerId);
+  });
+
+  it('does not count a booking that was cancelled as having worked there', async () => {
+    const world = await buildWorld();
+    await prisma.assignment.update({
+      where: { id: world.assignmentId },
+      data: { status: 'CANCELLED' },
+    });
+
+    await expect(
+      reportIncident({
+        facilityId: world.facilityId,
+        actorId: world.reporterId,
+        subjectUserId: world.practitionerId,
+        occurredAt: OCCURRED,
+        severity: 'MINOR',
+        category: 'DOCUMENTATION',
+        summary: SUMMARY,
+      }),
+    ).rejects.toMatchObject({ code: 'incident_subject_unknown' });
+  });
+
+  it('refuses a subject who is not the practitioner on the shift named', async () => {
+    // The shift is the evidence; a report that says "this shift" and "that
+    // person" must not be able to pair a shift with somebody who was not on it.
+    const world = await buildWorld();
+    const other = await createUser({ fullName: 'Chidi Okeke' });
+
+    await expect(
+      reportIncident({
+        facilityId: world.facilityId,
+        actorId: world.reporterId,
+        assignmentId: world.assignmentId,
+        subjectUserId: other.id,
+        occurredAt: OCCURRED,
+        severity: 'MODERATE',
+        category: 'CONDUCT',
+        summary: SUMMARY,
+      }),
+    ).rejects.toMatchObject({ code: 'incident_subject_mismatch', status: 422 });
+  });
+
   it('publishes the event and writes an audit row', async () => {
     const world = await buildWorld();
     const incident = await reportIncident({

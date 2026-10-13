@@ -51,7 +51,9 @@ export async function GET(request: Request, props: { params: Promise<{ id: strin
         type: input.scopeType,
         id: input.scopeType === 'SELF' ? (input.scopeId ?? session.userId) : input.scopeId,
       }),
-      action: async ({ input }) => ({ disputes: await listDisputesFor(input.id) }),
+      action: async ({ input, session }) => ({
+        disputes: await listDisputesFor(input.id, session.userId),
+      }),
     },
     params,
   );
