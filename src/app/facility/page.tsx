@@ -172,7 +172,13 @@ export default function FacilityDashboard() {
                   shifts.
                 </p>
                 {facility.data.reviewNotes ? <p>What compliance said: {facility.data.reviewNotes}</p> : null}
-                <p>Reply to Medilink with the corrected documents to be reviewed again.</p>
+                <p>
+                  Correct what was wrong on the{' '}
+                  <Link href="/facility/profile" className="font-medium underline underline-offset-4">
+                    facility profile
+                  </Link>{' '}
+                  and send it back for review.
+                </p>
               </>
             ) : (
               <p>

@@ -330,6 +330,14 @@ export interface UpdateFacilityParams {
   licenceNumber?: string;
   licenceObjectKey?: string;
   licenceExpiresAt?: Date;
+  /** Only for a refused facility: correct the registration number. */
+  cacNumber?: string;
+  /**
+   * Send a refused facility back to compliance with these corrections. Explicit
+   * rather than implied by any edit, so an owner tidying an address while
+   * refused does not put an unfinished correction in front of a reviewer.
+   */
+  resubmit?: boolean;
 }
 
 const LICENCE_FIELDS = ['licenceNumber', 'licenceObjectKey', 'licenceExpiresAt'] as const;
@@ -343,6 +351,40 @@ export async function updateFacility(input: UpdateFacilityParams): Promise<Facil
   if (input.lgaId) await assertLgaInState(input.lgaId, existing.stateId);
   if (input.licenceObjectKey) await confirmLicenceReference(existing.id, input.licenceObjectKey);
 
+  // The registration number is the facility's identity. A verified one cannot
+  // be swapped for another by an edit, and a pending one is what compliance is
+  // looking at; it can be corrected only after a refusal, which is when it is
+  // most often the thing that was wrong.
+  const cacNumber = input.cacNumber === undefined ? undefined : normaliseCacNumber(input.cacNumber);
+  if (cacNumber !== undefined && existing.status !== 'REJECTED') throw FacilityErrors.cacLocked();
+
+  /**
+   * Resubmitting a refused facility. Verification needed a PENDING facility and
+   * the number could not be edited, so a refusal was final: the dashboard told
+   * the owner to reply with corrected documents and offered no way to.
+   *
+   * Something has to have changed. A facility sent back unchanged would be
+   * refused for the same reason, and a loop between the two helps nobody.
+   */
+  const resubmitting = input.resubmit === true;
+  if (resubmitting) {
+    if (existing.status !== 'REJECTED') throw FacilityErrors.notRejected();
+
+    const changed =
+      (cacNumber !== undefined && cacNumber !== existing.cacNumber) ||
+      (input.name !== undefined && input.name !== existing.name) ||
+      (input.addressLine !== undefined && input.addressLine !== existing.addressLine) ||
+      (input.lgaId !== undefined && input.lgaId !== existing.lgaId) ||
+      (input.contactPhone !== undefined && input.contactPhone !== existing.contactPhone) ||
+      (input.contactEmail !== undefined && input.contactEmail !== existing.contactEmail) ||
+      (input.licenceNumber !== undefined && input.licenceNumber !== existing.licenceNumber) ||
+      (input.licenceObjectKey !== undefined &&
+        input.licenceObjectKey !== existing.licenceObjectKey) ||
+      (input.licenceExpiresAt !== undefined &&
+        input.licenceExpiresAt.getTime() !== existing.licenceExpiresAt?.getTime());
+    if (!changed) throw FacilityErrors.nothingChanged();
+  }
+
   /**
    * Changing the licence of an already-verified facility sends it back for
    * review. Without this, verification would mean only that some licence was
@@ -353,42 +395,59 @@ export async function updateFacility(input: UpdateFacilityParams): Promise<Facil
   const licenceChanged = LICENCE_FIELDS.some((field) => input[field] !== undefined);
   const resetForReview = licenceChanged && existing.status === 'VERIFIED';
 
-  return prisma.$transaction(async (tx) => {
-    const updated = await tx.facility.update({
-      where: { id: existing.id },
-      data: {
-        name: input.name,
-        addressLine: input.addressLine,
-        lgaId: input.lgaId,
-        contactPhone: input.contactPhone,
-        contactEmail: input.contactEmail,
-        licenceNumber: input.licenceNumber,
-        licenceObjectKey: input.licenceObjectKey,
-        licenceExpiresAt: input.licenceExpiresAt,
-        ...(resetForReview
-          ? { status: 'PENDING', verifiedBy: null, verifiedAt: null, reviewNotes: null }
-          : {}),
-      },
-    });
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const updated = await tx.facility.update({
+        where: { id: existing.id },
+        data: {
+          name: input.name,
+          cacNumber,
+          addressLine: input.addressLine,
+          lgaId: input.lgaId,
+          contactPhone: input.contactPhone,
+          contactEmail: input.contactEmail,
+          licenceNumber: input.licenceNumber,
+          licenceObjectKey: input.licenceObjectKey,
+          licenceExpiresAt: input.licenceExpiresAt,
+          ...(resetForReview || resubmitting
+            ? { status: 'PENDING', verifiedBy: null, verifiedAt: null, reviewNotes: null }
+            : {}),
+        },
+      });
 
-    if (input.licenceObjectKey) {
-      await confirmLicenceUpload(tx, existing.id, input.actorId, input.licenceObjectKey);
+      if (input.licenceObjectKey) {
+        await confirmLicenceUpload(tx, existing.id, input.actorId, input.licenceObjectKey);
+      }
+
+      await recordAudit(tx, {
+        action: resubmitting
+          ? 'facility.resubmitted'
+          : resetForReview
+            ? 'facility.licence_replaced'
+            : 'facility.updated',
+        entityType: 'facilities.facilities',
+        entityId: updated.id,
+        actorId: input.actorId,
+        scopeType: 'FACILITY',
+        scopeId: updated.id,
+        reason: resubmitting
+          ? 'Corrected and sent back for review'
+          : resetForReview
+            ? 'Licence changed; returned for review'
+            : undefined,
+        before: toView(existing),
+        after: toView(updated),
+      });
+
+      return toView(updated);
+    });
+  } catch (error) {
+    // Refused by the constraint rather than by a prior read, as at creation.
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      throw FacilityErrors.duplicateCacNumber();
     }
-
-    await recordAudit(tx, {
-      action: resetForReview ? 'facility.licence_replaced' : 'facility.updated',
-      entityType: 'facilities.facilities',
-      entityId: updated.id,
-      actorId: input.actorId,
-      scopeType: 'FACILITY',
-      scopeId: updated.id,
-      reason: resetForReview ? 'Licence changed; returned for review' : undefined,
-      before: toView(existing),
-      after: toView(updated),
-    });
-
-    return toView(updated);
-  });
+    throw error;
+  }
 }
 
 export interface VerifyFacilityParams {

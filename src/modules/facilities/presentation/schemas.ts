@@ -128,6 +128,10 @@ export const updateFacilitySchema = z
     licenceNumber: licenceNumber.optional(),
     licenceObjectKey: z.string().min(1).max(500).optional(),
     licenceExpiresAt: z.coerce.date().optional(),
+    // Only a refused facility may correct its registration number, and only
+    // together with sending itself back for review: see updateFacility.
+    cacNumber: cacNumber.optional(),
+    resubmit: z.boolean().optional(),
   })
   .refine((value) => Object.keys(value).some((key) => key !== 'id'), {
     message: 'Provide at least one field to change.',

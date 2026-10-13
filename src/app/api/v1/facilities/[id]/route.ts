@@ -48,6 +48,8 @@ export async function PATCH(request: Request, props: { params: Promise<{ id: str
           licenceNumber: input.licenceNumber,
           licenceObjectKey: input.licenceObjectKey,
           licenceExpiresAt: input.licenceExpiresAt,
+          cacNumber: input.cacNumber,
+          resubmit: input.resubmit,
         }),
     },
     params,

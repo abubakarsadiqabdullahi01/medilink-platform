@@ -48,6 +48,27 @@ export const FacilityErrors = {
       403,
     ),
 
+  notRejected: () =>
+    new FacilityError(
+      'not_rejected',
+      'Only a facility that was refused can be sent back for review.',
+      409,
+    ),
+
+  nothingChanged: () =>
+    new FacilityError(
+      'nothing_changed',
+      'Correct what compliance asked about first. A facility that has not changed would only be refused again for the same reason.',
+      409,
+    ),
+
+  cacLocked: () =>
+    new FacilityError(
+      'cac_locked',
+      'The registration number can only be corrected after a facility has been refused. Contact Medilink to change it.',
+      409,
+    ),
+
   noLicenceOnFacility: () =>
     new FacilityError('no_licence_on_facility', 'This facility has no licence document.', 422),
 
