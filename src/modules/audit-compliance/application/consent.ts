@@ -115,7 +115,8 @@ export async function recordConsent(input: {
       actorId: input.actorId,
       scopeType: 'SELF',
       scopeId: input.userId,
-      reason: input.note,
+      // The note is kept on the consent record, where erasure can reach it.
+      reason: input.note?.trim() ? 'A note was recorded with this.' : undefined,
       after: { purpose: input.purpose, granted: input.granted, lawfulBasis: basis },
     });
   });
@@ -157,7 +158,8 @@ export async function grantConsentsInTx(
       actorId: input.actorId,
       scopeType: 'SELF',
       scopeId: input.userId,
-      reason: input.note,
+      // The note is kept on the consent record, where erasure can reach it.
+      reason: input.note?.trim() ? 'A note was recorded with this.' : undefined,
       after: { purpose, granted: true, lawfulBasis: basis },
     });
   }

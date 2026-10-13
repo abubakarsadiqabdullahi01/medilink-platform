@@ -106,8 +106,8 @@ export async function raiseRequest(input: {
       actorId: input.userId,
       scopeType: 'SELF',
       scopeId: input.userId,
-      reason: input.detail,
-      after: { kind: input.kind, dueBy: row.dueBy },
+      // What the person wrote stays on the request, where erasure can reach it.
+      after: { kind: input.kind, dueBy: row.dueBy, hasDetail: Boolean(input.detail?.trim()) },
     });
 
     return row;

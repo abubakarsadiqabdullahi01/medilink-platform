@@ -82,7 +82,9 @@ export async function startRegistration(
       actorType: 'system',
       scopeType: 'SELF',
       scopeId: created.id,
-      after: { phone: maskPhone(phone), fullName, email },
+      // Not the name or the address: an audit row is kept for good and a person's
+      // right to erasure cannot reach it.
+      after: { phone: maskPhone(phone), hasEmail: Boolean(email) },
       ipAddress: input.ipAddress,
     });
 

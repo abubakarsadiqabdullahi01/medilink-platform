@@ -28,13 +28,44 @@ export interface AuditInput {
   ipAddress?: string;
 }
 
+/**
+ * Fields that must never reach the audit table in clear text.
+ *
+ * The first group is secrets. The second is what identifies a person: an audit
+ * row is kept for good, so anything identifying in one is a record that a
+ * person's right to erasure cannot reach (AUD-02). The row still says that the
+ * field existed or changed; it does not say what it held.
+ */
 const REDACTED_KEYS = new Set([
   'passwordHash', 'password', 'codeHash', 'tokenHash', 'accountNumber',
   'bvn', 'nin', 'secret', 'apiKey',
+  'fullName', 'email', 'contactEmail', 'contactPhone', 'dateOfBirth', 'addressLine',
 ]);
+
+const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+/**
+ * A Nigerian mobile number written the ways people write one: +234 or 0, the
+ * network prefix, then seven digits, with spaces or hyphens between groups. Not
+ * inside a longer run of digits, so an amount or an identifier is left alone,
+ * and not a masked number, which has asterisks where the digits were.
+ */
+const PHONE = /(?<!\d)(?:\+?234|0)[\s-]?[789][01]\d[\s-]?\d{3}[\s-]?\d{4}(?!\d)/g;
+
+/**
+ * Text with the email addresses and phone numbers taken out.
+ *
+ * Names cannot be found by their shape, so what a person was named is kept out
+ * by the call sites and by the key list above. This is the net under them: a
+ * number or an address typed into a free-text field, under whatever key, does
+ * not reach the table either.
+ */
+export function scrubText(text: string): string {
+  return text.replace(EMAIL, '[email]').replace(PHONE, '[phone]');
+}
 
 /** Values that must never reach the audit table in clear text. */
 export function redact(value: unknown): unknown {
+  if (typeof value === 'string') return scrubText(value);
   if (Array.isArray(value)) return value.map(redact);
   if (value && typeof value === 'object') {
     return Object.fromEntries(
@@ -57,7 +88,7 @@ export async function recordAudit(tx: Tx, input: AuditInput) {
       actorType: input.actorType ?? 'user',
       scopeType: input.scopeType,
       scopeId: input.scopeId,
-      reason: input.reason,
+      reason: input.reason === undefined ? undefined : scrubText(input.reason),
       before: input.before === undefined ? undefined : (redact(input.before) as object),
       after: input.after === undefined ? undefined : (redact(input.after) as object),
       correlationId: input.correlationId,
