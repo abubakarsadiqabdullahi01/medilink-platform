@@ -168,6 +168,9 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # `migrate deploy` does not generate the client, and the seed imports it. The
+      # migrations job gets one for free from `migrate reset`; this job has no reset.
+      - run: pnpm prisma generate
       # MinIO stands in for Tigris, as it does in docker-compose. MinIO no longer
       # publishes its images (minio/minio on Docker Hub and quay.io/minio/minio both
       # refuse a pull), so this is Bitnami's frozen archive of the last community
