@@ -37,6 +37,25 @@ export const ServiceRequestErrors = {
       422,
     ),
 
+  /**
+   * The profession has levels (REQ-01) and the request names none. A house officer
+   * and a consultant are not the same offer, and a request that does not say which
+   * is the retrofit this exists to prevent.
+   */
+  levelRequired: (professionName: string) =>
+    new ServiceRequestError(
+      'level_required',
+      `${professionName} has levels, so say which level this shift is for.`,
+      422,
+    ),
+
+  invalidLevel: () =>
+    new ServiceRequestError(
+      'invalid_level',
+      'That is not a level in use for the selected profession.',
+      422,
+    ),
+
   endBeforeStart: () =>
     new ServiceRequestError('end_before_start', 'The shift must end after it starts.', 422),
 

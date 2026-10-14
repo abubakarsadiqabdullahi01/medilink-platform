@@ -136,7 +136,7 @@ export async function invitePractitioners(input: InviteParams): Promise<Invitati
   const now = new Date();
   if (request.startsAt.getTime() <= now.getTime()) throw AssignmentErrors.shiftStarted();
   if (!(await getFacility(request.facilityId)).canPublish) throw AssignmentErrors.facilityNotActive();
-  const blockers = await bookingBlockersFor(input.userIds, request.professionalCategoryId, now);
+  const blockers = await bookingBlockersFor(input.userIds, request, now);
   const refused = input.userIds.filter((userId) => (blockers.get(userId) ?? ['not_eligible']).length > 0);
   if (refused.length > 0) throw AssignmentErrors.notBookable(refused.length);
 
@@ -295,6 +295,8 @@ export async function respondToInvitation(input: RespondParams): Promise<Invitat
         startsAt: true,
         endsAt: true,
         professionalCategoryId: true,
+        cadreLevelId: true,
+        supervisionAvailable: true,
         hourlyRateKobo: true,
         cancellationTerms: true,
         notes: true,
@@ -317,7 +319,7 @@ export async function respondToInvitation(input: RespondParams): Promise<Invitat
       notes: request.notes,
     };
     if (request.startsAt.getTime() <= now.getTime()) throw AssignmentErrors.shiftStarted();
-    if ((await bookingBlockers(input.userId, request.professionalCategoryId, now)).length > 0) {
+    if ((await bookingBlockers(input.userId, request, now)).length > 0) {
       throw AssignmentErrors.cannotAccept();
     }
   }
@@ -535,7 +537,7 @@ export async function confirmAssignment(input: ConfirmParams): Promise<Assignmen
   const now = new Date();
   const [facility, bookingBlockersNow, rateTerms] = await Promise.all([
     getFacility(known.facilityId),
-    bookingBlockers(input.userId, known.professionalCategoryId, now),
+    bookingBlockers(input.userId, known, now),
     // The allowances in force for this shift's date, fixed on the booking. A
     // published shift's terms cannot change, so reading them before the locks is safe.
     rateTermsFor(known.facilityId, known.startsAt, now),

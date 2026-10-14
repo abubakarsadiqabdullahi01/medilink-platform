@@ -9,6 +9,8 @@ export const setRateFloorSchema = z.object({
   categoryKey: z.string().trim().min(1).max(80),
   /** `*` (or left out) means every specialty in the profession. */
   specialtyKey: z.string().trim().min(1).max(80).optional(),
+  /** `*` (or left out) means every level. Otherwise a level of the profession. */
+  cadreLevelKey: z.string().trim().min(1).max(160).optional(),
   shiftType: z.enum(['day', 'night']),
   minHourlyKobo: z.coerce.number().int(),
   effectiveFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Write the date as year-month-day.'),

@@ -11,9 +11,14 @@ import { isDateOnly, lagosDate } from '@/lib/lagos-date';
 /** The sentinel in config.rate_floors meaning "any specialty in this category". */
 export const ANY_SPECIALTY = '*';
 
+/** The same, for the level: a floor that names none holds for every level. */
+export const ANY_LEVEL = '*';
+
 export interface RateFloorLike {
   categoryKey: string;
   specialtyKey: string;
+  /** Left out, or `*`, for every level (REQ-01). */
+  cadreLevelKey?: string;
   shiftType: string;
   minHourlyKobo: number;
   effectiveFrom: Date;
@@ -23,6 +28,8 @@ export interface FloorQuery {
   categoryKey: string;
   /** Null when the request names no specialty. */
   specialtyKey: string | null;
+  /** Null when the request names no level. */
+  cadreLevelKey?: string | null;
   shiftType: 'DAY' | 'NIGHT';
   /** The shift's own start, not now: a floor that changes next month does not
    * govern a shift being priced for next week. */
@@ -32,14 +39,19 @@ export interface FloorQuery {
 /**
  * The floor that governs this request, or null when none is published for it.
  *
- * Two rules decide between candidates, in order:
+ * Three rules decide between candidates, in order:
  *
- * 1. A floor naming the request's specialty beats the category-wide `*`.
+ * 1. A floor naming the request's level beats one that names none. A registrar and
+ *    a house officer are not paid alike, so a floor for one must never be read as
+ *    the other's, and a level with its own floor is not held to the general one.
+ * 2. A floor naming the request's specialty beats the category-wide `*`.
  *    Anaesthesia having its own floor is the reason the column exists, and
  *    falling back to the category rate would quietly underpay it.
- * 2. Among equally specific floors, the latest `effectiveFrom` at or before
+ * 3. Among equally specific floors, the latest `effectiveFrom` at or before
  *    the shift wins. Floors are versioned by date rather than replaced, so a
  *    shift priced today under last year's floor can still be explained.
+ *
+ * A floor for a level the request does not name never applies to it.
  */
 export function resolveRateFloor(
   floors: RateFloorLike[],
@@ -54,16 +66,22 @@ export function resolveRateFloor(
       floor.shiftType === shiftType &&
       floor.effectiveFrom.getTime() <= query.at.getTime() &&
       (floor.specialtyKey === ANY_SPECIALTY ||
-        (query.specialtyKey !== null && floor.specialtyKey === query.specialtyKey)),
+        (query.specialtyKey !== null && floor.specialtyKey === query.specialtyKey)) &&
+      ((floor.cadreLevelKey ?? ANY_LEVEL) === ANY_LEVEL ||
+        (typeof query.cadreLevelKey === 'string' && floor.cadreLevelKey === query.cadreLevelKey)),
   );
 
   if (applicable.length === 0) return null;
 
   return applicable.reduce((best, candidate) => {
+    const bestLevel = (best.cadreLevelKey ?? ANY_LEVEL) !== ANY_LEVEL;
+    const candidateLevel = (candidate.cadreLevelKey ?? ANY_LEVEL) !== ANY_LEVEL;
+    if (candidateLevel !== bestLevel) return candidateLevel ? candidate : best;
+
     const bestIsSpecific = best.specialtyKey !== ANY_SPECIALTY;
     const candidateIsSpecific = candidate.specialtyKey !== ANY_SPECIALTY;
-
     if (candidateIsSpecific !== bestIsSpecific) return candidateIsSpecific ? candidate : best;
+
     return candidate.effectiveFrom.getTime() > best.effectiveFrom.getTime() ? candidate : best;
   });
 }

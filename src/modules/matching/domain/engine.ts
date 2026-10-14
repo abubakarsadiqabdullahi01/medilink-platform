@@ -12,6 +12,8 @@ export type ExclusionReason =
   | 'not_eligible'
   | 'category_mismatch'
   | 'specialty_mismatch'
+  | 'level_mismatch'
+  | 'supervision_required'
   | 'unavailable'
   | 'blocked'
   | 'already_assigned'
@@ -72,12 +74,24 @@ export interface RequestInput {
   professionalCategoryId: string;
   /** When set, a candidate holding a different specialty is excluded. */
   specialtyId: string | null;
+  /**
+   * When set, only somebody recorded at exactly this level is offered it (REQ-01). The
+   * profession's cadre is mandatory, not a preference, and nobody is assumed to be at
+   * a level nobody has recorded for them.
+   */
+  cadreLevelId?: string | null;
+  /** Whether somebody is there to supervise. A supervised practitioner can be offered only a shift that says so. */
+  supervisionAvailable?: boolean;
 }
 
 export interface CandidateInput {
   userId: string;
   professionalCategoryId: string;
   specialtyId: string | null;
+  /** The level an officer recorded against their registration; null when none has been. */
+  cadreLevelId?: string | null;
+  /** Whether their registration category says they work under supervision. */
+  supervised?: boolean;
   yearsOfExperience: number;
   proximity: ProximityTier;
   travelPreference: TravelPreferenceValue;
@@ -143,6 +157,18 @@ export function exclusionsFor(
   // near miss.
   if (request.specialtyId && candidate.specialtyId !== request.specialtyId) {
     reasons.push('specialty_mismatch');
+  }
+
+  // Same standing as the specialty: asking for a registrar and being sent a house
+  // officer is a clinical failure, whatever they would accept to be paid.
+  if (request.cadreLevelId && candidate.cadreLevelId !== request.cadreLevelId) {
+    reasons.push('level_mismatch');
+  }
+
+  // Somebody on a provisional register is not offered a shift with nobody to
+  // supervise them, however well they would otherwise score.
+  if (candidate.supervised && !request.supervisionAvailable) {
+    reasons.push('supervision_required');
   }
 
   if (candidate.availability === 'blocked') reasons.push('blocked');

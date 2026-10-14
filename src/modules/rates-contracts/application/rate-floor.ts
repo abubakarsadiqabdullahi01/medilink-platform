@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { recordAudit } from '@/lib/audit';
 import { HttpError } from '@/lib/http/errors';
-import { ANY_SPECIALTY, floorProblem, type FloorProblem } from '@/modules/service-requests/domain/rate-floor';
+import { ANY_LEVEL, ANY_SPECIALTY, floorProblem, type FloorProblem } from '@/modules/service-requests/domain/rate-floor';
 
 /**
  * The minimum hourly rate a shift may be published at, per profession and shift
@@ -29,6 +29,12 @@ export const RateFloorErrors = {
   invalid: (problem: FloorProblem) => new HttpError('rate_floor_invalid', MESSAGES[problem], 422),
   categoryNotFound: () =>
     new HttpError('category_not_found', 'There is no such profession.', 404),
+  levelInvalid: () =>
+    new HttpError(
+      'level_invalid',
+      'That is not a level of that profession. Leave it blank for every level.',
+      422,
+    ),
   specialtyInvalid: () =>
     new HttpError(
       'specialty_invalid',
@@ -38,7 +44,7 @@ export const RateFloorErrors = {
   exists: () =>
     new HttpError(
       'rate_floor_exists',
-      'A floor is already set for that profession, specialty and shift type from that date. Choose a later date to change it.',
+      'A floor is already set for that profession, specialty, level and shift type from that date. Choose a later date to change it.',
       409,
     ),
 };
@@ -47,6 +53,8 @@ export interface RateFloorView {
   id: string;
   categoryKey: string;
   specialtyKey: string;
+  /** `*` for every level. */
+  cadreLevelKey: string;
   shiftType: string;
   minHourlyKobo: number;
   /** `YYYY-MM-DD`. */
@@ -63,13 +71,19 @@ export interface RateFloorOverview {
   floors: RateFloorView[];
   /** Every profession and shift type with no all-specialty floor in force today. */
   missing: MissingFloor[];
-  categories: { key: string; name: string; specialties: { key: string; name: string }[] }[];
+  categories: {
+    key: string;
+    name: string;
+    specialties: { key: string; name: string }[];
+    levels: { key: string; name: string }[];
+  }[];
 }
 
 const toView = (row: {
   id: string;
   categoryKey: string;
   specialtyKey: string;
+  cadreLevelKey: string;
   shiftType: string;
   minHourlyKobo: number;
   effectiveFrom: Date;
@@ -77,6 +91,7 @@ const toView = (row: {
   id: row.id,
   categoryKey: row.categoryKey,
   specialtyKey: row.specialtyKey,
+  cadreLevelKey: row.cadreLevelKey,
   shiftType: row.shiftType,
   minHourlyKobo: row.minHourlyKobo,
   effectiveFrom: row.effectiveFrom.toISOString().slice(0, 10),
@@ -85,17 +100,30 @@ const toView = (row: {
 export async function rateFloorOverview(now: Date = new Date()): Promise<RateFloorOverview> {
   const [floors, categories] = await Promise.all([
     prisma.rateFloor.findMany({
-      orderBy: [{ categoryKey: 'asc' }, { shiftType: 'asc' }, { specialtyKey: 'asc' }, { effectiveFrom: 'desc' }],
+      orderBy: [
+        { categoryKey: 'asc' },
+        { shiftType: 'asc' },
+        { specialtyKey: 'asc' },
+        { cadreLevelKey: 'asc' },
+        { effectiveFrom: 'desc' },
+      ],
     }),
     prisma.professionalCategory.findMany({
       orderBy: { name: 'asc' },
       select: { key: true, name: true },
     }),
   ]);
-  const specialties = await prisma.specialty.findMany({
-    orderBy: { name: 'asc' },
-    select: { key: true, name: true, category: { select: { key: true } } },
-  });
+  const [specialties, levels] = await Promise.all([
+    prisma.specialty.findMany({
+      orderBy: { name: 'asc' },
+      select: { key: true, name: true, category: { select: { key: true } } },
+    }),
+    prisma.cadreLevel.findMany({
+      where: { isActive: true },
+      orderBy: [{ professionalCategoryId: 'asc' }, { rank: 'asc' }],
+      select: { key: true, name: true, category: { select: { key: true } } },
+    }),
+  ]);
 
   // "In force" is by the shift's own date, so for the gap that matters today it is
   // whatever started on or before now.
@@ -105,6 +133,7 @@ export async function rateFloorOverview(now: Date = new Date()): Promise<RateFlo
         floor.categoryKey === categoryKey &&
         floor.shiftType === shiftType &&
         floor.specialtyKey === ANY_SPECIALTY &&
+        floor.cadreLevelKey === ANY_LEVEL &&
         floor.effectiveFrom.getTime() <= now.getTime(),
     );
 
@@ -125,6 +154,9 @@ export async function rateFloorOverview(now: Date = new Date()): Promise<RateFlo
       specialties: specialties
         .filter((specialty) => specialty.category.key === category.key)
         .map(({ key, name }) => ({ key, name })),
+      levels: levels
+        .filter((level) => level.category.key === category.key)
+        .map(({ key, name }) => ({ key, name })),
     })),
   };
 }
@@ -132,6 +164,8 @@ export async function rateFloorOverview(now: Date = new Date()): Promise<RateFlo
 export async function setRateFloor(input: {
   categoryKey: string;
   specialtyKey?: string;
+  /** A level of the profession, or left out for every level (REQ-01). */
+  cadreLevelKey?: string;
   shiftType: 'day' | 'night';
   minHourlyKobo: number;
   effectiveFrom: string;
@@ -159,12 +193,22 @@ export async function setRateFloor(input: {
     if (!specialty || specialty.category.key !== category.key) throw RateFloorErrors.specialtyInvalid();
   }
 
+  const cadreLevelKey = input.cadreLevelKey ?? ANY_LEVEL;
+  if (cadreLevelKey !== ANY_LEVEL) {
+    const level = await prisma.cadreLevel.findUnique({
+      where: { key: cadreLevelKey },
+      select: { isActive: true, category: { select: { key: true } } },
+    });
+    if (!level || !level.isActive || level.category.key !== category.key) throw RateFloorErrors.levelInvalid();
+  }
+
   try {
     return await prisma.$transaction(async (tx) => {
       const created = await tx.rateFloor.create({
         data: {
           categoryKey: category.key,
           specialtyKey,
+          cadreLevelKey,
           shiftType: input.shiftType,
           minHourlyKobo: input.minHourlyKobo,
           effectiveFrom: new Date(`${input.effectiveFrom}T00:00:00.000Z`),

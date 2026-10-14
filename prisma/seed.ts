@@ -273,9 +273,10 @@ async function seedRateFloors() {
   for (const floor of floors) {
     await prisma.rateFloor.upsert({
       where: {
-        categoryKey_specialtyKey_shiftType_effectiveFrom: {
+        categoryKey_specialtyKey_cadreLevelKey_shiftType_effectiveFrom: {
           categoryKey: floor.categoryKey,
           specialtyKey: floor.specialtyKey,
+          cadreLevelKey: '*',
           shiftType: floor.shiftType,
           effectiveFrom,
         },

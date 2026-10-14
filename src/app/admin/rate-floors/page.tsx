@@ -32,6 +32,7 @@ interface Floor {
   id: string;
   categoryKey: string;
   specialtyKey: string;
+  cadreLevelKey: string;
   shiftType: string;
   minHourlyKobo: number;
   effectiveFrom: string;
@@ -40,7 +41,12 @@ interface Floor {
 interface Overview {
   floors: Floor[];
   missing: { categoryKey: string; categoryName: string; shiftType: 'day' | 'night' }[];
-  categories: { key: string; name: string; specialties: { key: string; name: string }[] }[];
+  categories: {
+    key: string;
+    name: string;
+    specialties: { key: string; name: string }[];
+    levels: { key: string; name: string }[];
+  }[];
 }
 
 const EVERY = '*';
@@ -64,6 +70,7 @@ export default function RateFloorsPage() {
 
   const [categoryKey, setCategoryKey] = useState('');
   const [specialtyKey, setSpecialtyKey] = useState(EVERY);
+  const [levelKey, setLevelKey] = useState(EVERY);
   const [shiftType, setShiftType] = useState<'day' | 'night'>('day');
   const [amount, setAmount] = useState('');
   const [startsOn, setStartsOn] = useState(() => new Date(Date.now() + 3600_000).toISOString().slice(0, 10));
@@ -76,6 +83,7 @@ export default function RateFloorsPage() {
       api.post('/api/v1/rate-floors', {
         categoryKey,
         specialtyKey: specialtyKey === EVERY ? undefined : specialtyKey,
+        cadreLevelKey: levelKey === EVERY ? undefined : levelKey,
         shiftType,
         minHourlyKobo: kobo,
         effectiveFrom: startsOn,
@@ -89,6 +97,8 @@ export default function RateFloorsPage() {
   });
 
   const nameOf = (key: string) => overview.data?.categories.find((row) => row.key === key)?.name ?? key;
+  const levelName = (categoryKeyOf: string, key: string) =>
+    overview.data?.categories.find((row) => row.key === categoryKeyOf)?.levels.find((row) => row.key === key)?.name ?? key;
 
   return (
     <>
@@ -138,6 +148,7 @@ export default function RateFloorsPage() {
                   onValueChange={(value) => {
                     setCategoryKey(value);
                     setSpecialtyKey(EVERY);
+                    setLevelKey(EVERY);
                   }}
                 >
                   <SelectTrigger>
@@ -168,6 +179,24 @@ export default function RateFloorsPage() {
                   </SelectContent>
                 </Select>
               </div>
+              {(category?.levels ?? []).length > 0 ? (
+                <div className="min-w-[12rem] space-y-1.5">
+                  <Label>Level</Label>
+                  <Select value={levelKey} onValueChange={setLevelKey}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={EVERY}>Every level</SelectItem>
+                      {(category?.levels ?? []).map((row) => (
+                        <SelectItem key={row.key} value={row.key}>
+                          {row.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : null}
               <div className="space-y-1.5">
                 <Label>Shift</Label>
                 <Select value={shiftType} onValueChange={(value) => setShiftType(value as 'day' | 'night')}>
@@ -221,6 +250,7 @@ export default function RateFloorsPage() {
                     <TableRow>
                       <TableHead>Profession</TableHead>
                       <TableHead>Specialty</TableHead>
+                      <TableHead>Level</TableHead>
                       <TableHead>Shift</TableHead>
                       <TableHead className="text-right">Minimum per hour</TableHead>
                       <TableHead>From</TableHead>
@@ -231,6 +261,7 @@ export default function RateFloorsPage() {
                       <TableRow key={floor.id}>
                         <TableCell>{nameOf(floor.categoryKey)}</TableCell>
                         <TableCell>{floor.specialtyKey === EVERY ? 'Every specialty' : floor.specialtyKey}</TableCell>
+                        <TableCell>{floor.cadreLevelKey === EVERY ? 'Every level' : levelName(floor.categoryKey, floor.cadreLevelKey)}</TableCell>
                         <TableCell className="capitalize">{floor.shiftType}</TableCell>
                         <TableCell className="tabular text-right">{formatNaira(floor.minHourlyKobo)}</TableCell>
                         <TableCell>{formatDate(floor.effectiveFrom)}</TableCell>

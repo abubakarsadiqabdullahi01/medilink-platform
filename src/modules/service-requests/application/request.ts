@@ -33,6 +33,10 @@ export interface ServiceRequestView {
   facilityId: string;
   professionalCategoryId: string;
   specialtyId: string | null;
+  /** The level the shift is for, when the profession has levels (REQ-01). */
+  cadreLevelId: string | null;
+  /** Whether somebody is there to supervise: needed to offer it to a practitioner who requires it. */
+  supervisionAvailable: boolean;
   shiftType: 'DAY' | 'NIGHT';
   startsAt: Date;
   endsAt: Date;
@@ -61,6 +65,8 @@ function toView(row: RequestRow): ServiceRequestView {
     facilityId: row.facilityId,
     professionalCategoryId: row.professionalCategoryId,
     specialtyId: row.specialtyId,
+    cadreLevelId: row.cadreLevelId,
+    supervisionAvailable: row.supervisionAvailable,
     shiftType: row.shiftType,
     startsAt: row.startsAt,
     endsAt: row.endsAt,
@@ -88,16 +94,20 @@ function toView(row: RequestRow): ServiceRequestView {
 async function floorFor(input: {
   professionalCategoryId: string;
   specialtyId: string | null;
+  cadreLevelId?: string | null;
   shiftType: 'DAY' | 'NIGHT';
   at: Date;
 }) {
-  const [category, specialty] = await Promise.all([
+  const [category, specialty, level] = await Promise.all([
     prisma.professionalCategory.findUnique({
       where: { id: input.professionalCategoryId },
       select: { key: true },
     }),
     input.specialtyId
       ? prisma.specialty.findUnique({ where: { id: input.specialtyId }, select: { key: true } })
+      : Promise.resolve(null),
+    input.cadreLevelId
+      ? prisma.cadreLevel.findUnique({ where: { id: input.cadreLevelId }, select: { key: true } })
       : Promise.resolve(null),
   ]);
   if (!category) throw ServiceRequestErrors.invalidCategory();
@@ -107,15 +117,47 @@ async function floorFor(input: {
   return resolveRateFloor(floors, {
     categoryKey: category.key,
     specialtyKey: specialty?.key ?? null,
+    cadreLevelKey: level?.key ?? null,
     shiftType: input.shiftType,
     at: input.at,
   });
+}
+
+/**
+ * The level a request names, held to the rule that a profession with levels needs one
+ * (REQ-01). A profession compliance has defined none for needs none and takes none that
+ * is not its own; once it has any in use, a request names one of them. Read at creation
+ * and again at publish, because levels are defined after drafts are written.
+ */
+async function assertLevel(input: {
+  professionalCategoryId: string;
+  professionName: string;
+  cadreLevelId: string | null | undefined;
+}): Promise<void> {
+  if (input.cadreLevelId) {
+    const level = await prisma.cadreLevel.findUnique({
+      where: { id: input.cadreLevelId },
+      select: { isActive: true, professionalCategoryId: true },
+    });
+    if (!level || !level.isActive || level.professionalCategoryId !== input.professionalCategoryId) {
+      throw ServiceRequestErrors.invalidLevel();
+    }
+    return;
+  }
+
+  const inUse = await prisma.cadreLevel.count({
+    where: { professionalCategoryId: input.professionalCategoryId, isActive: true },
+  });
+  if (inUse > 0) throw ServiceRequestErrors.levelRequired(input.professionName);
 }
 
 export interface CreateServiceRequestParams {
   facilityId: string;
   professionalCategoryId: string;
   specialtyId?: string;
+  /** Required once the profession has levels in use; refused if it is not one of them (REQ-01). */
+  cadreLevelId?: string;
+  supervisionAvailable?: boolean;
   shiftType: 'DAY' | 'NIGHT';
   startsAt: Date;
   endsAt: Date;
@@ -154,11 +196,18 @@ export async function createServiceRequest(
     }
   }
 
+  await assertLevel({
+    professionalCategoryId: input.professionalCategoryId,
+    professionName: category.name,
+    cadreLevelId: input.cadreLevelId,
+  });
+
   // Checked at creation as well as at publish, so a facility learns the rate
   // is illegal while writing the request rather than at the last step.
   const floor = await floorFor({
     professionalCategoryId: input.professionalCategoryId,
     specialtyId: input.specialtyId ?? null,
+    cadreLevelId: input.cadreLevelId ?? null,
     shiftType: input.shiftType,
     at: input.startsAt,
   });
@@ -175,6 +224,8 @@ export async function createServiceRequest(
         facilityId: input.facilityId,
         professionalCategoryId: input.professionalCategoryId,
         specialtyId: input.specialtyId,
+        cadreLevelId: input.cadreLevelId,
+        supervisionAvailable: input.supervisionAvailable ?? false,
         shiftType: input.shiftType,
         startsAt: input.startsAt,
         endsAt: input.endsAt,
@@ -228,11 +279,23 @@ export async function publishServiceRequest(
   // practitioners: the fee and the rules cannot bind somebody who never agreed.
   await assertFacilityTermsAccepted(input.facilityId);
 
+  // A level may have been defined, or retired, since this was drafted.
+  const profession = await prisma.professionalCategory.findUnique({
+    where: { id: request.professionalCategoryId },
+    select: { name: true },
+  });
+  await assertLevel({
+    professionalCategoryId: request.professionalCategoryId,
+    professionName: profession?.name ?? 'This profession',
+    cadreLevelId: request.cadreLevelId,
+  });
+
   // Re-checked at publish, because a floor can move between drafting and
   // publishing and the published rate is the one that counts.
   const floor = await floorFor({
     professionalCategoryId: request.professionalCategoryId,
     specialtyId: request.specialtyId,
+    cadreLevelId: request.cadreLevelId,
     shiftType: request.shiftType,
     at: request.startsAt,
   });

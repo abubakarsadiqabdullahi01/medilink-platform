@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ANY_LEVEL,
   ANY_SPECIALTY,
   checkAgainstFloor,
   floorProblem,
@@ -100,6 +101,62 @@ describe('resolveRateFloor', () => {
       specialtyKey: 'paediatrics',
     });
     expect(resolved?.specialtyKey).toBe(ANY_SPECIALTY);
+  });
+});
+
+describe('resolveRateFloor and levels', () => {
+  const registrar = { ...QUERY, cadreLevelKey: 'doctor.registrar' };
+
+  it('applies a floor that names no level to every level, and to a request that names none', () => {
+    expect(floor().cadreLevelKey ?? ANY_LEVEL).toBe(ANY_LEVEL);
+    expect(resolveRateFloor([floor()], registrar)?.minHourlyKobo).toBe(650_000);
+    expect(resolveRateFloor([floor()], QUERY)?.minHourlyKobo).toBe(650_000);
+  });
+
+  it('lets a floor for the request\'s level beat the one for every level', () => {
+    const forEveryone = floor({ minHourlyKobo: 650_000 });
+    const forRegistrars = floor({ cadreLevelKey: 'doctor.registrar', minHourlyKobo: 900_000 });
+
+    expect(resolveRateFloor([forEveryone, forRegistrars], registrar)?.minHourlyKobo).toBe(900_000);
+    expect(resolveRateFloor([forRegistrars, forEveryone], registrar)?.minHourlyKobo).toBe(900_000);
+  });
+
+  it('never applies a floor for another level', () => {
+    const forConsultants = floor({ cadreLevelKey: 'doctor.consultant', minHourlyKobo: 1_500_000 });
+
+    // Without the every-level floor there is none at all, which is a refusal, not a pass.
+    expect(resolveRateFloor([forConsultants], registrar)).toBeNull();
+    expect(resolveRateFloor([forConsultants], QUERY)).toBeNull();
+  });
+
+  it('prefers the level over the specialty when only one of them is named by each floor', () => {
+    const forAnaesthesia = floor({ specialtyKey: 'anaesthesia', minHourlyKobo: 800_000 });
+    const forRegistrars = floor({ cadreLevelKey: 'doctor.registrar', minHourlyKobo: 900_000 });
+
+    const resolved = resolveRateFloor([forAnaesthesia, forRegistrars], { ...registrar, specialtyKey: 'anaesthesia' });
+
+    expect(resolved?.minHourlyKobo).toBe(900_000);
+  });
+
+  it('prefers a floor naming both over one naming either', () => {
+    const both = floor({ cadreLevelKey: 'doctor.registrar', specialtyKey: 'anaesthesia', minHourlyKobo: 1_100_000 });
+    const level = floor({ cadreLevelKey: 'doctor.registrar', minHourlyKobo: 900_000 });
+    const specialty = floor({ specialtyKey: 'anaesthesia', minHourlyKobo: 800_000 });
+
+    const resolved = resolveRateFloor([specialty, level, both], { ...registrar, specialtyKey: 'anaesthesia' });
+
+    expect(resolved?.minHourlyKobo).toBe(1_100_000);
+  });
+
+  it('prefers the newer of two floors for the same level', () => {
+    const older = floor({ cadreLevelKey: 'doctor.registrar', minHourlyKobo: 900_000 });
+    const newer = floor({
+      cadreLevelKey: 'doctor.registrar',
+      minHourlyKobo: 950_000,
+      effectiveFrom: new Date('2026-06-01T00:00:00.000Z'),
+    });
+
+    expect(resolveRateFloor([older, newer], registrar)?.minHourlyKobo).toBe(950_000);
   });
 });
 

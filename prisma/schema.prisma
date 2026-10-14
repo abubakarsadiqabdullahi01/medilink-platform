@@ -347,6 +347,7 @@ model CadreLevel {
 
   category ProfessionalCategory @relation(fields: [professionalCategoryId], references: [id])
   registrations ProfessionalRegistration[]
+  serviceRequests ServiceRequest[]
 
   @@unique([professionalCategoryId, rank])
   @@map("cadre_levels")
@@ -471,6 +472,8 @@ model RateFloor {
   id            String   @id @default(uuid()) @db.Uuid
   categoryKey   String   @map("category_key")
   specialtyKey  String   @default("*") @map("specialty_key")
+  /// `*` for every level; otherwise a `config.cadre_levels.key` of this profession (REQ-01).
+  cadreLevelKey String   @default("*") @map("cadre_level_key")
   shiftType     String   @map("shift_type")
   minHourlyKobo Int      @map("min_hourly_kobo")
   currency      String   @default("NGN")
@@ -478,7 +481,7 @@ model RateFloor {
   owner         String
   createdAt     DateTime @default(now()) @map("created_at")
 
-  @@unique([categoryKey, specialtyKey, shiftType, effectiveFrom])
+  @@unique([categoryKey, specialtyKey, cadreLevelKey, shiftType, effectiveFrom])
   @@map("rate_floors")
   @@schema("config")
 }
@@ -1002,6 +1005,12 @@ model ServiceRequest {
   facilityId             String  @map("facility_id") @db.Uuid
   professionalCategoryId String  @map("professional_category_id") @db.Uuid
   specialtyId            String? @map("specialty_id") @db.Uuid
+  // The level the shift is for, when the profession has levels (REQ-01). Only somebody
+  // recorded at exactly this level is offered it. Null for a profession with none defined.
+  cadreLevelId           String? @map("cadre_level_id") @db.Uuid
+  // Whether somebody is there to supervise. A practitioner on a register that needs
+  // supervision can be offered only a shift that says so.
+  supervisionAvailable   Boolean @default(false) @map("supervision_available")
 
   shiftType ShiftType @map("shift_type")
   startsAt  DateTime  @map("starts_at")
@@ -1036,6 +1045,7 @@ model ServiceRequest {
   facility             Facility             @relation(fields: [facilityId], references: [id])
   professionalCategory ProfessionalCategory @relation(fields: [professionalCategoryId], references: [id])
   specialty            Specialty?           @relation(fields: [specialtyId], references: [id])
+  cadreLevel           CadreLevel?          @relation(fields: [cadreLevelId], references: [id])
 
   @@index([status, startsAt])
   // A facility's shifts by status in start order, a page at a time.

@@ -21,6 +21,10 @@ export const createServiceRequestSchema = z.object({
   facilityId,
   professionalCategoryId: z.string().uuid(),
   specialtyId: z.string().uuid().optional(),
+  // Required once the profession has levels in use; the application says which and why (REQ-01).
+  cadreLevelId: z.string().uuid().optional(),
+  // Whether somebody is there to supervise, which a practitioner on a provisional register needs.
+  supervisionAvailable: z.boolean().optional(),
   shiftType: z.enum(['DAY', 'NIGHT']),
   startsAt: z.coerce.date(),
   endsAt: z.coerce.date(),

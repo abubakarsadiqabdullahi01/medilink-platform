@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/db';
 import { withdrawnFromMatching } from '@/modules/audit-compliance/application/consent';
+import { standingsFor } from './candidates';
 import { getEligibilityFor } from './eligibility';
 
 /**
@@ -15,21 +16,37 @@ import { getEligibilityFor } from './eligibility';
  * Built from the same pieces matching uses (`getEligibilityFor`, the consent
  * check) so it cannot disagree with matching about who is eligible.
  */
-export type BookingBlocker = 'not_eligible' | 'wrong_profession' | 'consent_withdrawn';
+export type BookingBlocker =
+  | 'not_eligible'
+  | 'wrong_profession'
+  | 'wrong_level'
+  | 'supervision_required'
+  | 'consent_withdrawn';
+
+/** What a booking is for: the profession, and the level and supervision it asks for (REQ-01). */
+export interface BookingTarget {
+  professionalCategoryId: string;
+  // Required, not optional: a caller that forgot to carry them would skip the check
+  // without a word, which is how the first version of this missed the acceptance step.
+  cadreLevelId: string | null;
+  supervisionAvailable: boolean;
+}
 
 export async function bookingBlockersFor(
   userIds: string[],
-  professionalCategoryId: string,
+  target: BookingTarget,
   now: Date = new Date(),
 ): Promise<Map<string, BookingBlocker[]>> {
   const ids = [...new Set(userIds)];
-  const [eligibility, profiles, withdrawn] = await Promise.all([
+  const professionalCategoryId = target.professionalCategoryId;
+  const [eligibility, profiles, withdrawn, standings] = await Promise.all([
     getEligibilityFor(ids, now),
     prisma.practitionerProfile.findMany({
       where: { userId: { in: ids }, deletedAt: null },
       select: { userId: true, professionalCategoryId: true },
     }),
     withdrawnFromMatching(ids),
+    standingsFor(ids),
   ]);
   const categoryOf = new Map(profiles.map((profile) => [profile.userId, profile.professionalCategoryId]));
 
@@ -38,6 +55,12 @@ export async function bookingBlockersFor(
     const blockers: BookingBlocker[] = [];
     if (!(eligibility.get(userId)?.eligible ?? false)) blockers.push('not_eligible');
     if (categoryOf.get(userId) !== professionalCategoryId) blockers.push('wrong_profession');
+    // The same two rules matching applies, asked again at booking time because the
+    // register is looked at again in between: a level changed after the offer stops
+    // the booking.
+    const standing = standings.get(userId);
+    if (target.cadreLevelId && standing?.cadreLevelId !== target.cadreLevelId) blockers.push('wrong_level');
+    if (standing?.supervised && !target.supervisionAvailable) blockers.push('supervision_required');
     if (withdrawn.has(userId)) blockers.push('consent_withdrawn');
     result.set(userId, blockers);
   }
@@ -46,8 +69,8 @@ export async function bookingBlockersFor(
 
 export async function bookingBlockers(
   userId: string,
-  professionalCategoryId: string,
+  target: BookingTarget,
   now: Date = new Date(),
 ): Promise<BookingBlocker[]> {
-  return (await bookingBlockersFor([userId], professionalCategoryId, now)).get(userId) ?? ['not_eligible'];
+  return (await bookingBlockersFor([userId], target, now)).get(userId) ?? ['not_eligible'];
 }
