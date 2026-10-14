@@ -86,6 +86,12 @@ const schema = z.object({
   SUPPORT_EMAIL: z.string().optional(),
   SUPPORT_HOURS: z.string().optional(),
 
+  // The one header the deployment's edge sets and overwrites with the caller's address
+  // (`fly-client-ip`, `cf-connecting-ip`, `x-real-ip`). When set it is the only header read for
+  // the address, so a caller cannot choose their own by writing X-Forwarded-For. Unset, the
+  // first X-Forwarded-For entry is used, which is right only behind an edge that replaces it.
+  CLIENT_IP_HEADER: z.string().trim().toLowerCase().optional(),
+
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 
   /** A request slower than this is logged as a warning (see lib/http/timing.ts). */

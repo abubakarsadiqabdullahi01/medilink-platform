@@ -6,6 +6,7 @@ const staging: DeploymentSettings = {
   APP_ENV: 'staging',
   APP_URL: 'https://staging.medilink.ng',
   SESSION_SECRET: 'a-freshly-generated-secret-of-plenty-of-length',
+  CLIENT_IP_HEADER: 'fly-client-ip',
   SMS_PROVIDER: 'termii',
   SMS_API_KEY: 'a-gateway-key',
   SMS_SENDER_ID: 'Medilink',
@@ -51,6 +52,7 @@ describe('deploymentProblems', () => {
     ["CI's session secret", { SESSION_SECRET: 'ci-session-secret-value-at-least-32-chars' }, /published/],
     ['a plain-http address', { APP_URL: 'http://staging.medilink.ng' }, /https/],
     ['no key for bank account numbers', { PAYOUT_ACCOUNT_KEY: undefined }, /PAYOUT_ACCOUNT_KEY is not set/],
+    ['no word on which header carries the caller\'s address', { CLIENT_IP_HEADER: undefined }, /CLIENT_IP_HEADER is not set/],
     [
       'the account key the local process falls back to',
       { PAYOUT_ACCOUNT_KEY: 'local-development-payout-account-key-not-a-secret' },
@@ -82,6 +84,10 @@ describe('deploymentProblems', () => {
     }
   });
 
+  it('accepts none as a deliberate answer about the address header', () => {
+    expect(deploymentProblems({ ...staging, CLIENT_IP_HEADER: 'none' }, true)).toEqual([]);
+  });
+
   it('accepts a real SMS provider that has what it needs', () => {
     expect(deploymentProblems({ ...staging, SMS_PROVIDER: 'termii', SMS_API_KEY: 'k', SMS_SENDER_ID: 'Medilink' }, true)).toEqual([]);
     expect(deploymentProblems({ ...staging, SMS_PROVIDER: 'africastalking', SMS_API_KEY: 'k', SMS_USERNAME: 'medilink' }, true)).toEqual([]);
@@ -95,9 +101,10 @@ describe('deploymentProblems', () => {
         PAYMENT_PROVIDER: 'console',
         APP_URL: 'http://staging.medilink.ng',
         PAYOUT_ACCOUNT_KEY: undefined,
+        CLIENT_IP_HEADER: undefined,
       },
       true,
     );
-    expect(problems).toHaveLength(4);
+    expect(problems).toHaveLength(5);
   });
 });

@@ -16,6 +16,7 @@ export interface DeploymentSettings {
   SESSION_SECRET: string;
   SMS_PROVIDER: string;
   SMS_CONSOLE_OUTBOX?: string;
+  CLIENT_IP_HEADER?: string;
   SMS_API_KEY?: string;
   SMS_SENDER_ID?: string;
   SMS_USERNAME?: string;
@@ -65,6 +66,15 @@ export function deploymentProblems(env: DeploymentSettings, appEnvWasSet: boolea
       `SMS_PROVIDER=console writes every one-time code into the log, and is refused in ${env.APP_ENV}.`,
     );
   }
+  // The per-address limits are only as good as the address. Which header the edge overwrites is
+  // a fact about the deployment that nothing here can know, so it has to be said: a header
+  // name, or `none` for an edge that replaces X-Forwarded-For (AUT-02).
+  if (!env.CLIENT_IP_HEADER) {
+    problems.push(
+      `CLIENT_IP_HEADER is not set. Name the header your edge sets with the caller's address (fly-client-ip, cf-connecting-ip, x-real-ip), or say none if it replaces X-Forwarded-For; without it a caller can choose their own address and with it their own sign-in and one-time-code limits in ${env.APP_ENV}.`,
+    );
+  }
+
   // A provider with no credentials used to start fine and then fail every code silently
   // (NOT-06); now it refuses to start, naming what is missing.
   if (env.SMS_PROVIDER === 'termii') {
