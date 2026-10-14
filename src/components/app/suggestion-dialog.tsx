@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { api, errorMessage } from '@/lib/ui/api';
 import { useSession } from '@/lib/ui/session';
@@ -23,19 +23,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
+import { MySuggestionsList, SUGGESTION_AREAS, type MySuggestion } from '@/components/app/my-suggestions';
 
-const AREAS = [
-  ['ONBOARDING', 'Signing up and getting verified'],
-  ['CREDENTIALS', 'Documents and credentials'],
-  ['MATCHING', 'Offers and matching'],
-  ['SCHEDULING', 'Shifts and rotas'],
-  ['ATTENDANCE', 'Checking in and out'],
-  ['TIMESHEETS', 'Timesheets'],
-  ['PAYMENTS', 'Pay and invoices'],
-  ['SUPPORT', 'Getting help'],
-  ['OTHER', 'Something else'],
-] as const;
 
 const MIN_BODY = 10;
 
@@ -52,6 +43,16 @@ export function SuggestionDialog({ open, onOpenChange }: { open: boolean; onOpen
   const facilityId = useFacilityId();
   const [area, setArea] = useState('OTHER');
   const [body, setBody] = useState('');
+  const [tab, setTab] = useState<'send' | 'yours'>('send');
+  const queryClient = useQueryClient();
+
+  // Only fetched when somebody looks: most people open this to send one.
+  const mine = useQuery({
+    queryKey: ['my-suggestions'],
+    queryFn: () => api.get<{ suggestions: MySuggestion[] }>('/api/v1/me/suggestions'),
+    enabled: open && tab === 'yours',
+    retry: false,
+  });
 
   // Hospital staff hold the permission at their facility rather than at
   // SELF, so they send it with that facility's id for the scope check.
@@ -72,6 +73,7 @@ export function SuggestionDialog({ open, onOpenChange }: { open: boolean; onOpen
       toast.success('Thank you', { description: 'The Medilink team reads every suggestion and replies to it.' });
       setBody('');
       setArea('OTHER');
+      void queryClient.invalidateQueries({ queryKey: ['my-suggestions'] });
       onOpenChange(false);
     },
     onError: (error) => toast.error('Could not send it', { description: errorMessage(error) }),
@@ -81,46 +83,79 @@ export function SuggestionDialog({ open, onOpenChange }: { open: boolean; onOpen
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Send a suggestion</DialogTitle>
+          <DialogTitle>{tab === 'send' ? 'Send a suggestion' : 'Your suggestions'}</DialogTitle>
           <DialogDescription>
-            Something slow, confusing or missing? Tell the Medilink team. Complaints are welcome too.
+            {tab === 'send'
+              ? 'Something slow, confusing or missing? Tell the Medilink team. Complaints are welcome too.'
+              : 'What you have sent, where each one stands, and the reply.'}
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-4">
-          <div className="space-y-1.5">
-            <Label>What it is about</Label>
-            <Select value={area} onValueChange={setArea}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {AREAS.map(([value, label]) => (
-                  <SelectItem key={value} value={value}>
-                    {label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="suggestion-body">Your suggestion</Label>
-            <Textarea
-              id="suggestion-body"
-              rows={4}
-              placeholder="What happened, and what would have been better."
-              value={body}
-              onChange={(event) => setBody(event.target.value)}
-            />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button disabled={body.trim().length < MIN_BODY} loading={send.isPending} onClick={() => send.mutate()}>
-            Send
-          </Button>
-        </DialogFooter>
+
+        <Tabs value={tab} onValueChange={(value) => setTab(value as 'send' | 'yours')}>
+          <TabsList>
+            <TabsTrigger value="send">Send one</TabsTrigger>
+            <TabsTrigger value="yours">Yours</TabsTrigger>
+          </TabsList>
+        </Tabs>
+
+        {tab === 'send' ? (
+          <>
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <Label>What it is about</Label>
+                <Select value={area} onValueChange={setArea}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SUGGESTION_AREAS.map(([value, label]) => (
+                      <SelectItem key={value} value={value}>
+                        {label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="suggestion-body">Your suggestion</Label>
+                <Textarea
+                  id="suggestion-body"
+                  rows={4}
+                  placeholder="What happened, and what would have been better."
+                  value={body}
+                  onChange={(event) => setBody(event.target.value)}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => onOpenChange(false)}>
+                Cancel
+              </Button>
+              <Button disabled={body.trim().length < MIN_BODY} loading={send.isPending} onClick={() => send.mutate()}>
+                Send
+              </Button>
+            </DialogFooter>
+          </>
+        ) : (
+          <>
+            <div className="max-h-[50vh] overflow-y-auto pr-1">
+              {mine.isPending ? (
+                <p className="py-6 text-center text-sm text-muted-foreground">Loading…</p>
+              ) : mine.isError ? (
+                <p className="py-6 text-center text-sm text-muted-foreground">
+                  Could not load them just now. Try again in a moment.
+                </p>
+              ) : (
+                <MySuggestionsList suggestions={mine.data.suggestions} />
+              )}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => onOpenChange(false)}>
+                Close
+              </Button>
+            </DialogFooter>
+          </>
+        )}
       </DialogContent>
     </Dialog>
   );

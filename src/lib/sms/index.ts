@@ -101,6 +101,37 @@ export class SmsConsoleAdapterOutsideLocalError extends Error {
   }
 }
 
+interface Credentials {
+  prefix: 'SMS' | 'SMS_FALLBACK';
+  apiKey?: string;
+  senderId?: string;
+  username?: string;
+}
+
+/**
+ * A real gateway's adapter from the credentials it was given, or one that says which
+ * setting is missing at the first send. `prefix` is only for that message: the primary
+ * gateway's settings are `SMS_*` and the fallback's are `SMS_FALLBACK_*`, and the fallback
+ * never reads the primary's, because two gateways that share a key are one gateway.
+ */
+function gatewayAdapter(provider: 'termii' | 'africastalking', credentials: Credentials): SmsAdapter {
+  const setting = (name: string) => `${credentials.prefix}_${name}`;
+  switch (provider) {
+    case 'termii':
+      if (!credentials.apiKey) return missingConfiguration('termii', setting('API_KEY'));
+      if (!credentials.senderId) return missingConfiguration('termii', setting('SENDER_ID'));
+      return termiiAdapter({ apiKey: credentials.apiKey, senderId: credentials.senderId });
+    case 'africastalking':
+      if (!credentials.apiKey) return missingConfiguration('africastalking', setting('API_KEY'));
+      if (!credentials.username) return missingConfiguration('africastalking', setting('USERNAME'));
+      return africasTalkingAdapter({
+        apiKey: credentials.apiKey,
+        username: credentials.username,
+        senderId: credentials.senderId,
+      });
+  }
+}
+
 export function smsAdapter(): SmsAdapter {
   switch (env.SMS_PROVIDER) {
     case 'console':
@@ -111,61 +142,110 @@ export function smsAdapter(): SmsAdapter {
       }
       return consoleSmsAdapter;
     case 'termii':
-      if (!env.SMS_API_KEY) return missingConfiguration('termii', 'SMS_API_KEY');
-      if (!env.SMS_SENDER_ID) return missingConfiguration('termii', 'SMS_SENDER_ID');
-      return termiiAdapter({ apiKey: env.SMS_API_KEY, senderId: env.SMS_SENDER_ID });
     case 'africastalking':
-      if (!env.SMS_API_KEY) return missingConfiguration('africastalking', 'SMS_API_KEY');
-      if (!env.SMS_USERNAME) return missingConfiguration('africastalking', 'SMS_USERNAME');
-      return africasTalkingAdapter({
+      return gatewayAdapter(env.SMS_PROVIDER, {
+        prefix: 'SMS',
         apiKey: env.SMS_API_KEY,
-        username: env.SMS_USERNAME,
         senderId: env.SMS_SENDER_ID,
+        username: env.SMS_USERNAME,
       });
   }
 }
 
+/**
+ * The second gateway, used only when the first fails to take a message. None unless
+ * `SMS_FALLBACK_PROVIDER` is set, so a deployment that has not chosen a second provider
+ * behaves exactly as before. It carries its own credentials (`SMS_FALLBACK_*`).
+ */
+export function fallbackAdapter(): SmsAdapter | null {
+  if (!env.SMS_FALLBACK_PROVIDER) return null;
+  return gatewayAdapter(env.SMS_FALLBACK_PROVIDER, {
+    prefix: 'SMS_FALLBACK',
+    apiKey: env.SMS_FALLBACK_API_KEY,
+    senderId: env.SMS_FALLBACK_SENDER_ID,
+    username: env.SMS_FALLBACK_USERNAME,
+  });
+}
+
 export interface SmsAttempt {
-  /** True only when the gateway accepted the message. */
+  /** True only when a gateway accepted the message. */
   delivered: boolean;
   result: SmsResult | null;
   /** Why not, in words an operator can read; never the message body. */
   reason: string | null;
+  /** Set when the first gateway failed and the fallback took the message: the one that failed. */
+  failedOverFrom?: string;
+}
+
+const REASON_MAX_LENGTH = 300;
+
+/**
+ * Offers a message to each gateway in turn until one takes it, and says what happened.
+ * Never throws: a delivery failure must not roll back a committed write. A gateway that
+ * answers "not accepted" has failed just as one that throws has — the old shape handed back
+ * the result either way and callers treated any result as sent.
+ *
+ * One attempt per gateway; retrying is the outbox's job (see `notify`). A failover can send
+ * a text twice: a gateway that times out may have taken the message after all, and the
+ * fallback then sends it again. That is the right side to err on for a one-time code, a
+ * missed-shift alert or a severe-incident alert, and the repeat is a duplicate text, not a
+ * lost one.
+ *
+ * With one gateway the reasons are what they have always been. With two, each failure is
+ * named, so the reason says which gateway said what.
+ */
+export async function attemptWith(adapters: SmsAdapter[], message: SmsMessage): Promise<SmsAttempt> {
+  const failures: { name: string; reason: string }[] = [];
+
+  for (const adapter of adapters) {
+    try {
+      const result = await adapter.send(message);
+      if (result.accepted) {
+        return {
+          delivered: true,
+          result,
+          reason: null,
+          ...(failures.length > 0 ? { failedOverFrom: failures[0]!.name } : {}),
+        };
+      }
+      logger.error('sms not accepted', { provider: adapter.name, to: maskPhone(message.to) });
+      failures.push({ name: adapter.name, reason: `The ${adapter.name} gateway did not accept the message.` });
+      // A refusal is the gateway's answer, so a caller reading `result` sees it (as it did before
+      // there was a fallback) when there is nobody else to ask.
+      if (adapters.length === 1) return { delivered: false, result, reason: failures[0]!.reason };
+    } catch (error) {
+      logger.error('sms delivery failed', {
+        provider: adapter.name,
+        to: maskPhone(message.to),
+        error: String(error),
+      });
+      failures.push({ name: adapter.name, reason: String(error) });
+    }
+  }
+
+  const reason =
+    adapters.length === 1
+      ? failures[0]!.reason
+      : failures.map((failure) => `${failure.name}: ${failure.reason}`).join('; ');
+  return { delivered: false, result: null, reason: reason.slice(0, REASON_MAX_LENGTH) };
 }
 
 /**
- * Tries to send, and says what happened. Never throws: a delivery failure must
- * not roll back a committed write. A gateway that answers "not accepted" is a
- * failure just as a thrown error is — the old shape handed back the result
- * either way and callers treated any result as sent.
+ * Tries to send, through the primary gateway and then the fallback if there is one, and
+ * says what happened. Never throws. A primary that cannot be built at all (the console
+ * adapter outside local) is a misconfiguration, not an outage, and is reported as one
+ * rather than quietly handed to the fallback.
  */
 export async function attemptSms(message: SmsMessage): Promise<SmsAttempt> {
-  let adapter: SmsAdapter;
+  let adapters: SmsAdapter[];
   try {
-    adapter = smsAdapter();
+    const fallback = fallbackAdapter();
+    adapters = fallback ? [smsAdapter(), fallback] : [smsAdapter()];
   } catch (error) {
     logger.error('sms adapter unavailable', { to: maskPhone(message.to), error: String(error) });
-    return { delivered: false, result: null, reason: String(error).slice(0, 300) };
+    return { delivered: false, result: null, reason: String(error).slice(0, REASON_MAX_LENGTH) };
   }
-  try {
-    const result = await adapter.send(message);
-    if (!result.accepted) {
-      logger.error('sms not accepted', { provider: adapter.name, to: maskPhone(message.to) });
-      return {
-        delivered: false,
-        result,
-        reason: `The ${adapter.name} gateway did not accept the message.`,
-      };
-    }
-    return { delivered: true, result, reason: null };
-  } catch (error) {
-    logger.error('sms delivery failed', {
-      provider: adapter.name,
-      to: maskPhone(message.to),
-      error: String(error),
-    });
-    return { delivered: false, result: null, reason: String(error).slice(0, 300) };
-  }
+  return attemptWith(adapters, message);
 }
 
 /** Never throws. For callers that only want the result, or nothing. */

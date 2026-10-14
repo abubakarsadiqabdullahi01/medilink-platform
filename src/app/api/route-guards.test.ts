@@ -40,6 +40,8 @@ const HAND_WRITTEN: Record<string, string> = {
     'Asks the guard itself, per section, at the facility named; a facility the caller holds nothing at is 403.',
   'v1/dashboard/practitioner/route.ts':
     'Asks the guard itself, per section, for the caller\'s own record; holding none of them is 403.',
+  'v1/webhooks/sms/africastalking/route.ts':
+    'Called by the SMS gateway, not a person: 404 unless a receipt secret is set, 401 without it in the URL, and it can only move the delivery state of a message this system gave that gateway forward. It reads no record and returns none.',
   'v1/facilities/register/route.ts':
     'Authenticated but not permission-guarded: a hospital that has never used Medilink holds no grant; it is created PENDING and cannot publish until verified.',
 };
@@ -89,9 +91,19 @@ describe('every API route', () => {
     }
   });
 
-  it('that is hand-written still asks who the caller is, unless it is public', () => {
+  it('that is hand-written still asks who the caller is, unless it is public or answers a secret', () => {
     const PUBLIC = ['v1/health/route.ts', 'v1/health/background/route.ts'];
-    for (const file of Object.keys(HAND_WRITTEN).filter((name) => !PUBLIC.includes(name))) {
+    // Called by a gateway, which has no session: it must prove itself with a secret, compared in
+    // constant time, and the route must not exist at all when no secret has been chosen.
+    const SECRET_AUTHENTICATED = ['v1/webhooks/sms/africastalking/route.ts'];
+
+    for (const file of SECRET_AUTHENTICATED) {
+      expect(/timingSafeEqual/.test(code(file)), `${file} compares its secret in constant time`).toBe(true);
+      expect(/SMS_RECEIPT_SECRET/.test(code(file)), `${file} is off until a secret is set`).toBe(true);
+    }
+    for (const file of Object.keys(HAND_WRITTEN).filter(
+      (name) => !PUBLIC.includes(name) && !SECRET_AUTHENTICATED.includes(name),
+    )) {
       expect(/requireSession|currentSession|sessionState/.test(code(file)), file).toBe(true);
     }
   });

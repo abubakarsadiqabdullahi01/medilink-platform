@@ -37,6 +37,23 @@ const schema = z.object({
   // for its sandbox).
   SMS_SENDER_ID: z.string().optional(),
   SMS_USERNAME: z.string().optional(),
+  // A second gateway, offered a message only when the first fails to take it. Unset, nothing
+  // changes. Its own credentials: two gateways that share a key are one gateway. Must be a
+  // different provider from SMS_PROVIDER (see env-rules.ts).
+  SMS_FALLBACK_PROVIDER: z.enum(['termii', 'africastalking']).optional(),
+  SMS_FALLBACK_API_KEY: z.string().optional(),
+  SMS_FALLBACK_SENDER_ID: z.string().optional(),
+  SMS_FALLBACK_USERNAME: z.string().optional(),
+  // Where a gateway reports what became of a message it took. The endpoint
+  // (/api/v1/webhooks/sms/<provider>) exists only when this is set, and answers only a caller who
+  // puts it in the URL as ?token=. Unset, nothing is exposed and messages stay "no report".
+  SMS_RECEIPT_SECRET: z
+    .string()
+    .optional()
+    .transform((value) => (value === '' ? undefined : value))
+    .refine((value) => value === undefined || value.length >= 24, {
+      message: 'SMS_RECEIPT_SECRET must be at least 24 characters.',
+    }),
   // A file the console adapter also appends each message to, one JSON object
   // per line. The browser journeys read one-time codes from it; it means
   // nothing to any other adapter and is ignored by them.

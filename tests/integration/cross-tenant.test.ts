@@ -715,7 +715,9 @@ const SCOPED_WRITES: ScopedCase[] = [
       body: {
         facilityId: c.declare,
         professionalCategoryId: c.t.facilityId,
-        shiftType: 'DAY',
+        // No shiftType: it is worked out from the hours, and these hours come from the clock.
+        // Stating 'DAY' made the body a mislabelled night shift (422, before the scope was
+        // ever looked at) whenever the run started between about 16:00 and 02:00 Lagos time.
         startsAt: iso(5 * DAY),
         endsAt: iso(5 * DAY + 8 * HOUR),
         headcount: 1,
@@ -775,6 +777,7 @@ const NO_TENANT_IDENTIFIER: Record<string, string> = {
   'me/notifications/read':
     'the caller’s own inbox: the ids in the body are matched against the session’s own messages, which inbox.test.ts attacks',
   'me/payout-account': 'the caller’s own account, read from the session',
+  'me/suggestions': 'the caller’s own suggestions, read from the session; suggestion-feedback.test.ts attacks it',
   'payout-accounts': 'the platform’s review queue; takes no identifier',
   'practitioners/me': 'the caller’s own profile, read from the session',
   'practitioners/me/photo-upload-url': 'the caller’s own photograph; takes no identifier',
@@ -787,6 +790,8 @@ const NO_TENANT_IDENTIFIER: Record<string, string> = {
   sanctions: 'the platform’s register of listed people; takes no tenant identifier',
   'suggestions/summary': 'the platform’s aggregate; takes no identifier',
   unhonoured: 'the platform’s queue; takes no identifier',
+  'webhooks/sms/africastalking':
+    'called by the SMS gateway with its own message id and a shared secret; it names no tenant, reads no record and can only move a message’s delivery state forward (sms-receipts.test.ts attacks it)',
 };
 
 /** Platform-scoped routes that take an identifier in the body or query: refused for any hospital. */

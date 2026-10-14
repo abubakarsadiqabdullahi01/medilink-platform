@@ -14,6 +14,10 @@ produce it, and nothing was run: "verified" means *read in the code*.
 files are not committed. They are generated from the Markdown with `tools/make_docx.py` (see below) and were shared with the team
 directly. A local build writes them to `out/`, which is also ignored.
 
+| [Module-Completion-Plan.md](Module-Completion-Plan.md) | The delivery plan: which module to work on next, what "complete" means for it, the ordered tasks (marked done, partly done or open, with the commit), the decisions that block work, the release gates and the sign-off record. Re-baselined to `main` at `9a93861` | ~25 pages |
+| [Gap-Reconciliation.md](Gap-Reconciliation.md) | All 410 gaps from the register, each marked closed, partly closed or open against `main` at `9a93861`, with the evidence for the mark | ~30 pages |
+| [Phase0-progress.md](Phase0-progress.md) | What the Phase 0 work fixed, how each fix was shown to work, and what was not done and why | ~12 pages |
+
 Start with **The one-page brief**, then Part 5 (the gap register) and Part 6 (the target).
 
 ## Folder

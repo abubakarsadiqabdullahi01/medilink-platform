@@ -135,3 +135,63 @@ describe('an SMS provider with no working adapter (NOT-06)', () => {
     expect(deploymentProblems({ ...staging, SMS_PROVIDER: 'infobip' }, true, ['infobip'])).toEqual([]);
   });
 });
+
+describe('a fallback SMS gateway', () => {
+  const primary = { ...staging, SMS_PROVIDER: 'termii', SMS_API_KEY: 'k', SMS_SENDER_ID: 'Medilink' };
+  const withFallback = {
+    ...primary,
+    SMS_FALLBACK_PROVIDER: 'africastalking',
+    SMS_FALLBACK_API_KEY: 'k2',
+    SMS_FALLBACK_USERNAME: 'medilink',
+  };
+
+  it('is optional: no fallback is no problem', () => {
+    expect(deploymentProblems(primary, true)).toEqual([]);
+  });
+
+  it('is accepted when it is a different gateway with its own credentials', () => {
+    for (const appEnv of ['staging', 'production'] as const) {
+      expect(deploymentProblems({ ...withFallback, APP_ENV: appEnv }, true)).toEqual([]);
+    }
+  });
+
+  it('is refused when it is the same provider as the primary: if one is down so is the other', () => {
+    const problems = deploymentProblems(
+      { ...withFallback, SMS_FALLBACK_PROVIDER: 'termii', SMS_FALLBACK_SENDER_ID: 'Medilink' },
+      true,
+    );
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(/SMS_FALLBACK_PROVIDER=termii is the same provider as SMS_PROVIDER/);
+  });
+
+  it('is refused, naming each missing setting, when it has no credentials of its own', () => {
+    const termii = deploymentProblems(
+      { ...primary, SMS_PROVIDER: 'africastalking', SMS_API_KEY: 'k', SMS_USERNAME: 'medilink', SMS_FALLBACK_PROVIDER: 'termii' },
+      true,
+    );
+    expect(termii).toHaveLength(2);
+    expect(termii.join(' ')).toMatch(/SMS_FALLBACK_API_KEY/);
+    expect(termii.join(' ')).toMatch(/SMS_FALLBACK_SENDER_ID/);
+
+    const talking = deploymentProblems(
+      { ...primary, SMS_FALLBACK_PROVIDER: 'africastalking', SMS_FALLBACK_API_KEY: 'k2' },
+      true,
+    );
+    expect(talking).toHaveLength(1);
+    expect(talking[0]).toMatch(/SMS_FALLBACK_USERNAME/);
+  });
+
+  it('does not accept the primary\'s key as its own', () => {
+    const problems = deploymentProblems(
+      { ...primary, SMS_FALLBACK_PROVIDER: 'africastalking', SMS_FALLBACK_API_KEY: 'k', SMS_FALLBACK_USERNAME: 'medilink' },
+      true,
+    );
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(/SMS_FALLBACK_API_KEY is the same value as SMS_API_KEY/);
+  });
+
+  it('is left alone on a laptop, where nothing real is sent', () => {
+    const local = { ...withFallback, APP_ENV: 'local' as const, APP_URL: 'http://localhost:3000', SMS_FALLBACK_API_KEY: undefined };
+    expect(deploymentProblems(local, true)).toEqual([]);
+  });
+});

@@ -33,6 +33,7 @@ export const EVENTS = {
   DisputeResolved: 'dispute.resolved',
   DisputeWithdrawn: 'dispute.withdrawn',
   ClinicalIncidentReported: 'clinical_incident.reported',
+  SuggestionAnswered: 'suggestion.answered',
 } as const;
 
 export type EventType = (typeof EVENTS)[keyof typeof EVENTS];

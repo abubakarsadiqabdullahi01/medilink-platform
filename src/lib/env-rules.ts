@@ -20,6 +20,10 @@ export interface DeploymentSettings {
   SMS_API_KEY?: string;
   SMS_SENDER_ID?: string;
   SMS_USERNAME?: string;
+  SMS_FALLBACK_PROVIDER?: string;
+  SMS_FALLBACK_API_KEY?: string;
+  SMS_FALLBACK_SENDER_ID?: string;
+  SMS_FALLBACK_USERNAME?: string;
   PAYMENT_PROVIDER: string;
   PAYOUT_ACCOUNT_KEY?: string;
 }
@@ -107,6 +111,32 @@ export function deploymentProblems(
   if (env.SMS_PROVIDER === 'africastalking') {
     for (const [name, value] of [['SMS_API_KEY', env.SMS_API_KEY], ['SMS_USERNAME', env.SMS_USERNAME]] as const) {
       if (!value) problems.push(`SMS_PROVIDER=africastalking needs ${name}, and without it no one-time code can be sent in ${env.APP_ENV}.`);
+    }
+  }
+  // A second gateway only helps if it is a different one with its own account: the same provider
+  // fails together, and a shared key is one account. It has to be complete, for the same reason
+  // the primary does: a fallback that cannot send is found out during the outage it was for.
+  if (env.SMS_FALLBACK_PROVIDER) {
+    if (env.SMS_FALLBACK_PROVIDER === env.SMS_PROVIDER) {
+      problems.push(
+        `SMS_FALLBACK_PROVIDER=${env.SMS_FALLBACK_PROVIDER} is the same provider as SMS_PROVIDER, so an outage takes both; name a different one, or leave it unset in ${env.APP_ENV}.`,
+      );
+    }
+    const needed: [string, string | undefined][] =
+      env.SMS_FALLBACK_PROVIDER === 'termii'
+        ? [['SMS_FALLBACK_API_KEY', env.SMS_FALLBACK_API_KEY], ['SMS_FALLBACK_SENDER_ID', env.SMS_FALLBACK_SENDER_ID]]
+        : [['SMS_FALLBACK_API_KEY', env.SMS_FALLBACK_API_KEY], ['SMS_FALLBACK_USERNAME', env.SMS_FALLBACK_USERNAME]];
+    for (const [name, value] of needed) {
+      if (!value) {
+        problems.push(
+          `SMS_FALLBACK_PROVIDER=${env.SMS_FALLBACK_PROVIDER} needs ${name}, and without it the fallback cannot send in ${env.APP_ENV}.`,
+        );
+      }
+    }
+    if (env.SMS_FALLBACK_API_KEY && env.SMS_FALLBACK_API_KEY === env.SMS_API_KEY) {
+      problems.push(
+        `SMS_FALLBACK_API_KEY is the same value as SMS_API_KEY; the fallback needs an account of its own in ${env.APP_ENV}.`,
+      );
     }
   }
   if (env.SMS_CONSOLE_OUTBOX) {
