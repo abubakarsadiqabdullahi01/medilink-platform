@@ -13,6 +13,10 @@ import {
   remindUnapprovedTimesheets,
   warnExpiringCredentials,
 } from '../modules/notifications/application/sweeps';
+import {
+  announceLapsedFacilityLicences,
+  warnExpiringFacilityLicences,
+} from '../modules/notifications/application/licence-sweeps';
 import type { JobHandler } from './scheduler';
 
 /**
@@ -95,6 +99,12 @@ export const JOB_DEFINITIONS: JobDefinition[] = [
     intervalSeconds: DAILY,
   },
   {
+    key: 'facility.licence_sweep',
+    description:
+      'Tell the people who run a verified facility a month before its licence expires and again in the last week, and once when it has lapsed, so a hospital does not learn of it when its next shift will not publish. Daily; one message per person at each stage for that expiry date, and anybody who could not be reached is tried again. Changes nothing: a lapsed licence already stops publishing, inviting and confirming on its own.',
+    intervalSeconds: DAILY,
+  },
+  {
     key: 'timesheet.approval_reminder_sweep',
     description:
       'Remind a facility about hours waiting for approval after a day and again after three, and tell the practitioner at three days that they are being chased. Hourly. Decides nothing: whether hours are approved, and any deadline after which they are approved for the facility, are not this job\'s to settle.',
@@ -114,6 +124,13 @@ export const jobs: Record<string, JobHandler> = {
   },
   'credential.expiry_warning_sweep': async () => {
     await warnExpiringCredentials();
+  },
+  'facility.licence_sweep': async () => {
+    // Both, even if the first could not reach somebody: failing to text one person is no reason
+    // to leave the others untold, and the job still fails so the next run tries again.
+    const results = await Promise.allSettled([warnExpiringFacilityLicences(), announceLapsedFacilityLicences()]);
+    const failed = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+    if (failed) throw failed.reason;
   },
   'timesheet.approval_reminder_sweep': async () => {
     await remindUnapprovedTimesheets();
