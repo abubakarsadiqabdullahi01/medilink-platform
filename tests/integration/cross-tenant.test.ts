@@ -715,7 +715,9 @@ const SCOPED_WRITES: ScopedCase[] = [
       body: {
         facilityId: c.declare,
         professionalCategoryId: c.t.facilityId,
-        shiftType: 'DAY',
+        // No shiftType: it is worked out from the hours, and these hours come from the clock.
+        // Stating 'DAY' made the body a mislabelled night shift (422, before the scope was
+        // ever looked at) whenever the run started between about 16:00 and 02:00 Lagos time.
         startsAt: iso(5 * DAY),
         endsAt: iso(5 * DAY + 8 * HOUR),
         headcount: 1,
