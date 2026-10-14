@@ -8,7 +8,7 @@ The blueprint lists 119 P0 gaps, collected into fourteen pilot blockers. This no
 
 **What "fixed" means here.** Each fix was written test-first: the new test was run and seen to fail for the reason the gap predicts before the code changed, and where a test cannot see it (a screen, an interaction) it was driven in headless Chromium against a running server. A control case was run where a test could pass for the wrong reason. Nothing is counted as fixed because it was written.
 
-**Verification.** 877 unit tests pass; type-check and lint are clean. Every integration file that touches the changed code was run against a real PostgreSQL and passes; the result of one complete run of the whole integration suite is recorded in the commit that follows this one. Before this work the suites held 600 unit and 563 integration tests.
+**Verification.** 877 unit tests and 910 integration tests (53 files, one complete serial run against a real PostgreSQL, exit 0, no failures) pass; type-check and lint are clean. That run was made on the last code commit (`68fd346`); nothing but this note has changed since. Before this work the suites held 600 unit and 563 integration tests.
 
 ## The fourteen pilot blockers
 
