@@ -7,6 +7,8 @@ const staging: DeploymentSettings = {
   APP_URL: 'https://staging.medilink.ng',
   SESSION_SECRET: 'a-freshly-generated-secret-of-plenty-of-length',
   SMS_PROVIDER: 'termii',
+  SMS_API_KEY: 'a-gateway-key',
+  SMS_SENDER_ID: 'Medilink',
   PAYMENT_PROVIDER: 'none',
   PAYOUT_ACCOUNT_KEY: 'a-freshly-generated-account-key-of-plenty-of-length',
 };
@@ -65,6 +67,24 @@ describe('deploymentProblems', () => {
       expect(problems).toHaveLength(1);
       expect(problems[0]).toMatch(message);
     }
+  });
+
+  it('refuses a real SMS provider that has no credentials, naming each missing one', () => {
+    for (const appEnv of ['staging', 'production'] as const) {
+      const termii = deploymentProblems({ ...staging, APP_ENV: appEnv, SMS_PROVIDER: 'termii', SMS_API_KEY: undefined, SMS_SENDER_ID: undefined }, true);
+      expect(termii).toHaveLength(2);
+      expect(termii.join(' ')).toMatch(/SMS_API_KEY/);
+      expect(termii.join(' ')).toMatch(/SMS_SENDER_ID/);
+
+      const talking = deploymentProblems({ ...staging, APP_ENV: appEnv, SMS_PROVIDER: 'africastalking', SMS_API_KEY: 'k', SMS_USERNAME: undefined }, true);
+      expect(talking).toHaveLength(1);
+      expect(talking[0]).toMatch(/SMS_USERNAME/);
+    }
+  });
+
+  it('accepts a real SMS provider that has what it needs', () => {
+    expect(deploymentProblems({ ...staging, SMS_PROVIDER: 'termii', SMS_API_KEY: 'k', SMS_SENDER_ID: 'Medilink' }, true)).toEqual([]);
+    expect(deploymentProblems({ ...staging, SMS_PROVIDER: 'africastalking', SMS_API_KEY: 'k', SMS_USERNAME: 'medilink' }, true)).toEqual([]);
   });
 
   it('lists every problem at once, not one per failed deploy', () => {

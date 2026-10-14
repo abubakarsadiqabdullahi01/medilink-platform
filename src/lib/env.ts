@@ -32,6 +32,11 @@ const schema = z.object({
 
   SMS_PROVIDER: z.enum(['console', 'termii', 'africastalking']).default('console'),
   SMS_API_KEY: z.string().optional(),
+  // The sender ID registered with the gateway (Termii requires one; Africa's Talking
+  // uses its shared one without), and Africa's Talking's account username ('sandbox'
+  // for its sandbox).
+  SMS_SENDER_ID: z.string().optional(),
+  SMS_USERNAME: z.string().optional(),
   // A file the console adapter also appends each message to, one JSON object
   // per line. The browser journeys read one-time codes from it; it means
   // nothing to any other adapter and is ignored by them.

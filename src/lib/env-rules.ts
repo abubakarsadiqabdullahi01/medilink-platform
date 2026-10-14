@@ -16,6 +16,9 @@ export interface DeploymentSettings {
   SESSION_SECRET: string;
   SMS_PROVIDER: string;
   SMS_CONSOLE_OUTBOX?: string;
+  SMS_API_KEY?: string;
+  SMS_SENDER_ID?: string;
+  SMS_USERNAME?: string;
   PAYMENT_PROVIDER: string;
   PAYOUT_ACCOUNT_KEY?: string;
 }
@@ -61,6 +64,18 @@ export function deploymentProblems(env: DeploymentSettings, appEnvWasSet: boolea
     problems.push(
       `SMS_PROVIDER=console writes every one-time code into the log, and is refused in ${env.APP_ENV}.`,
     );
+  }
+  // A provider with no credentials used to start fine and then fail every code silently
+  // (NOT-06); now it refuses to start, naming what is missing.
+  if (env.SMS_PROVIDER === 'termii') {
+    for (const [name, value] of [['SMS_API_KEY', env.SMS_API_KEY], ['SMS_SENDER_ID', env.SMS_SENDER_ID]] as const) {
+      if (!value) problems.push(`SMS_PROVIDER=termii needs ${name}, and without it no one-time code can be sent in ${env.APP_ENV}.`);
+    }
+  }
+  if (env.SMS_PROVIDER === 'africastalking') {
+    for (const [name, value] of [['SMS_API_KEY', env.SMS_API_KEY], ['SMS_USERNAME', env.SMS_USERNAME]] as const) {
+      if (!value) problems.push(`SMS_PROVIDER=africastalking needs ${name}, and without it no one-time code can be sent in ${env.APP_ENV}.`);
+    }
   }
   if (env.SMS_CONSOLE_OUTBOX) {
     problems.push(
