@@ -60,6 +60,7 @@ export const AUDITED_MODELS: Readonly<Record<string, string>> = {
   RateCard: 'rates.rate_cards',
   Invoice: 'billing.invoices',
   Payout: 'billing.payouts',
+  PayoutAccount: 'billing.payout_accounts',
   AgreementVersion: 'consent.agreement_versions',
   ConsentRecord: 'consent.consent_records',
   DataSubjectRequest: 'consent.data_subject_requests',

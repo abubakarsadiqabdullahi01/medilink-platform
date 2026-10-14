@@ -28,4 +28,8 @@ export const ROUTES: RouteDefinition[] = [
   { method: 'POST', path: '/api/v1/payouts/:id/fail', permission: 'payout.manage', scopeType: 'PLATFORM' },
   { method: 'POST', path: '/api/v1/payouts/:id/cancel', permission: 'payout.manage', scopeType: 'PLATFORM' },
   { method: 'GET', path: '/api/v1/payouts', permission: 'invoice.read', scopeType: 'SELF' },
+  { method: 'POST', path: '/api/v1/me/payout-account', permission: 'payout.account.change', scopeType: 'SELF' },
+  { method: 'GET', path: '/api/v1/payout-accounts', permission: 'invoice.read', scopeType: 'PLATFORM' },
+  { method: 'GET', path: '/api/v1/payout-accounts/practitioner/:id', permission: 'payout.manage', scopeType: 'PLATFORM' },
+  { method: 'POST', path: '/api/v1/payout-accounts/:id/review', permission: 'payout.manage', scopeType: 'PLATFORM' },
 ];

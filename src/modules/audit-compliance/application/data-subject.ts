@@ -343,6 +343,7 @@ export async function exportSubjectData(userId: string) {
     acceptances,
     requests,
     payouts,
+    payoutAccounts,
   ] = await Promise.all([
     prisma.user.findUnique({
       where: { id: userId },
@@ -378,6 +379,21 @@ export async function exportSubjectData(userId: string) {
     }),
     prisma.dataSubjectRequest.findMany({ where: { userId } }),
     prisma.payout.findMany({ where: { practitionerId: userId } }),
+    // Never the sealed number or the hash of it: the last four digits, which is what
+    // the person sees of their own account anywhere in the product.
+    prisma.payoutAccount.findMany({
+      where: { userId },
+      select: {
+        bankName: true,
+        accountName: true,
+        accountLast4: true,
+        status: true,
+        createdAt: true,
+        reviewedAt: true,
+        reviewNote: true,
+      },
+      orderBy: { createdAt: 'asc' },
+    }),
   ]);
 
   if (!user) throw DataSubjectErrors.notFound();
@@ -392,6 +408,8 @@ export async function exportSubjectData(userId: string) {
       ledger:
         'Financial entries have another party on the other side of them. Your own payments appear under "payouts".',
       nin: 'Your NIN is not stored — only a keyed digest of it and the last four digits, which are shown.',
+      bankAccountNumbers:
+        'Your bank account numbers are stored sealed and are opened only to make a transfer to you. Only the last four digits are shown here, as they are everywhere else.',
     },
     account: user,
     profile,
@@ -409,6 +427,7 @@ export async function exportSubjectData(userId: string) {
     })),
     dataSubjectRequests: requests,
     payouts,
+    payoutAccounts,
   };
 }
 

@@ -17,6 +17,7 @@ export interface DeploymentSettings {
   SMS_PROVIDER: string;
   SMS_CONSOLE_OUTBOX?: string;
   PAYMENT_PROVIDER: string;
+  PAYOUT_ACCOUNT_KEY?: string;
 }
 
 /**
@@ -28,6 +29,12 @@ export const PUBLISHED_SECRETS: ReadonlySet<string> = new Set([
   'change-me-32-chars-minimum-value-here',
   'ci-session-secret-value-at-least-32-chars',
   'test-session-secret-value-at-least-32-chars',
+]);
+
+/** The key a local process falls back to, and the one the integration suite sets. Anybody who has read the code has them. */
+export const PUBLISHED_ACCOUNT_KEYS: ReadonlySet<string> = new Set([
+  'local-development-payout-account-key-not-a-secret',
+  'test-payout-account-key-at-least-32-characters-long',
 ]);
 
 /**
@@ -63,6 +70,15 @@ export function deploymentProblems(env: DeploymentSettings, appEnvWasSet: boolea
   if (env.PAYMENT_PROVIDER === 'console') {
     problems.push(
       `PAYMENT_PROVIDER=console reports payments that never happened, and is refused in ${env.APP_ENV}.`,
+    );
+  }
+  if (!env.PAYOUT_ACCOUNT_KEY) {
+    problems.push(
+      `PAYOUT_ACCOUNT_KEY is not set. It seals the bank account numbers practitioners are paid into, and without it nobody can give one in ${env.APP_ENV}.`,
+    );
+  } else if (PUBLISHED_ACCOUNT_KEYS.has(env.PAYOUT_ACCOUNT_KEY)) {
+    problems.push(
+      'PAYOUT_ACCOUNT_KEY is a value published in this repository, so anybody who has read the code could open every account number; generate a new one.',
     );
   }
   if (PUBLISHED_SECRETS.has(env.SESSION_SECRET)) {

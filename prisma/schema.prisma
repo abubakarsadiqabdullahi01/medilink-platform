@@ -45,6 +45,7 @@ model User {
   credentialSubmissions CredentialSubmission[]
   representedFacilities Facility[]
   payouts               Payout[]
+  payoutAccounts        PayoutAccount[]
   agreementAcceptances  AgreementAcceptance[]
   consentRecords        ConsentRecord[]
   dataSubjectRequests   DataSubjectRequest[]
@@ -2023,6 +2024,11 @@ model Payout {
   /// paid it by hand (BIL-05). Null for a payout a gateway settled.
   paidOn DateTime? @map("paid_on") @db.Date
 
+  /// The verified account this was prepared for (BIL-06). Releasing checks it is
+  /// still the practitioner's, so an account changed in between is not paid to. Null
+  /// on a payout prepared before accounts were recorded.
+  accountId String? @map("account_id") @db.Uuid
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -2030,6 +2036,52 @@ model Payout {
 
   @@index([practitionerId, status])
   @@map("payouts")
+  @@schema("billing")
+}
+
+/// Where a practitioner is paid (BIL-06). A practitioner gives one, a finance
+/// officer verifies it, and a payout is made only to a verified one. At most one is
+/// PENDING and at most one VERIFIED per person, which the database holds with two
+/// partial unique indexes Prisma cannot express (see the migration).
+enum PayoutAccountStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+  /// Superseded by a newer one, or withdrawn by the practitioner submitting another.
+  REPLACED
+
+  @@schema("billing")
+}
+
+model PayoutAccount {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @map("user_id") @db.Uuid
+
+  bankName String @map("bank_name")
+  /// The name the bank holds the account under, as the practitioner gave it.
+  accountName String @map("account_name")
+  accountLast4 String @map("account_last4")
+  /// AES-256-GCM under PAYOUT_ACCOUNT_KEY (see infrastructure/account-vault.ts).
+  /// Opened only to show finance where to transfer, and each time is audited.
+  accountNumberSealed String @map("account_number_sealed")
+  /// A keyed hash of the number, so one account given by two people is found
+  /// without opening either.
+  fingerprint String
+
+  status PayoutAccountStatus @default(PENDING)
+
+  reviewedBy String?   @map("reviewed_by") @db.Uuid
+  reviewedAt DateTime? @map("reviewed_at")
+  /// Why it was rejected, or why a mismatch was accepted.
+  reviewNote String? @map("review_note")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, status])
+  @@index([fingerprint])
+  @@map("payout_accounts")
   @@schema("billing")
 }
 

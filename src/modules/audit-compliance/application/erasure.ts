@@ -234,6 +234,8 @@ export async function executeErasure(input: {
     );
 
     // --- What they wrote, and what was sent to them.
+    // Where they were paid. A payout that went to one is kept and no longer says where.
+    count(deleted, 'payout accounts', (await tx.payoutAccount.deleteMany({ where: { userId: user.id } })).count);
     count(deleted, 'notification messages', (await tx.notificationMessage.deleteMany({ where: { userId: user.id } })).count);
     count(deleted, 'blocked periods', (await tx.blockedPeriod.deleteMany({ where: { userId: user.id } })).count);
     count(deleted, 'availability slots', (await tx.availabilitySlot.deleteMany({ where: { userId: user.id } })).count);

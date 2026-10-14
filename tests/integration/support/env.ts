@@ -43,3 +43,13 @@ process.env.PAYOUT_SECOND_APPROVER = 'off';
 // it is about something else, and does not stop to pay each invoice first, so the
 // rule is off for the run; the cases that are about it unset it.
 process.env.PAYOUT_REQUIRES_COLLECTION = 'off';
+
+// A payout goes only to a bank account a finance officer has verified, once it has
+// been the practitioner's for a day (BIL-06). The same reasoning as the two above:
+// most of the suite is about something else and does not give everybody an account,
+// so both are off for the run and the cases about them set them.
+process.env.PAYOUT_REQUIRES_ACCOUNT = 'off';
+process.env.PAYOUT_ACCOUNT_COOLING_HOURS = '0';
+
+// Not the key a local process falls back to, so the suite exercises a key being set.
+process.env.PAYOUT_ACCOUNT_KEY = 'test-payout-account-key-at-least-32-characters-long';

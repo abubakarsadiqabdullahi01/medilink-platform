@@ -849,6 +849,7 @@ describe('paying a practitioner', () => {
       heldKobo: 0,
       payableKobo: 4_000_000,
       awaitingKobo: 0,
+      account: { state: 'not_required', readyAt: null },
     });
 
     const payout = await preparePayout({

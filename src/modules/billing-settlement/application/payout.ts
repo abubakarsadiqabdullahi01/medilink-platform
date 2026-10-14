@@ -9,6 +9,7 @@ import { lagosDate } from '@/lib/lagos-date';
 import { entriesForPayout } from '../domain/ledger';
 import { heldForDisputes, netOfLine } from '../domain/holds';
 import { collectionRequired, payableKobo } from '../domain/payable';
+import { accountStanding, type AccountState } from './payout-account';
 import { transferProblem, type TransferProblem } from '../domain/transfer';
 import { PaymentGatewayUnavailable, paidByHand, sendPayout } from '../infrastructure/gateway';
 
@@ -46,6 +47,26 @@ export const PayoutErrors = {
     new HttpError(
       'nothing_collected',
       'The facilities this practitioner worked for have not paid for this work yet, so there is nothing collected to pay it out of. It can be paid once the invoice is recorded as paid.',
+      409,
+    ),
+  noAccount: (unverified: boolean) =>
+    new HttpError(
+      'no_payout_account',
+      unverified
+        ? 'The bank account this practitioner gave has not been verified yet. Check it first, then prepare the payout.'
+        : 'This practitioner has not given a bank account to be paid into. They can add one on their earnings page.',
+      409,
+    ),
+  accountCoolingOff: (readyAt: Date) =>
+    new HttpError(
+      'payout_account_cooling_off',
+      `This practitioner's bank account is new, and nothing is paid to a new account for a while after it is added. It can be paid from ${readyAt.toISOString().slice(0, 16).replace('T', ' ')} UTC.`,
+      409,
+    ),
+  accountChanged: () =>
+    new HttpError(
+      'payout_account_changed',
+      'The practitioner\'s bank account has changed since this payout was prepared. Cancel it and prepare a new one, so it goes to the account that is verified now.',
       409,
     ),
   notByHand: () =>
@@ -258,6 +279,8 @@ export async function payoutPosition(practitionerId: string): Promise<{
   payableKobo: number;
   /** What is owed that the facilities have not yet paid for. */
   awaitingKobo: number;
+  /** Whether there is somewhere to pay them, and if not, why (BIL-06). */
+  account: { state: AccountState; readyAt: Date | null };
 }> {
   const owedKobo = await amountOwed(practitionerId);
   const inFlight = await prisma.payout.aggregate({
@@ -273,6 +296,7 @@ export async function payoutPosition(practitionerId: string): Promise<{
     heldKobo,
     payableKobo: Math.max(0, Math.min(unpaidKobo - heldKobo, collectedKobo - inFlightKobo)),
     awaitingKobo: Math.max(0, owedKobo - collectedKobo),
+    account: await accountStanding(prisma, practitionerId).then(({ state, readyAt }) => ({ state, readyAt })),
   };
 }
 
@@ -287,6 +311,27 @@ export async function payoutPosition(practitionerId: string): Promise<{
  */
 export async function lockPayouts(tx: Tx, practitionerId: string): Promise<void> {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`payout:${practitionerId}`}, 0))`;
+}
+
+/**
+ * Where a payout may go, or why it may not (BIL-06). Not required: nowhere is named.
+ * Otherwise the practitioner's verified account, once it is old enough, and the id of
+ * it is what a payout is prepared for and checked against at release.
+ */
+async function destinationFor(tx: Tx, practitionerId: string): Promise<string | null> {
+  const standing = await accountStanding(tx, practitionerId);
+  switch (standing.state) {
+    case 'not_required':
+      return null;
+    case 'ready':
+      return standing.accountId;
+    case 'cooling_off':
+      throw PayoutErrors.accountCoolingOff(standing.readyAt!);
+    case 'missing':
+      throw PayoutErrors.noAccount(false);
+    case 'unverified':
+      throw PayoutErrors.noAccount(true);
+  }
 }
 
 /**
@@ -323,13 +368,16 @@ export async function preparePayout(input: {
     const collected = (await payableByCollection(tx, input.practitionerId, owed)) - inFlightKobo;
     if (collected <= 0) throw PayoutErrors.nothingCollected();
 
+    // Only to an account a person has checked.
+    const accountId = await destinationFor(tx, input.practitionerId);
+
     // What a dispute holds is not paid. Whatever is left is, up to what has arrived.
     const held = await heldFor(tx, input.practitionerId, unpaid);
     const amountKobo = Math.min(unpaid - held, collected);
     if (amountKobo <= 0) throw PayoutErrors.held();
 
     const payout = await tx.payout.create({
-      data: { practitionerId: input.practitionerId, amountKobo, preparedBy: input.actorId },
+      data: { practitionerId: input.practitionerId, amountKobo, preparedBy: input.actorId, accountId },
     });
 
     await recordAudit(tx, {
@@ -375,6 +423,13 @@ export async function releasePayout(input: {
   // prepared, and what is owed can fall between then and now.
   await prisma.$transaction(async (tx: Tx) => {
     await lockPayouts(tx, existing.practitionerId);
+
+    // Still to the account that is verified now? One changed since this was prepared
+    // is not paid to, however the payout got here.
+    const destination = await destinationFor(tx, existing.practitionerId);
+    if (destination !== null && existing.accountId !== null && existing.accountId !== destination) {
+      throw PayoutErrors.accountChanged();
+    }
 
     const owed = await amountOwed(existing.practitionerId, tx);
     const alreadyOut = await tx.payout.aggregate({

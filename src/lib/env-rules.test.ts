@@ -8,6 +8,7 @@ const staging: DeploymentSettings = {
   SESSION_SECRET: 'a-freshly-generated-secret-of-plenty-of-length',
   SMS_PROVIDER: 'termii',
   PAYMENT_PROVIDER: 'none',
+  PAYOUT_ACCOUNT_KEY: 'a-freshly-generated-account-key-of-plenty-of-length',
 };
 
 describe('deploymentProblems', () => {
@@ -47,6 +48,17 @@ describe('deploymentProblems', () => {
     ['the example session secret', { SESSION_SECRET: 'change-me-32-chars-minimum-value-here' }, /published/],
     ["CI's session secret", { SESSION_SECRET: 'ci-session-secret-value-at-least-32-chars' }, /published/],
     ['a plain-http address', { APP_URL: 'http://staging.medilink.ng' }, /https/],
+    ['no key for bank account numbers', { PAYOUT_ACCOUNT_KEY: undefined }, /PAYOUT_ACCOUNT_KEY is not set/],
+    [
+      'the account key the local process falls back to',
+      { PAYOUT_ACCOUNT_KEY: 'local-development-payout-account-key-not-a-secret' },
+      /PAYOUT_ACCOUNT_KEY is a value published/,
+    ],
+    [
+      "the integration suite's account key",
+      { PAYOUT_ACCOUNT_KEY: 'test-payout-account-key-at-least-32-characters-long' },
+      /PAYOUT_ACCOUNT_KEY is a value published/,
+    ],
   ] as const)('refuses %s outside local', (_label, change, message) => {
     for (const appEnv of ['staging', 'production'] as const) {
       const problems = deploymentProblems({ ...staging, APP_ENV: appEnv, ...change }, true);
@@ -62,9 +74,10 @@ describe('deploymentProblems', () => {
         SMS_PROVIDER: 'console',
         PAYMENT_PROVIDER: 'console',
         APP_URL: 'http://staging.medilink.ng',
+        PAYOUT_ACCOUNT_KEY: undefined,
       },
       true,
     );
-    expect(problems).toHaveLength(3);
+    expect(problems).toHaveLength(4);
   });
 });

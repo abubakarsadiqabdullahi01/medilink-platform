@@ -24,6 +24,8 @@ export const EVENTS = {
   InvoiceIssued: 'invoice.issued',
   PaymentCompleted: 'payment.completed',
   PayoutSettled: 'payout.settled',
+  PayoutAccountSubmitted: 'payout_account.submitted',
+  PayoutAccountReviewed: 'payout_account.reviewed',
   NoShowRecorded: 'no_show.recorded',
   SanctionApplied: 'sanction.applied',
   DisputeOpened: 'dispute.opened',

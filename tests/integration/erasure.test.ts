@@ -147,7 +147,20 @@ async function subject() {
       { transactionId: '00000000-0000-4000-8000-0000000000a2', account: 'CASH', amountKobo: -4_000_000, subjectId: null, memo: 'Payout' },
     ],
   });
-  await prisma.payout.create({ data: { practitionerId: userId, amountKobo: 4_000_000, status: 'SETTLED', settledAt: new Date() } });
+  // Where they were paid. The account holds their name and a sealed number; the payout
+  // that went to it is money that moved, and stays.
+  const account = await prisma.payoutAccount.create({
+    data: {
+      userId,
+      bankName: 'Guaranty Trust Bank',
+      accountName: NAME,
+      accountLast4: '6789',
+      accountNumberSealed: 'v1.sealed.sealed.sealed',
+      fingerprint: 'fingerprint',
+      status: 'VERIFIED',
+    },
+  });
+  await prisma.payout.create({ data: { practitionerId: userId, amountKobo: 4_000_000, status: 'SETTLED', settledAt: new Date(), accountId: account.id } });
   await prisma.auditLog.create({ data: { action: 'test.earlier_event', entityType: 'test', entityId: userId, actorId: userId } });
 
   const request = await raiseRequest({ userId, kind: 'ERASURE', detail: `Please delete me, ${NAME}, phone ${PHONE}` });
@@ -301,6 +314,8 @@ describe('erasing a person', () => {
     await executeErasure({ requestId: s.requestId, actorId: s.officerId });
 
     expect(await prisma.notificationMessage.count({ where: { userId: s.userId } })).toBe(0);
+    expect(await prisma.payoutAccount.count({ where: { userId: s.userId } })).toBe(0);
+    expect(await prisma.payout.count({ where: { practitionerId: s.userId, status: 'SETTLED' } })).toBe(1);
     expect(await prisma.blockedPeriod.count({ where: { userId: s.userId } })).toBe(0);
     expect(await prisma.availabilitySlot.count({ where: { userId: s.userId } })).toBe(0);
     const suggestion = await prisma.suggestion.findFirstOrThrow();

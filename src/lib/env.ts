@@ -50,6 +50,20 @@ const schema = z.object({
   PAYSTACK_SECRET_KEY: z.string().optional(),
   PAYSTACK_WEBHOOK_SECRET: z.string().optional(),
 
+  // Seals the account numbers practitioners are paid into (BIL-06). Its own key,
+  // not the session secret: that one signs cookies and rotating it signs everybody
+  // out, and this one protects data that must stay readable. Required outside
+  // local (see env-rules.ts); a local process falls back to a fixed key that is
+  // not a secret. Changing it makes every stored number unreadable, so a practitioner
+  // is asked for theirs again rather than finance being shown a wrong one.
+  PAYOUT_ACCOUNT_KEY: z
+    .string()
+    .optional()
+    .transform((value) => (value === '' ? undefined : value))
+    .refine((value) => value === undefined || value.length >= 32, {
+      message: 'PAYOUT_ACCOUNT_KEY must be at least 32 characters.',
+    }),
+
   // Identity and professional-registration checks default to `none` — both
   // need a paid provider subscription this project does not have, and the
   // fallback is a compliance officer recording the evidence by hand. See

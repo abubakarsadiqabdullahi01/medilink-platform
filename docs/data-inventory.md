@@ -163,6 +163,16 @@ A scheduled job (`retention.purge_sweep`, daily) deletes only what no obligation
 - **Retention today:** Kept, and never deleted today. The legal period is to be confirmed by counsel and an accountant.
 - **What removes it:** Kept; nothing deletes it
 
+### Payout bank accounts
+
+- **Tables:** `billing.payout_accounts`
+- **Holds:** The bank, the name the account is held under, its last four digits, and the whole number sealed under a key kept outside the database; a keyed hash of the number so one account given twice is found; who verified it and any reason given.
+- **Purpose:** To pay a practitioner what they are owed, to the right account.
+- **Proposed basis:** Contract: paying for the work.
+- **Owner:** Finance
+- **Retention today:** For as long as the account is the practitioner's, and an account they replace is kept for the audit of what was paid where. Erasure deletes every one. The whole number is opened only to show finance where to transfer, and each time is audited.
+- **What removes it:** Deleted or replaced when the person asks to be erased
+
 ### Disputes
 
 - **Tables:** `disputes.disputes`, `disputes.dispute_evidence`

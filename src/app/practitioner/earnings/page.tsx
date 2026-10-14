@@ -6,6 +6,7 @@ import { api } from '@/lib/ui/api';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Card, CardContent } from '@/components/ui/card';
 import { AmountFigure } from '@/components/app/amount-figure';
+import { MyPayoutAccount } from '@/components/app/my-payout-account';
 import { StatusBadge } from '@/components/app/status-badge';
 import { EmptyState, PageHeader, QueueSkeleton } from '@/components/app/page-shell';
 import { formatDate, formatNaira } from '@/components/app/format';
@@ -109,6 +110,8 @@ export default function EarningsPage() {
           not here yet is waiting for the next invoice.
         </AlertDescription>
       </Alert>
+
+      <MyPayoutAccount />
 
       <h2 className="mb-3 text-sm font-medium">Payments</h2>
 

@@ -20,6 +20,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { AmountFigure } from '@/components/app/amount-figure';
+import { PayoutAccountPanel, type AccountState } from '@/components/app/payout-account-panel';
 import { StatusBadge } from '@/components/app/status-badge';
 import { Detail, DetailGrid, EmptyState, PageHeader, QueueSkeleton } from '@/components/app/page-shell';
 import { useStepUp } from '@/components/app/step-up';
@@ -93,12 +94,31 @@ export default function PayoutsPage() {
         heldKobo: number;
         payableKobo: number;
         awaitingKobo: number;
+        account: { state: AccountState; readyAt: string | null };
         secondApproverRequired: boolean;
         paidByHand: boolean;
       }>(
         `/api/v1/payouts?scopeType=PLATFORM&scopeId=${selected!.userId}`,
       ),
     enabled: Boolean(selected),
+  });
+
+  // Accounts practitioners have given that nobody has checked yet: the other half of
+  // what finance have to do before anybody can be paid.
+  const waiting = useQuery({
+    queryKey: ['payout-accounts', 'queue'],
+    queryFn: () =>
+      api.get<{
+        accounts: {
+          id: string;
+          practitionerId: string;
+          practitionerName: string;
+          bankName: string;
+          last4: string;
+          createdAt: string;
+          problems: string[];
+        }[];
+      }>('/api/v1/payout-accounts'),
   });
 
   function refresh() {
@@ -231,6 +251,34 @@ export default function PayoutsPage() {
           </CardContent>
         </Card>
 
+        {(waiting.data?.accounts.length ?? 0) > 0 ? (
+          <Card className="mb-6">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm">Accounts waiting to be checked</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {waiting.data!.accounts.map((row) => (
+                <button
+                  key={row.id}
+                  type="button"
+                  onClick={() => setSelected({ userId: row.practitionerId, fullName: row.practitionerName, phone: '' })}
+                  className="flex w-full flex-wrap items-center justify-between gap-2 rounded-lg border bg-card p-3 text-left transition-colors hover:border-primary/50 hover:bg-muted/50"
+                >
+                  <span>
+                    <span className="font-medium">{row.practitionerName}</span>
+                    <span className="ml-2 text-xs text-muted-foreground">
+                      {row.bankName} · <span className="font-mono">••••••{row.last4}</span> · given {formatDate(row.createdAt)}
+                    </span>
+                  </span>
+                  {row.problems.length > 0 ? (
+                    <span className="text-xs text-warning">Needs a look: {row.problems.length === 1 ? '1 thing' : `${row.problems.length} things`} to resolve</span>
+                  ) : null}
+                </button>
+              ))}
+            </CardContent>
+          </Card>
+        ) : null}
+
         {!applied ? (
           <EmptyState
             icon={<HandCoins />}
@@ -303,6 +351,14 @@ export default function PayoutsPage() {
           isError={payouts.isError}
         />
       </div>
+
+      {payouts.data ? (
+        <PayoutAccountPanel
+          practitionerId={selected.userId}
+          standing={payouts.data.account.state}
+          readyAt={payouts.data.account.readyAt}
+        />
+      ) : null}
 
       <Dialog open={recording !== null} onOpenChange={(open) => (open ? null : setRecording(null))}>
         <DialogContent>
@@ -428,7 +484,11 @@ export default function PayoutsPage() {
           ) : null}
           <Button
             loading={prepare.isPending}
-            disabled={payouts.data !== undefined && payouts.data.payableKobo <= 0}
+            disabled={
+              payouts.data !== undefined &&
+              (payouts.data.payableKobo <= 0 ||
+                ['missing', 'unverified', 'cooling_off'].includes(payouts.data.account.state))
+            }
             onClick={() => prepare.mutate()}
           >
             <HandCoins />

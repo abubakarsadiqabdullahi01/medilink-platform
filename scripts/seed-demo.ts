@@ -113,6 +113,10 @@ import {
   releasePayout,
 } from '../src/modules/billing-settlement/application/payout';
 import {
+  reviewPayoutAccount,
+  submitPayoutAccount,
+} from '../src/modules/billing-settlement/application/payout-account';
+import {
   beginIncidentReview,
   closeIncident,
   reportIncident,
@@ -2284,6 +2288,43 @@ async function main(): Promise<void> {
         data: { rateTerms: { ...(await rateTermsFor(row.facilityId, row.startsAt)) } },
       });
     }
+  }
+
+  // Where everybody is paid. A payout goes only to an account a finance officer has
+  // verified, and has been the practitioner's for a day (BIL-06), so the simulated
+  // practitioners each have one, given long ago and verified. These are demo numbers
+  // and belong to nobody. Two have given a replacement that is still being checked, one
+  // of them in somebody else's name, so the queue and its warnings have something in them.
+  log('Giving practitioners somewhere to be paid…');
+  {
+    const bankNames = ['Guaranty Trust Bank', 'Access Bank', 'First Bank of Nigeria', 'Zenith Bank', 'United Bank for Africa'];
+    const longAgo = addDays(new Date(), -120);
+    let index = 0;
+    for (const person of practitioners) {
+      if ((person.spec.stage ?? 'complete') !== 'complete') continue;
+      index += 1;
+      const number = `0${String(200_000_000 + index * 7_919).padStart(9, '0')}`;
+      const held = person.fullName.split(' ').reverse().join(' ').toUpperCase();
+      const account = await submitPayoutAccount({
+        userId: person.id,
+        bankName: bankNames[index % bankNames.length]!,
+        accountName: held,
+        accountNumber: number,
+      });
+      await reviewPayoutAccount({ accountId: account.id, actorId: finance.id, decision: 'verify' });
+      await prisma.payoutAccount.update({ where: { id: account.id }, data: { createdAt: longAgo, reviewedAt: addDays(longAgo, 1) } });
+    }
+    const replacements = practitioners.filter((person) => (person.spec.stage ?? 'complete') === 'complete').slice(3, 5);
+    for (const [position, person] of replacements.entries()) {
+      await submitPayoutAccount({
+        userId: person.id,
+        bankName: 'Access Bank',
+        // The second is in a relative's name, which is what the check is for.
+        accountName: position === 0 ? person.fullName.split(' ').reverse().join(' ').toUpperCase() : 'ADEYEMI FUNMILAYO',
+        accountNumber: `0${String(900_000_000 + position * 4_013).padStart(9, '0')}`,
+      });
+    }
+    log(`  ${index} accounts verified; ${replacements.length} replacements waiting for a check`);
   }
 
   log('Invoicing, paying and settling month by month…');

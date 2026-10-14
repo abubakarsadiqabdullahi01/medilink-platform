@@ -653,3 +653,67 @@ export async function notifyPayoutSettled(payload: Record<string, unknown>): Pro
     'the payment',
   );
 }
+
+/**
+ * Somebody has added a bank account to be paid into, told to the person it is for.
+ *
+ * This is the control, not a courtesy: a stranger with a stolen session adding an
+ * account is how somebody else's pay is redirected, and the person it is for is the
+ * one who can say it was not them. Says which bank and the last four digits and
+ * nothing more, and that nothing is paid to it until it has been checked.
+ */
+export async function notifyPayoutAccountSubmitted(payload: Record<string, unknown>): Promise<void> {
+  const accountId = String(payload.accountId ?? '');
+  const userId = String(payload.userId ?? '');
+  const bankName = String(payload.bankName ?? 'a bank');
+  const last4 = String(payload.last4 ?? '');
+  const holdHours = Number(payload.holdHours ?? 0);
+  if (!accountId || !userId) {
+    logger.warn('payout_account.submitted event missing ids; skipping notification');
+    return;
+  }
+  if (await alreadyNotified(userId, 'payout_account.submitted', accountId)) return;
+
+  const wait = holdHours > 0 ? ` and ${holdHours} hours have passed` : '';
+  failIfAnyFailed(
+    [
+      await notify({
+        userId,
+        kind: 'payout_account.submitted',
+        body: `A bank account ending ${last4} at ${bankName} was added for payments to you. If this was not you, contact Medilink straight away. Nothing is paid to it until it has been checked${wait}. Medilink.`,
+        relatedType: 'billing.payout_accounts',
+        relatedId: accountId,
+      }),
+    ],
+    'the new account',
+  );
+}
+
+/** An account was verified or refused, told to the person it is for, with the reason if it was refused. */
+export async function notifyPayoutAccountReviewed(payload: Record<string, unknown>): Promise<void> {
+  const accountId = String(payload.accountId ?? '');
+  const userId = String(payload.userId ?? '');
+  const last4 = String(payload.last4 ?? '');
+  const refused = payload.decision === 'reject';
+  const note = String(payload.note ?? '').trim();
+  if (!accountId || !userId) {
+    logger.warn('payout_account.reviewed event missing ids; skipping notification');
+    return;
+  }
+  if (await alreadyNotified(userId, 'payout_account.reviewed', accountId)) return;
+
+  failIfAnyFailed(
+    [
+      await notify({
+        userId,
+        kind: 'payout_account.reviewed',
+        body: refused
+          ? `The bank account ending ${last4} could not be verified${note ? `: ${note}` : ''}. Please give another account in your earnings page. Medilink.`
+          : `The bank account ending ${last4} has been verified. Payments to you will go to it. Medilink.`,
+        relatedType: 'billing.payout_accounts',
+        relatedId: accountId,
+      }),
+    ],
+    'the account decision',
+  );
+}

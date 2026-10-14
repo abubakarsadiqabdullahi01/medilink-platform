@@ -321,6 +321,19 @@ export const DATA_CATEGORIES: DataCategory[] = [
     enforcement: 'kept',
   },
   {
+    key: 'payout_accounts',
+    name: 'Payout bank accounts',
+    tables: ['billing.payout_accounts'],
+    holds:
+      'The bank, the name the account is held under, its last four digits, and the whole number sealed under a key kept outside the database; a keyed hash of the number so one account given twice is found; who verified it and any reason given.',
+    purpose: 'To pay a practitioner what they are owed, to the right account.',
+    basis: 'Contract: paying for the work.',
+    owner: 'Finance',
+    retention:
+      'For as long as the account is the practitioner\'s, and an account they replace is kept for the audit of what was paid where. Erasure deletes every one. The whole number is opened only to show finance where to transfer, and each time is audited.',
+    enforcement: 'erasure',
+  },
+  {
     key: 'disputes',
     name: 'Disputes',
     tables: ['disputes.disputes', 'disputes.dispute_evidence'],

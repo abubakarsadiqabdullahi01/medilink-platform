@@ -55,6 +55,7 @@ interface Ctx {
   credentialId: string;
   disputeId: string;
   evidenceId: string;
+  payoutAccountId: string;
   victimPhone: string;
 }
 
@@ -101,6 +102,19 @@ async function world(): Promise<Ctx> {
     data: { userId: a.practitionerId, credentialTypeId: type.id, status: 'PENDING', referenceNumber: `${CANARY}-REF` },
   });
 
+  // Where the victim is paid, which is the most useful thing here to somebody who wants to redirect it.
+  const payoutAccount = await prisma.payoutAccount.create({
+    data: {
+      userId: a.practitionerId,
+      bankName: `${CANARY}-Bank`,
+      accountName: `${CANARY}-ADAKU`,
+      accountLast4: '9999',
+      accountNumberSealed: 'v1.a.b.c',
+      fingerprint: `${CANARY}-fingerprint`,
+      status: 'PENDING',
+    },
+  });
+
   const attackerFacility = await createUser({ fullName: 'Attacker At Hospital B' });
   await grant({
     userId: attackerFacility.id,
@@ -134,6 +148,7 @@ async function world(): Promise<Ctx> {
     credentialId: credential.id,
     disputeId: dispute.id,
     evidenceId: evidence.id,
+    payoutAccountId: payoutAccount.id,
     victimPhone: victim.phone,
   };
 }
@@ -159,6 +174,8 @@ async function fingerprint(): Promise<string> {
     prisma.credentialSubmission.findMany({ orderBy: { id: 'asc' } }),
     prisma.storedObject.findMany({ orderBy: { id: 'asc' } }),
     prisma.excusal.findMany({ orderBy: { id: 'asc' } }),
+    prisma.payoutAccount.findMany({ orderBy: { id: 'asc' } }),
+    prisma.auditLog.count({ where: { action: { startsWith: 'payout_account.' } } }),
     prisma.invoice.count(),
   ]);
   return JSON.stringify(parts);
@@ -251,6 +268,13 @@ const PROBES: Probe[] = [
   { route: 'credentials/[id]/document-url', method: 'POST', as: 'practitioner', params: (c) => ({ id: c.credentialId }), body: (c) => ({ scopeType: 'SELF', scopeId: c.a.practitionerId }) },
   { route: 'credentials', method: 'GET', as: 'practitioner', query: (c) => ({ scopeType: 'SELF', scopeId: c.a.practitionerId }) },
   { route: 'payouts', method: 'GET', as: 'practitioner', query: (c) => ({ scopeType: 'SELF', scopeId: c.a.practitionerId }) },
+  // Where somebody is paid: the number is opened by finance only, and verifying is not the holder's to do.
+  { route: 'payout-accounts/practitioner/[id]', method: 'GET', as: 'practitioner', params: (c) => ({ id: c.a.practitionerId }), query: () => ({}) },
+  { route: 'payout-accounts/practitioner/[id]', method: 'GET', as: 'facility', params: (c) => ({ id: c.a.practitionerId }), query: () => ({}) },
+  { route: 'payout-accounts/[id]/review', method: 'POST', as: 'practitioner', params: (c) => ({ id: c.payoutAccountId }), body: () => ({ decision: 'verify' }) },
+  { route: 'payout-accounts/[id]/review', method: 'POST', as: 'facility', params: (c) => ({ id: c.payoutAccountId }), body: () => ({ decision: 'verify' }) },
+  { route: 'payout-accounts', method: 'GET', as: 'practitioner', query: () => ({}) },
+  { route: 'payout-accounts', method: 'GET', as: 'facility', query: () => ({}) },
   { route: 'practitioners/eligibility', method: 'GET', as: 'practitioner', query: (c) => ({ scopeType: 'SELF', scopeId: c.a.practitionerId }) },
   { route: 'practitioners/verification', method: 'GET', as: 'practitioner', query: (c) => ({ scopeType: 'SELF', scopeId: c.a.practitionerId }) },
   { route: 'disputes/[id]', method: 'GET', as: 'practitioner', params: (c) => ({ id: c.disputeId }), query: () => ({}) },

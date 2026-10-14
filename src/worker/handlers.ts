@@ -9,6 +9,8 @@ import {
   notifyDisputeEvent,
   notifyIncidentReported,
   notifyInvoiceIssued,
+  notifyPayoutAccountReviewed,
+  notifyPayoutAccountSubmitted,
   notifyPayoutSettled,
   notifyShiftAccepted,
   notifyShiftInvited,
@@ -90,6 +92,8 @@ export const handlers: Record<string, EventHandler> = {
   [EVENTS.TimesheetRejected]: (payload) => notifyTimesheetDecision('rejected', payload),
   [EVENTS.InvoiceIssued]: (payload) => notifyInvoiceIssued(payload),
   [EVENTS.PayoutSettled]: (payload) => notifyPayoutSettled(payload),
+  [EVENTS.PayoutAccountSubmitted]: (payload) => notifyPayoutAccountSubmitted(payload),
+  [EVENTS.PayoutAccountReviewed]: (payload) => notifyPayoutAccountReviewed(payload),
 
   [EVENTS.PractitionerRegistered]: async (payload) => {
     // Stage 4.7: send the welcome message through the notification adapter.
