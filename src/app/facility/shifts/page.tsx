@@ -59,6 +59,8 @@ interface ServiceRequest {
   facilityId: string;
   professionalCategoryId: string;
   specialtyId: string | null;
+  cadreLevelId: string | null;
+  supervisionAvailable: boolean;
   shiftType: string;
   startsAt: string;
   endsAt: string;
@@ -350,6 +352,12 @@ export default function ShiftsPage() {
                         {row.specialtyId ? (
                           <p className="text-xs text-muted-foreground">
                             {nameOf(reference.data?.specialties, row.specialtyId)}
+                          </p>
+                        ) : null}
+                        {row.cadreLevelId ? (
+                          <p className="text-xs text-muted-foreground">
+                            {nameOf(reference.data?.cadreLevels, row.cadreLevelId)}
+                            {row.supervisionAvailable ? ' · supervised' : ''}
                           </p>
                         ) : null}
                       </Link>

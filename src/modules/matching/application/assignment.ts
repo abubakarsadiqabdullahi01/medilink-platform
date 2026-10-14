@@ -300,6 +300,7 @@ export async function respondToInvitation(input: RespondParams): Promise<Invitat
         hourlyRateKobo: true,
         cancellationTerms: true,
         notes: true,
+        cadreLevel: { select: { name: true } },
         facility: { select: { name: true, addressLine: true } },
       },
     });
@@ -317,6 +318,9 @@ export async function respondToInvitation(input: RespondParams): Promise<Invitat
       hourlyRateKobo: request.hourlyRateKobo,
       cancellationTerms: request.cancellationTerms,
       notes: request.notes,
+      // What level the shift was for and whether anybody was supervising, as they were shown.
+      levelName: request.cadreLevel?.name ?? null,
+      supervisionAvailable: request.supervisionAvailable,
     };
     if (request.startsAt.getTime() <= now.getTime()) throw AssignmentErrors.shiftStarted();
     if ((await bookingBlockers(input.userId, request, now)).length > 0) {
@@ -1046,6 +1050,10 @@ export interface InvitationQueueRow extends InvitationView {
   notes: string | null;
   addressLine: string;
   headcount: number;
+  /** The level the shift is for, when its profession has levels (REQ-01). */
+  levelName: string | null;
+  /** Whether somebody is there to supervise. */
+  supervisionAvailable: boolean;
 }
 
 /**
@@ -1080,6 +1088,8 @@ export async function listInvitationsFor(userId: string): Promise<InvitationQueu
           cancellationTerms: true,
           notes: true,
           headcount: true,
+          supervisionAvailable: true,
+          cadreLevel: { select: { name: true } },
           facility: { select: { name: true, addressLine: true } },
         },
       })
@@ -1094,6 +1104,8 @@ export async function listInvitationsFor(userId: string): Promise<InvitationQueu
     return [
       {
         ...toInvitationView(row),
+        levelName: request.cadreLevel?.name ?? null,
+        supervisionAvailable: request.supervisionAvailable,
         facilityName: request.facility.name,
         professionalCategoryId: request.professionalCategoryId,
         specialtyId: request.specialtyId,

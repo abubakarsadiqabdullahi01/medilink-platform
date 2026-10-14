@@ -4,6 +4,7 @@ import {
   MAX_HEADCOUNT,
   NOTES_MAX_LENGTH,
 } from '../domain/request';
+import { deriveShiftType } from '../domain/shift-type';
 
 /**
  * Request validation at the boundary.
@@ -17,7 +18,8 @@ import {
 const facilityId = z.string().uuid();
 const requestStatus = z.enum(['DRAFT', 'PUBLISHED', 'FILLED', 'CANCELLED', 'EXPIRED']);
 
-export const createServiceRequestSchema = z.object({
+export const createServiceRequestSchema = z
+  .object({
   facilityId,
   professionalCategoryId: z.string().uuid(),
   specialtyId: z.string().uuid().optional(),
@@ -25,7 +27,8 @@ export const createServiceRequestSchema = z.object({
   cadreLevelId: z.string().uuid().optional(),
   // Whether somebody is there to supervise, which a practitioner on a provisional register needs.
   supervisionAvailable: z.boolean().optional(),
-  shiftType: z.enum(['DAY', 'NIGHT']),
+  // Optional: worked out from the times when it is left out.
+  shiftType: z.enum(['DAY', 'NIGHT']).optional(),
   startsAt: z.coerce.date(),
   endsAt: z.coerce.date(),
   headcount: z.coerce.number().int().min(1).max(MAX_HEADCOUNT).default(1),
@@ -36,8 +39,24 @@ export const createServiceRequestSchema = z.object({
   // on, and a request without it is one nobody can adjudicate later.
   cancellationTerms: z.string().trim().min(10).max(CANCELLATION_TERMS_MAX_LENGTH),
   notes: z.string().trim().max(NOTES_MAX_LENGTH).optional(),
-});
-export type CreateServiceRequestInput = z.infer<typeof createServiceRequestSchema>;
+  })
+  // Day or night is a fact about the hours, and the pay floor differs by it, so a facility
+  // cannot call a night shift a day shift to be held to the lower floor (UXF-06). Left out,
+  // it is worked out; said, it has to agree.
+  .superRefine((input, context) => {
+    if (input.shiftType === undefined || input.endsAt.getTime() <= input.startsAt.getTime()) return;
+    const derived = deriveShiftType(input.startsAt, input.endsAt);
+    if (input.shiftType !== derived) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['shiftType'],
+        message: `These hours make it a ${derived.toLowerCase()} shift (night is 20:00 to 06:00), so it is held to the ${derived.toLowerCase()} floor. Leave the type out and it is worked out for you.`,
+      });
+    }
+  });
+export type CreateServiceRequestInput = Omit<z.infer<typeof createServiceRequestSchema>, 'shiftType'> & {
+  shiftType: 'DAY' | 'NIGHT';
+};
 
 /** `id` is merged in from the route's [id] segment; facilityId carries the scope. */
 export const requestActionSchema = z.object({

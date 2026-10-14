@@ -29,6 +29,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { formatNaira } from '@/components/app/format';
 import { lagosLocalToInstant } from '@/lib/lagos-date';
+import { deriveShiftType } from '@/modules/service-requests/domain/shift-type';
 
 /**
  * Publishing a shift.
@@ -48,7 +49,8 @@ export function NewShiftDialog({ facilityId }: { facilityId: string }) {
 
   const [categoryId, setCategoryId] = useState('');
   const [specialtyId, setSpecialtyId] = useState<string>('');
-  const [shiftType, setShiftType] = useState('DAY');
+  const [levelId, setLevelId] = useState('');
+  const [supervised, setSupervised] = useState(false);
   const [urgency, setUrgency] = useState('ROUTINE');
   const [startsAt, setStartsAt] = useState('');
   const [endsAt, setEndsAt] = useState('');
@@ -62,6 +64,8 @@ export function NewShiftDialog({ facilityId }: { facilityId: string }) {
   const specialties = (reference.data?.specialties ?? []).filter(
     (row) => row.categoryId === categoryId,
   );
+  // Levels the profession has defined (REQ-01). Once it has any, a shift has to say which.
+  const levels = (reference.data?.cadreLevels ?? []).filter((row) => row.categoryId === categoryId);
 
   const hourlyRateKobo = Math.round(Number(rateNaira || '0') * 100);
   const hours =
@@ -69,6 +73,10 @@ export function NewShiftDialog({ facilityId }: { facilityId: string }) {
       ? (new Date(endsAt).getTime() - new Date(startsAt).getTime()) / 3_600_000
       : 0;
   const estimate = hours > 0 ? hourlyRateKobo * hours * Number(headcount || '1') : 0;
+  // Day or night is a fact about the hours and the pay floor follows it, so it is worked out
+  // rather than picked (UXF-06). The server works it out again and refuses a label that disagrees.
+  const shiftType =
+    hours > 0 ? deriveShiftType(lagosLocalToInstant(startsAt), lagosLocalToInstant(endsAt)) : null;
 
   const publish = useMutation({
     mutationFn: async () => {
@@ -76,7 +84,8 @@ export function NewShiftDialog({ facilityId }: { facilityId: string }) {
         facilityId,
         professionalCategoryId: categoryId,
         specialtyId: specialtyId || undefined,
-        shiftType,
+        cadreLevelId: levelId || undefined,
+        supervisionAvailable: supervised,
         startsAt: lagosLocalToInstant(startsAt).toISOString(),
         endsAt: lagosLocalToInstant(endsAt).toISOString(),
         headcount: Number(headcount),
@@ -103,6 +112,7 @@ export function NewShiftDialog({ facilityId }: { facilityId: string }) {
 
   const ready =
     categoryId &&
+    (levels.length === 0 || levelId) &&
     startsAt &&
     endsAt &&
     hours > 0 &&
@@ -130,7 +140,14 @@ export function NewShiftDialog({ facilityId }: { facilityId: string }) {
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-1.5">
             <Label>Profession</Label>
-            <Select value={categoryId} onValueChange={setCategoryId}>
+            <Select
+              value={categoryId}
+              onValueChange={(value) => {
+                setCategoryId(value);
+                setSpecialtyId('');
+                setLevelId('');
+              }}
+            >
               <SelectTrigger>
                 <SelectValue placeholder="Choose a category" />
               </SelectTrigger>
@@ -164,6 +181,27 @@ export function NewShiftDialog({ facilityId }: { facilityId: string }) {
             </Select>
           </div>
 
+          {levels.length > 0 ? (
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label>Level</Label>
+              <Select value={levelId} onValueChange={setLevelId}>
+                <SelectTrigger aria-label="Level">
+                  <SelectValue placeholder="Which level is this shift for?" />
+                </SelectTrigger>
+                <SelectContent>
+                  {levels.map((row) => (
+                    <SelectItem key={row.id} value={row.id}>
+                      {row.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Only practitioners recorded at this level are offered the shift.
+              </p>
+            </div>
+          ) : null}
+
           <div className="space-y-1.5">
             <Label htmlFor="startsAt">Starts</Label>
             <Input
@@ -186,15 +224,13 @@ export function NewShiftDialog({ facilityId }: { facilityId: string }) {
 
           <div className="space-y-1.5">
             <Label>Shift type</Label>
-            <Select value={shiftType} onValueChange={setShiftType}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="DAY">Day</SelectItem>
-                <SelectItem value="NIGHT">Night</SelectItem>
-              </SelectContent>
-            </Select>
+            <p className="flex h-11 items-center rounded-md border bg-muted px-3 text-sm" aria-live="polite">
+              {shiftType === null
+                ? 'Worked out from the times'
+                : shiftType === 'NIGHT'
+                  ? 'Night shift — most of it falls between 20:00 and 06:00'
+                  : 'Day shift'}
+            </p>
           </div>
 
           <div className="space-y-1.5">
@@ -233,6 +269,19 @@ export function NewShiftDialog({ facilityId }: { facilityId: string }) {
               onChange={(event) => setRateNaira(event.target.value)}
             />
           </div>
+
+          <label className="flex items-center gap-2 text-sm sm:col-span-2">
+            <input
+              type="checkbox"
+              className="size-4"
+              checked={supervised}
+              onChange={(event) => setSupervised(event.target.checked)}
+            />
+            Somebody will be there to supervise on this shift
+            <span className="text-xs text-muted-foreground">
+              — needed to offer it to a practitioner on a provisional register
+            </span>
+          </label>
 
           <div className="space-y-1.5 sm:col-span-2">
             <Label htmlFor="terms">

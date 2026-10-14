@@ -45,6 +45,8 @@ interface Invitation {
   notes: string | null;
   addressLine: string;
   headcount: number;
+  levelName: string | null;
+  supervisionAvailable: boolean;
 }
 
 /** Answered offers shown before "show all". */
@@ -182,6 +184,8 @@ export default function OffersPage() {
                     <Detail label="Places">
                       {row.headcount === 1 ? '1 practitioner' : `${row.headcount} practitioners`}
                     </Detail>
+                    {row.levelName ? <Detail label="Level">{row.levelName}</Detail> : null}
+                    {row.supervisionAvailable ? <Detail label="Supervision">Someone will supervise</Detail> : null}
                   </DetailGrid>
 
                   {/* The two things an agreement turns on, read before the

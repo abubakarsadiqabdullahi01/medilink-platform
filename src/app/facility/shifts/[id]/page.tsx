@@ -25,6 +25,8 @@ interface ServiceRequest {
   id: string;
   professionalCategoryId: string;
   specialtyId: string | null;
+  cadreLevelId: string | null;
+  supervisionAvailable: boolean;
   shiftType: string;
   startsAt: string;
   endsAt: string;
@@ -240,6 +242,12 @@ export default function ShiftDetailPage() {
             <CardContent className="pt-6">
               <DetailGrid>
                 <Detail label="Shift type">{humanise(shift.data.shiftType)}</Detail>
+                {shift.data.cadreLevelId ? (
+                  <Detail label="Level">
+                    {nameOf(reference.data?.cadreLevels, shift.data.cadreLevelId)}
+                    {shift.data.supervisionAvailable ? ' · someone will supervise' : ''}
+                  </Detail>
+                ) : null}
                 <Detail label="Urgency">{humanise(shift.data.urgency)}</Detail>
                 <Detail label="Hourly rate">{formatNaira(shift.data.hourlyRateKobo)}</Detail>
                 <Detail label="Filled">

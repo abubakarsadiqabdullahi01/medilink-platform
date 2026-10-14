@@ -205,7 +205,19 @@ export async function setRegistrationCategoryActive(input: {
 }
 
 export interface HierarchyOverview {
-  professions: { id: string; key: string; name: string; levels: CadreLevelView[] }[];
+  professions: {
+    id: string;
+    key: string;
+    name: string;
+    levels: CadreLevelView[];
+    /**
+     * Practitioners of this profession with a profile and no level recorded. Once the
+     * profession has levels a request must name one and only somebody recorded at it is
+     * offered the shift, so this is how many would be passed over: the number to bring
+     * down before defining the first.
+     */
+    withoutLevel: number;
+  }[];
   registrationCategories: RegistrationCategoryView[];
 }
 
@@ -224,12 +236,25 @@ export async function hierarchyOverview(): Promise<HierarchyOverview> {
     prisma.registrationCategory.findMany({ orderBy: { name: 'asc' } }),
   ]);
 
+  const withoutLevel = await Promise.all(
+    professions.map((profession) =>
+      prisma.practitionerProfile.count({
+        where: {
+          professionalCategoryId: profession.id,
+          deletedAt: null,
+          user: { professionalRegistrations: { none: { deletedAt: null, cadreLevelId: { not: null } } } },
+        },
+      }),
+    ),
+  );
+
   return {
-    professions: professions.map((profession) => ({
+    professions: professions.map((profession, index) => ({
       id: profession.id,
       key: profession.key,
       name: profession.name,
       levels: profession.cadreLevels.map(levelView),
+      withoutLevel: withoutLevel[index]!,
     })),
     registrationCategories: categories.map(categoryView),
   };

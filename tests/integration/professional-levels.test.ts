@@ -173,6 +173,34 @@ describe('where the lists are read', () => {
     expect(overview.registrationCategories.map((category) => category.name)).toEqual(['Full registration']);
   });
 
+  it('counts, for each profession, the practitioners nobody has recorded a level for, so defining levels is not a surprise', async () => {
+    const doctor = await createProfessionalCategory({ name: 'Doctor' });
+    const actor = await officer();
+    const level = await createCadreLevel({ professionalCategoryId: doctor.id, name: 'Registrar', rank: 30, actorId: actor.id });
+    const { createProfile } = await import('@/modules/practitioners/application/profile');
+    const { recordProfessionalRegistration } = await import('@/modules/practitioners/application/verification');
+    const state = await (await import('./support/fixtures')).createState();
+    const people = [];
+    for (const name of ['Amina Yusuf', 'Chidi Okafor', 'Ngozi Eze']) {
+      const person = await createUser({ fullName: name });
+      await createProfile({ userId: person.id, professionalCategoryId: doctor.id, yearsOfExperience: 3, homeStateId: state.id });
+      await recordProfessionalRegistration({
+        userId: person.id,
+        regulator: 'MDCN',
+        folioNumber: `MDCN/L/${Math.floor(Math.random() * 900_000) + 100_000}`,
+        registrationStatus: 'ACTIVE',
+        cadreLevelId: people.length === 0 ? level.id : undefined,
+        actorId: actor.id,
+      });
+      people.push(person);
+    }
+
+    const overview = await hierarchyOverview();
+
+    // One of the three has a level; the other two would be passed over by a level-specific shift.
+    expect(overview.professions.find((profession) => profession.id === doctor.id)!.withoutLevel).toBe(2);
+  });
+
   it('gives forms only what can be chosen: a retired level or category is not offered', async () => {
     const doctor = await createProfessionalCategory({ name: 'Doctor' });
     const actor = await officer();

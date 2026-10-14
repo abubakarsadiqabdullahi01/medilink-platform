@@ -22,7 +22,7 @@ interface Level {
 }
 
 interface Overview {
-  professions: { id: string; key: string; name: string; levels: Level[] }[];
+  professions: { id: string; key: string; name: string; levels: Level[]; withoutLevel: number }[];
   registrationCategories: { id: string; key: string; name: string; supervisionRequired: boolean; isActive: boolean }[];
 }
 
@@ -131,6 +131,13 @@ export default function LevelsPage() {
                     {profession.levels.length === 0
                       ? 'No levels yet, so requests for this profession do not ask for one.'
                       : `${profession.levels.filter((level) => level.isActive).length} in use.`}
+                    {profession.withoutLevel > 0
+                      ? ` ${profession.withoutLevel} ${profession.withoutLevel === 1 ? 'practitioner has' : 'practitioners have'} no level recorded${
+                          profession.levels.length === 0
+                            ? ', and would not be offered a shift once there is one. Record theirs first (Practitioners, then Identity and registration).'
+                            : ', so a shift that names a level is not offered to them.'
+                        }`
+                      : ''}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">

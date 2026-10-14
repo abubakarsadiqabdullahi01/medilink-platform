@@ -117,6 +117,11 @@ import {
   submitPayoutAccount,
 } from '../src/modules/billing-settlement/application/payout-account';
 import {
+  createCadreLevel,
+  createRegistrationCategory,
+} from '../src/modules/config/hierarchy-config';
+import { recordPractitionerStanding } from '../src/modules/practitioners/application/verification';
+import {
   beginIncidentReview,
   closeIncident,
   reportIncident,
@@ -1692,6 +1697,9 @@ interface LiveShiftInput {
   ref: Reference;
   publish?: boolean;
   match?: boolean;
+  /** The level the shift is for, once its profession has levels (REQ-01). */
+  cadreLevelId?: string;
+  supervisionAvailable?: boolean;
 }
 
 /** A real future shift, published the way a scheduler would, nothing moved. */
@@ -1701,6 +1709,8 @@ async function openShift(input: LiveShiftInput) {
     facilityId: input.facility.id,
     professionalCategoryId: input.ref.categories.get(input.need.category)!.id,
     specialtyId: input.need.specialty ? input.ref.specialties.get(input.need.specialty) : undefined,
+    cadreLevelId: input.cadreLevelId,
+    supervisionAvailable: input.supervisionAvailable,
     shiftType: input.need.shift,
     startsAt: input.start,
     endsAt: addHours(input.start, hours),
@@ -3060,6 +3070,48 @@ async function main(): Promise<void> {
     }
   }
   log('  a shift in progress, one starting within the hour, upcoming rota, offers out, acceptances to confirm, open and draft shifts');
+
+  // Levels for doctors, defined last. Once a profession has levels every new request for it
+  // has to name one, and the history above was written before there were any, which is what a
+  // platform that starts using levels part-way through looks like. The names and ranks are
+  // illustrations: what a profession's levels are is the regulators' to say, and none ships.
+  log('Defining demo levels for doctors, and recording where the demo doctors stand…');
+  {
+    const doctorId = ref.categories.get('doctor')!.id;
+    const levels = [];
+    for (const [name, rank] of [['House officer', 10], ['Medical officer', 20], ['Registrar', 30], ['Consultant', 40]] as const) {
+      levels.push(await createCadreLevel({ professionalCategoryId: doctorId, name, rank, actorId: superAdmin.id }));
+    }
+    const full = await createRegistrationCategory({ name: 'Full registration', supervisionRequired: false, actorId: superAdmin.id });
+    const provisional = await createRegistrationCategory({ name: 'Provisional registration', supervisionRequired: true, actorId: superAdmin.id });
+
+    let recorded = 0;
+    const doctors = practitioners.filter((person) => person.spec.category === 'doctor' && (person.spec.stage ?? 'complete') === 'complete');
+    for (const [position, person] of doctors.entries()) {
+      const level = levels[position % levels.length]!;
+      try {
+        await recordPractitionerStanding({
+          userId: person.id,
+          cadreLevelId: level.id,
+          // A house officer is on a provisional register until fully registered.
+          registrationCategoryId: level.name === 'House officer' ? provisional.id : full.id,
+          actorId: compliance.id,
+        });
+        recorded += 1;
+      } catch {
+        // No registration recorded for them (a stuck onboarding persona): nothing to rest a level on.
+      }
+    }
+
+    // One shift that asks for a level, so the match shows it being applied.
+    const registrar = levels.find((level) => level.name === 'Registrar')!;
+    await openShift({
+      facility: flagship, need: paeds, start: watDay(nextDay(3, WEEKDAYS), 8), ref,
+      cadreLevelId: registrar.id, supervisionAvailable: false,
+      notes: 'Paediatric registrar for the ward round and the clinic. Registrars only.',
+    });
+    log(`  4 levels and 2 registration categories; ${recorded} doctors recorded; a registrar shift published`);
+  }
 
   // Revised last, not before the work above. Publishing a revised notice means everyone
   // who has not accepted it is asked to before they can accept an offer, and the work above
