@@ -184,19 +184,24 @@ describe('a decision on a document', () => {
     ['approve', 'credential.verified'],
     ['reject', 'credential.rejected'],
     ['request_info', 'credential.info_requested'],
-  ] as const)('is published as an event when an officer chooses %s', async (decision, eventType) => {
-    const { submission, officer } = await pendingSubmission();
+  ] as const)(
+    'is published as an event when an officer chooses %s',
+    async (decision, eventType) => {
+      const { submission, officer } = await pendingSubmission();
 
-    await reviewCredential({
-      submissionId: submission.id,
-      reviewerId: officer.id,
-      decision,
-      reviewNotes: 'Name on the scan does not match.',
-    });
+      await reviewCredential({
+        submissionId: submission.id,
+        reviewerId: officer.id,
+        decision,
+        reviewNotes: 'Name on the scan does not match.',
+      });
 
-    const events = await prisma.outboxEvent.findMany({ where: { eventType, aggregateId: submission.id } });
-    expect(events).toHaveLength(1);
-  });
+      const events = await prisma.outboxEvent.findMany({
+        where: { eventType, aggregateId: submission.id },
+      });
+      expect(events).toHaveLength(1);
+    },
+  );
 
   it('tells the practitioner which document, and leaves the officer’s reasons for the screen', async () => {
     const { practitioner, submission, type } = await pendingSubmission();
@@ -211,9 +216,9 @@ describe('a decision on a document', () => {
     await notifyCredentialInfoRequested(payload);
     await notifyCredentialExpired(payload);
 
-    const bodies = (await prisma.notificationMessage.findMany({ where: { userId: practitioner.id } })).map(
-      (row) => row.body,
-    );
+    const bodies = (
+      await prisma.notificationMessage.findMany({ where: { userId: practitioner.id } })
+    ).map((row) => row.body);
     expect(bodies).toHaveLength(4);
     expect(bodies.every((body) => body.includes('Practising Licence'))).toBe(true);
     expect(bodies.some((body) => body.includes('verified'))).toBe(true);
@@ -256,12 +261,28 @@ describe('a timesheet', () => {
     const first = crypto.randomUUID();
     const second = crypto.randomUUID();
 
-    await notifyTimesheetSubmitted({ assignmentId: assignment.id, submissionKey: first, userId: practitioner.id });
-    await notifyTimesheetSubmitted({ assignmentId: assignment.id, submissionKey: first, userId: practitioner.id });
-    expect(await prisma.notificationMessage.count({ where: { kind: 'timesheet.submitted' } })).toBe(1);
+    await notifyTimesheetSubmitted({
+      assignmentId: assignment.id,
+      submissionKey: first,
+      userId: practitioner.id,
+    });
+    await notifyTimesheetSubmitted({
+      assignmentId: assignment.id,
+      submissionKey: first,
+      userId: practitioner.id,
+    });
+    expect(await prisma.notificationMessage.count({ where: { kind: 'timesheet.submitted' } })).toBe(
+      1,
+    );
 
-    await notifyTimesheetSubmitted({ assignmentId: assignment.id, submissionKey: second, userId: practitioner.id });
-    expect(await prisma.notificationMessage.count({ where: { kind: 'timesheet.submitted' } })).toBe(2);
+    await notifyTimesheetSubmitted({
+      assignmentId: assignment.id,
+      submissionKey: second,
+      userId: practitioner.id,
+    });
+    expect(await prisma.notificationMessage.count({ where: { kind: 'timesheet.submitted' } })).toBe(
+      2,
+    );
   });
 });
 
@@ -283,6 +304,22 @@ describe('a dispute opened', () => {
     expect(message?.body).toContain('A dispute was opened');
     expect(message?.body).not.toContain('PAY');
     expect(message?.body).not.toContain('Amina');
+  });
+
+  it('tells the practitioner when the facility opened the case', async () => {
+    const { practitioner, representativeId, assignment } = await bookedShift();
+    const disputeId = crypto.randomUUID();
+
+    await notifyDisputeOpened({
+      disputeId,
+      assignmentId: assignment.id,
+      userId: practitioner.id,
+      raisedParty: 'FACILITY',
+    });
+
+    const [message] = await messagesAbout(disputeId);
+    expect(message?.userId).toBe(practitioner.id);
+    expect(message?.userId).not.toBe(representativeId);
   });
 });
 

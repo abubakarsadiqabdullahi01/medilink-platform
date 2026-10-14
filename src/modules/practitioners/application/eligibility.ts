@@ -45,33 +45,48 @@ export interface EligibilityView {
  * not exist, or whose account is deleted, gets nothing for that id, which is
  * the same answer the single loader gives with null.
  */
-async function loadEligibilityInputs(userIds: string[]): Promise<Map<string, EligibilityInput>> {
+export type EligibilityReader = Pick<
+  Tx,
+  | 'user'
+  | 'practitionerProfile'
+  | 'identityVerification'
+  | 'screeningResult'
+  | 'professionalRegistration'
+  | 'credentialSubmission'
+  | 'professionalCategory'
+  | 'credentialRequirement'
+>;
+
+async function loadEligibilityInputs(
+  userIds: string[],
+  db: EligibilityReader = prisma,
+): Promise<Map<string, EligibilityInput>> {
   const inputs = new Map<string, EligibilityInput>();
   if (userIds.length === 0) return inputs;
 
   const ids = [...new Set(userIds)];
 
   const [users, profiles, identities, screenings, registrations, submissions] = await Promise.all([
-    prisma.user.findMany({
+    db.user.findMany({
       where: { id: { in: ids } },
       select: { id: true, status: true, deletedAt: true },
     }),
-    prisma.practitionerProfile.findMany({
+    db.practitionerProfile.findMany({
       where: { userId: { in: ids } },
       select: { userId: true, professionalCategoryId: true },
     }),
-    prisma.identityVerification.findMany({
+    db.identityVerification.findMany({
       where: { userId: { in: ids } },
       select: { userId: true, nameMatch: true },
     }),
-    prisma.screeningResult.findMany({
+    db.screeningResult.findMany({
       where: { userId: { in: ids } },
       select: { userId: true, status: true },
     }),
     // Every regulator this set holds a registration with, filtered down per
     // practitioner below. The single-user path looked one up by the compound
     // unique; here the same choice is made in memory.
-    prisma.professionalRegistration.findMany({
+    db.professionalRegistration.findMany({
       where: { userId: { in: ids } },
       select: {
         userId: true,
@@ -82,7 +97,7 @@ async function loadEligibilityInputs(userIds: string[]): Promise<Map<string, Eli
         evidenceRetrievedAt: true,
       },
     }),
-    prisma.credentialSubmission.findMany({
+    db.credentialSubmission.findMany({
       where: { userId: { in: ids }, deletedAt: null, status: { in: ['VERIFIED', 'EXPIRED'] } },
       select: { userId: true, credentialTypeId: true, status: true },
     }),
@@ -95,13 +110,13 @@ async function loadEligibilityInputs(userIds: string[]): Promise<Map<string, Eli
   // profiles are in hand. Two round trips rather than two per practitioner.
   const [categories, requirements] = await Promise.all([
     categoryIds.length
-      ? prisma.professionalCategory.findMany({
+      ? db.professionalCategory.findMany({
           where: { id: { in: categoryIds } },
           select: { id: true, regulator: true },
         })
       : Promise.resolve([]),
     categoryIds.length
-      ? prisma.credentialRequirement.findMany({
+      ? db.credentialRequirement.findMany({
           where: { professionalCategoryId: { in: categoryIds }, isMandatory: true },
           select: { professionalCategoryId: true, credentialTypeId: true },
         })
@@ -219,8 +234,9 @@ export async function getEligibility(
 export async function getEligibilityFor(
   userIds: string[],
   now: Date = new Date(),
+  db: EligibilityReader = prisma,
 ): Promise<Map<string, EligibilityView>> {
-  const inputs = await loadEligibilityInputs(userIds);
+  const inputs = await loadEligibilityInputs(userIds, db);
   const views = new Map<string, EligibilityView>();
 
   for (const userId of userIds) {

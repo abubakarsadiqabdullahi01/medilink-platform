@@ -1,8 +1,5 @@
 import { z } from 'zod';
-import {
-  DISPUTE_REASON_MAX_LENGTH,
-  DISPUTE_REASON_MIN_LENGTH,
-} from '../domain/dispute';
+import { DISPUTE_REASON_MAX_LENGTH, DISPUTE_REASON_MIN_LENGTH } from '../domain/dispute';
 
 const uuid = z.string().uuid();
 const reason = z.string().trim().min(DISPUTE_REASON_MIN_LENGTH).max(DISPUTE_REASON_MAX_LENGTH);
@@ -28,22 +25,13 @@ export const listDisputesSchema = z.object({
 export const disputeIdSchema = z.object({ id: uuid });
 
 /**
- * A party's act on a case. A practitioner acts as themselves; somebody acting for
- * a facility says which, and the guard proves they hold `dispute.manage` over
- * *that* facility. Whether the case is theirs is the application's to prove: it
- * is checked against the shift's own facility, never trusted from here.
+ * A case action available to either party.
+ *
+ * Practitioners omit `facilityId` and act at SELF. A facility member includes
+ * it and is authorised at that FACILITY; the application layer still checks
+ * that the case actually belongs to the named facility.
  */
-export const partyDisputeSchema = z.object({ id: uuid, facilityId: uuid.optional() });
-
-/** The scope a party's act is authorised against: the facility they act for, or themselves. */
-export function partyScope(
-  input: { facilityId?: string },
-  session: { userId: string },
-): { type: 'FACILITY'; id: string } | { type: 'SELF'; id: string } {
-  return input.facilityId
-    ? { type: 'FACILITY', id: input.facilityId }
-    : { type: 'SELF', id: session.userId };
-}
+export const partyDisputeIdSchema = z.object({ id: uuid, facilityId: uuid.optional() });
 
 /**
  * One piece of evidence, identified by both ids.
@@ -52,7 +40,11 @@ export function partyScope(
  * request cannot name evidence belonging to a different case and have the
  * scope check pass on the one it claims.
  */
-export const evidenceUrlSchema = z.object({ id: uuid, evidenceId: uuid, facilityId: uuid.optional() });
+export const evidenceUrlSchema = z.object({
+  id: uuid,
+  evidenceId: uuid,
+  facilityId: uuid.optional(),
+});
 
 export const resolveDisputeSchema = z.object({
   id: uuid,

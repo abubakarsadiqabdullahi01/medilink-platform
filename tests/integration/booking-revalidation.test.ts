@@ -49,6 +49,46 @@ const confirm = (world: BookingWorld, userId: string) =>
     actorId: world.schedulerId,
   });
 
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+/** Holds the same request-row lock confirmation takes, until the test releases it. */
+async function holdRequest(requestId: string) {
+  const locked = deferred();
+  const release = deferred();
+  const finished = prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM service_requests.service_requests WHERE id = ${requestId}::uuid FOR UPDATE`;
+    locked.resolve();
+    await release.promise;
+  });
+  await locked.promise;
+  return { release: release.resolve, finished };
+}
+
+/** Waits until confirmation has reached the row lock, proving its earlier work is done. */
+async function waitForConfirmationLock(): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const [row] = await prisma.$queryRaw<Array<{ waiting: boolean }>>`
+      SELECT EXISTS (
+        SELECT 1
+        FROM pg_stat_activity
+        WHERE datname = current_database()
+          AND state = 'active'
+          AND wait_event_type = 'Lock'
+          AND query LIKE '%service_requests.service_requests%FOR UPDATE%'
+      ) AS waiting
+    `;
+    if (row?.waiting) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error('Confirmation did not reach the request lock.');
+}
+
 describe('inviting', () => {
   it('offers a shift to somebody who is eligible, in the profession and consenting', async () => {
     const world = await buildBookingWorld();
@@ -61,7 +101,9 @@ describe('inviting', () => {
     const nurse = await eligiblePractitioner(world);
     await lapseRegistration(nurse.id);
 
-    await expect(offer(world, nurse.id)).rejects.toMatchObject({ code: 'practitioner_not_bookable' });
+    await expect(offer(world, nurse.id)).rejects.toMatchObject({
+      code: 'practitioner_not_bookable',
+    });
     expect(await prisma.invitation.count()).toBe(0);
   });
 
@@ -78,7 +120,10 @@ describe('inviting', () => {
         userIds: [fine.id, lapsed.id],
         actorId: world.schedulerId,
       }),
-    ).rejects.toMatchObject({ code: 'practitioner_not_bookable', message: expect.stringContaining('One of') });
+    ).rejects.toMatchObject({
+      code: 'practitioner_not_bookable',
+      message: expect.stringContaining('One of'),
+    });
     expect(await prisma.invitation.count()).toBe(0);
   });
 
@@ -92,7 +137,9 @@ describe('inviting', () => {
       yearsOfExperience: 3,
     });
 
-    await expect(offer(world, stranger.id)).rejects.toMatchObject({ code: 'practitioner_not_bookable' });
+    await expect(offer(world, stranger.id)).rejects.toMatchObject({
+      code: 'practitioner_not_bookable',
+    });
   });
 
   it('refuses somebody who has withdrawn consent to be shown to facilities', async () => {
@@ -106,13 +153,18 @@ describe('inviting', () => {
       actorId: nurse.id,
     });
 
-    await expect(offer(world, nurse.id)).rejects.toMatchObject({ code: 'practitioner_not_bookable' });
+    await expect(offer(world, nurse.id)).rejects.toMatchObject({
+      code: 'practitioner_not_bookable',
+    });
   });
 
   it('refuses everything once the facility is no longer verified', async () => {
     const world = await buildBookingWorld();
     const nurse = await eligiblePractitioner(world);
-    await prisma.facility.update({ where: { id: world.facilityId }, data: { status: 'SUSPENDED' } });
+    await prisma.facility.update({
+      where: { id: world.facilityId },
+      data: { status: 'SUSPENDED' },
+    });
 
     await expect(offer(world, nurse.id)).rejects.toMatchObject({ code: 'facility_not_verified' });
   });
@@ -122,7 +174,10 @@ describe('inviting', () => {
     const nurse = await eligiblePractitioner(world);
     await prisma.serviceRequest.update({
       where: { id: world.requestId },
-      data: { startsAt: new Date(Date.now() - 60 * 60 * 1000), endsAt: new Date(Date.now() + 60 * 60 * 1000) },
+      data: {
+        startsAt: new Date(Date.now() - 60 * 60 * 1000),
+        endsAt: new Date(Date.now() + 60 * 60 * 1000),
+      },
     });
 
     await expect(offer(world, nurse.id)).rejects.toMatchObject({ code: 'shift_started' });
@@ -157,7 +212,10 @@ describe('accepting', () => {
     const invitation = await offer(world, nurse.id);
     await prisma.serviceRequest.update({
       where: { id: world.requestId },
-      data: { startsAt: new Date(Date.now() - 60 * 60 * 1000), endsAt: new Date(Date.now() + 60 * 60 * 1000) },
+      data: {
+        startsAt: new Date(Date.now() - 60 * 60 * 1000),
+        endsAt: new Date(Date.now() + 60 * 60 * 1000),
+      },
     });
 
     await expect(
@@ -184,7 +242,10 @@ describe('confirming', () => {
     const world = await buildBookingWorld();
     const nurse = await eligiblePractitioner(world);
     await accepted(world, nurse.id);
-    await prisma.facility.update({ where: { id: world.facilityId }, data: { status: 'SUSPENDED' } });
+    await prisma.facility.update({
+      where: { id: world.facilityId },
+      data: { status: 'SUSPENDED' },
+    });
 
     await expect(confirm(world, nurse.id)).rejects.toMatchObject({
       code: 'cannot_confirm',
@@ -198,7 +259,10 @@ describe('confirming', () => {
     await accepted(world, nurse.id);
     await prisma.serviceRequest.update({
       where: { id: world.requestId },
-      data: { startsAt: new Date(Date.now() - 60 * 60 * 1000), endsAt: new Date(Date.now() + 60 * 60 * 1000) },
+      data: {
+        startsAt: new Date(Date.now() - 60 * 60 * 1000),
+        endsAt: new Date(Date.now() + 60 * 60 * 1000),
+      },
     });
 
     await expect(confirm(world, nurse.id)).rejects.toMatchObject({
@@ -213,6 +277,59 @@ describe('confirming', () => {
     await accepted(world, nurse.id);
 
     await expect(confirm(world, nurse.id)).resolves.toMatchObject({ status: 'CONFIRMED' });
+  });
+
+  it('re-checks the facility after waiting for the request lock', async () => {
+    const world = await buildBookingWorld();
+    const nurse = await eligiblePractitioner(world);
+    await accepted(world, nurse.id);
+    const gate = await holdRequest(world.requestId);
+    const pending = confirm(world, nurse.id);
+
+    try {
+      await waitForConfirmationLock();
+      await prisma.facility.update({
+        where: { id: world.facilityId },
+        data: { status: 'SUSPENDED' },
+      });
+    } finally {
+      gate.release();
+      await gate.finished;
+    }
+
+    await expect(pending).rejects.toMatchObject({
+      code: 'cannot_confirm',
+      message: expect.stringContaining('facility_not_verified'),
+    });
+  });
+
+  it('uses the time after a lock wait, so a shift cannot start in the queue', async () => {
+    const world = await buildBookingWorld();
+    const nurse = await eligiblePractitioner(world);
+    await accepted(world, nurse.id);
+    const startsAt = new Date(Date.now() + 300);
+    await prisma.serviceRequest.update({
+      where: { id: world.requestId },
+      data: { startsAt, endsAt: new Date(startsAt.getTime() + 8 * 60 * 60 * 1000) },
+    });
+    const gate = await holdRequest(world.requestId);
+    const pending = confirm(world, nurse.id);
+
+    try {
+      await waitForConfirmationLock();
+      const remaining = startsAt.getTime() - Date.now();
+      if (remaining >= 0) {
+        await new Promise((resolve) => setTimeout(resolve, remaining + 50));
+      }
+    } finally {
+      gate.release();
+      await gate.finished;
+    }
+
+    await expect(pending).rejects.toMatchObject({
+      code: 'cannot_confirm',
+      message: expect.stringContaining('shift_started'),
+    });
   });
 });
 
@@ -249,7 +366,9 @@ describe('two people confirmed onto the same shift at the same moment', () => {
     const results = await Promise.allSettled([confirm(world, first.id), confirm(world, second.id)]);
 
     expect(results.every((r) => r.status === 'fulfilled')).toBe(true);
-    const request = await prisma.serviceRequest.findUniqueOrThrow({ where: { id: world.requestId } });
+    const request = await prisma.serviceRequest.findUniqueOrThrow({
+      where: { id: world.requestId },
+    });
     expect(request.status).toBe('FILLED');
     expect(await prisma.assignment.count({ where: { status: 'CONFIRMED' } })).toBe(2);
   });

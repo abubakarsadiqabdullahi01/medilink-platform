@@ -1,5 +1,5 @@
 import { handleGuardedRequest } from '@/lib/http/guarded-handler';
-import { partyDisputeSchema, partyScope } from '@/modules/disputes/presentation/schemas';
+import { partyDisputeIdSchema } from '@/modules/disputes/presentation/schemas';
 import { withdrawDispute } from '@/modules/disputes/application/dispute';
 
 /**
@@ -15,9 +15,12 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
     request,
     {
       source: 'body',
-      schema: partyDisputeSchema,
+      schema: partyDisputeIdSchema,
       permission: 'dispute.manage',
-      scope: partyScope,
+      scope: (input, session) =>
+        input.facilityId
+          ? { type: 'FACILITY', id: input.facilityId }
+          : { type: 'SELF', id: session.userId },
       action: async ({ input, session }) =>
         withdrawDispute({ disputeId: input.id, actorId: session.userId }),
     },

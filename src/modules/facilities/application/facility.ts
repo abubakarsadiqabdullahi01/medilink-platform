@@ -337,8 +337,11 @@ export async function assertScopeMayAddStaff(
   await assertFacilityVerified(scope.id);
 }
 
-export async function getFacility(facilityId: string): Promise<FacilityView> {
-  const facility = await prisma.facility.findFirst({
+export async function getFacility(
+  facilityId: string,
+  db: Pick<Tx, 'facility'> = prisma,
+): Promise<FacilityView> {
+  const facility = await db.facility.findFirst({
     where: { id: facilityId, deletedAt: null },
   });
   if (!facility) throw FacilityErrors.facilityNotFound();

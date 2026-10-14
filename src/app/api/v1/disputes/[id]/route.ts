@@ -1,5 +1,5 @@
 import { handleGuardedRequest } from '@/lib/http/guarded-handler';
-import { partyDisputeSchema } from '@/modules/disputes/presentation/schemas';
+import { partyDisputeIdSchema } from '@/modules/disputes/presentation/schemas';
 import { getCaseForParty, getDispute } from '@/modules/disputes/application/dispute';
 import { listEvidence, listEvidenceForParty } from '@/modules/disputes/application/evidence';
 
@@ -18,7 +18,7 @@ export async function GET(request: Request, props: { params: Promise<{ id: strin
     request,
     {
       source: 'query',
-      schema: partyDisputeSchema,
+      schema: partyDisputeIdSchema,
       permission: 'dispute.manage',
       scope: (input) =>
         input.facilityId ? { type: 'FACILITY', id: input.facilityId } : { type: 'PLATFORM' },

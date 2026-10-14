@@ -1,4 +1,4 @@
-import { prisma } from '@/lib/db';
+import { prisma, type Tx } from '@/lib/db';
 import { getEligibilityFor } from './eligibility';
 import { withdrawnFromMatching } from '@/modules/audit-compliance/application/consent';
 
@@ -102,8 +102,9 @@ export async function listMatchCandidates(input: {
  */
 export async function standingsFor(
   userIds: string[],
+  db: Pick<Tx, 'professionalRegistration'> = prisma,
 ): Promise<Map<string, { cadreLevelId: string | null; supervised: boolean }>> {
-  const rows = await prisma.professionalRegistration.findMany({
+  const rows = await db.professionalRegistration.findMany({
     where: { userId: { in: userIds }, deletedAt: null },
     orderBy: { createdAt: 'asc' },
     select: {

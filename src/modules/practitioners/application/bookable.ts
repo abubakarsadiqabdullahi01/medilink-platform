@@ -1,7 +1,7 @@
-import { prisma } from '@/lib/db';
+import { prisma, type Tx } from '@/lib/db';
 import { withdrawnFromMatching } from '@/modules/audit-compliance/application/consent';
 import { standingsFor } from './candidates';
-import { getEligibilityFor } from './eligibility';
+import { getEligibilityFor, type EligibilityReader } from './eligibility';
 
 /**
  * Why somebody cannot be offered, accept, or be confirmed onto a shift *now*.
@@ -32,23 +32,29 @@ export interface BookingTarget {
   supervisionAvailable: boolean;
 }
 
+type BookingReader = EligibilityReader &
+  Pick<Tx, 'practitionerProfile' | 'consentRecord' | 'professionalRegistration'>;
+
 export async function bookingBlockersFor(
   userIds: string[],
   target: BookingTarget,
   now: Date = new Date(),
+  db: BookingReader = prisma,
 ): Promise<Map<string, BookingBlocker[]>> {
   const ids = [...new Set(userIds)];
   const professionalCategoryId = target.professionalCategoryId;
   const [eligibility, profiles, withdrawn, standings] = await Promise.all([
-    getEligibilityFor(ids, now),
-    prisma.practitionerProfile.findMany({
+    getEligibilityFor(ids, now, db),
+    db.practitionerProfile.findMany({
       where: { userId: { in: ids }, deletedAt: null },
       select: { userId: true, professionalCategoryId: true },
     }),
-    withdrawnFromMatching(ids),
-    standingsFor(ids),
+    withdrawnFromMatching(ids, db),
+    standingsFor(ids, db),
   ]);
-  const categoryOf = new Map(profiles.map((profile) => [profile.userId, profile.professionalCategoryId]));
+  const categoryOf = new Map(
+    profiles.map((profile) => [profile.userId, profile.professionalCategoryId]),
+  );
 
   const result = new Map<string, BookingBlocker[]>();
   for (const userId of ids) {
@@ -71,6 +77,9 @@ export async function bookingBlockers(
   userId: string,
   target: BookingTarget,
   now: Date = new Date(),
+  db: BookingReader = prisma,
 ): Promise<BookingBlocker[]> {
-  return (await bookingBlockersFor([userId], target, now)).get(userId) ?? ['not_eligible'];
+  return (
+    (await bookingBlockersFor([userId], target, now, db)).get(userId) ?? ['not_eligible']
+  );
 }
