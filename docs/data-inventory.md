@@ -277,7 +277,7 @@ A scheduled job (`retention.purge_sweep`, daily) deletes only what no obligation
 
 ### Reference data
 
-- **Tables:** `config.credential_requirements`, `config.credential_types`, `config.facility_types`, `config.lgas`, `config.professional_categories`, `config.public_holidays`, `config.rate_floors`, `config.specialties`, `config.states`
+- **Tables:** `config.credential_requirements`, `config.credential_types`, `config.facility_types`, `config.lgas`, `config.professional_categories`, `config.cadre_levels`, `config.registration_categories`, `config.public_holidays`, `config.rate_floors`, `config.specialties`, `config.states`
 - **Holds:** Professions, credential types, facility types, geography, public holidays, rate floors. Nothing about a person.
 - **Purpose:** The vocabulary the rest of the platform is checked against.
 - **Proposed basis:** Not personal data.

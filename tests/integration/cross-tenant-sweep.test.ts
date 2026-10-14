@@ -275,6 +275,12 @@ const PROBES: Probe[] = [
   { route: 'payout-accounts/[id]/review', method: 'POST', as: 'facility', params: (c) => ({ id: c.payoutAccountId }), body: () => ({ decision: 'verify' }) },
   { route: 'payout-accounts', method: 'GET', as: 'practitioner', query: () => ({}) },
   { route: 'payout-accounts', method: 'GET', as: 'facility', query: () => ({}) },
+  // The lists the level model rests on are compliance's, not a tenant's.
+  { route: 'cadre-levels', method: 'GET', as: 'practitioner', query: () => ({}) },
+  { route: 'cadre-levels', method: 'GET', as: 'facility', query: () => ({}) },
+  { route: 'cadre-levels/[id]/active', method: 'POST', as: 'practitioner', params: (c) => ({ id: c.a.practitionerId }), body: () => ({ active: false }) },
+  { route: 'cadre-levels/[id]/active', method: 'POST', as: 'facility', params: (c) => ({ id: c.a.practitionerId }), body: () => ({ active: false }) },
+  { route: 'registration-categories/[id]/active', method: 'POST', as: 'facility', params: (c) => ({ id: c.a.practitionerId }), body: () => ({ active: false }) },
   { route: 'practitioners/eligibility', method: 'GET', as: 'practitioner', query: (c) => ({ scopeType: 'SELF', scopeId: c.a.practitionerId }) },
   { route: 'practitioners/verification', method: 'GET', as: 'practitioner', query: (c) => ({ scopeType: 'SELF', scopeId: c.a.practitionerId }) },
   { route: 'disputes/[id]', method: 'GET', as: 'practitioner', params: (c) => ({ id: c.disputeId }), query: () => ({}) },

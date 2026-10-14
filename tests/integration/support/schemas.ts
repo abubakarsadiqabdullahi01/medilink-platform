@@ -65,4 +65,9 @@ export const MUTABLE_CONFIG_TABLES = [
   // floor written by one case turned a later file's 5,000-naira shift into a
   // refusal.
   'config.rate_floors',
+  // Levels hang off a profession by id, and the test professions are upserted by a key
+  // that repeats between files, so a level left by one would sit under an unrelated
+  // profession in the next and make it demand a level of every request.
+  'config.cadre_levels',
+  'config.registration_categories',
 ] as const;

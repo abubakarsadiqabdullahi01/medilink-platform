@@ -323,8 +323,48 @@ model ProfessionalCategory {
   credentialRequirements CredentialRequirement[]
   serviceRequests ServiceRequest[]
   practitionerProfiles PractitionerProfile[]
+  cadreLevels CadreLevel[]
 
   @@map("professional_categories")
+  @@schema("config")
+}
+
+// A rung within a profession: house officer, medical officer, registrar, consultant.
+// What the rungs are is the regulators' to say and compliance's to enter (CFG-04); no
+// level ships with the product. `rank` orders them within one profession, 1 the most
+// junior, and is never compared across professions. Retired, not deleted: a level a
+// shift or a practitioner already holds must keep meaning what it meant.
+model CadreLevel {
+  id                     String   @id @default(uuid()) @db.Uuid
+  professionalCategoryId String   @map("professional_category_id") @db.Uuid
+  /// `<profession key>.<slug of the name>`, unique, and what a client names.
+  key                    String   @unique
+  name                   String
+  rank                   Int
+  isActive               Boolean  @default(true) @map("is_active")
+  owner                  String
+  createdAt              DateTime @default(now()) @map("created_at")
+
+  category ProfessionalCategory @relation(fields: [professionalCategoryId], references: [id])
+
+  @@unique([professionalCategoryId, rank])
+  @@map("cadre_levels")
+  @@schema("config")
+}
+
+// How a practitioner stands on the register: full, provisional, intern, post-basic.
+// `supervisionRequired` is what makes the rest of the platform treat somebody on it
+// as supervised: they can be offered only shifts that say supervision is available.
+model RegistrationCategory {
+  id                  String   @id @default(uuid()) @db.Uuid
+  key                 String   @unique
+  name                String
+  supervisionRequired Boolean  @default(false) @map("supervision_required")
+  isActive            Boolean  @default(true) @map("is_active")
+  owner               String
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  @@map("registration_categories")
   @@schema("config")
 }
 

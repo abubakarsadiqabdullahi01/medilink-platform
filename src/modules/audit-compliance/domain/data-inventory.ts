@@ -476,6 +476,8 @@ export const DATA_CATEGORIES: DataCategory[] = [
       'config.facility_types',
       'config.lgas',
       'config.professional_categories',
+      'config.cadre_levels',
+      'config.registration_categories',
       'config.public_holidays',
       'config.rate_floors',
       'config.specialties',

@@ -61,6 +61,8 @@ export const AUDITED_MODELS: Readonly<Record<string, string>> = {
   Invoice: 'billing.invoices',
   Payout: 'billing.payouts',
   PayoutAccount: 'billing.payout_accounts',
+  CadreLevel: 'config.cadre_levels',
+  RegistrationCategory: 'config.registration_categories',
   AgreementVersion: 'consent.agreement_versions',
   ConsentRecord: 'consent.consent_records',
   DataSubjectRequest: 'consent.data_subject_requests',
