@@ -1,4 +1,4 @@
-# Gap reconciliation: all 410 gaps against `main` at `9a93861`
+# Gap reconciliation: all 410 gaps against `main` at `9a93861`, and what changed after it
 
 *Written 14 October 2026 against System Blueprint v3.0 (code read at `5c199c1`) and Module Reference v3.0.*
 
@@ -22,9 +22,9 @@ The Blueprint’s gap register holds **410 gaps**: 119 P0, 225 P1, 66 P2. Since 
 | Priority | Total | Closed | Partial | Open | Not yet reviewed |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | P0 | 119 | 87 | 18 | 14 | 0 |
-| P1 | 225 | 7 | 55 | 163 | 0 |
+| P1 | 225 | 10 | 56 | 159 | 0 |
 | P2 | 66 | 0 | 6 | 60 | 0 |
-| **All** | **410** | **94** | **79** | **237** | **0** |
+| **All** | **410** | **97** | **80** | **233** | **0** |
 
 By area:
 
@@ -37,7 +37,7 @@ By area:
 | Availability (`AVL`) | 1 | 5 | 1 | 7 | 1 | 0 | 6 |
 | Service requests (`REQ`) | 3 | 8 | 1 | 12 | 3 | 4 | 5 |
 | Matching (`MAT`) | 5 | 9 | 2 | 16 | 6 | 2 | 8 |
-| Scheduling (`SCH`) | 2 | 1 | 0 | 3 | 2 | 0 | 1 |
+| Scheduling (`SCH`) | 2 | 1 | 0 | 3 | 2 | 1 | 0 |
 | Attendance (`ATT`) | 2 | 8 | 2 | 12 | 2 | 1 | 9 |
 | Timesheets (`TIM`) | 3 | 9 | 0 | 12 | 2 | 4 | 6 |
 | Rates (`RAT`) | 3 | 13 | 3 | 19 | 4 | 4 | 11 |
@@ -47,17 +47,31 @@ By area:
 | Incidents (`INC`) | 4 | 7 | 2 | 13 | 3 | 0 | 10 |
 | Notifications (`NOT`) | 6 | 6 | 0 | 12 | 5 | 4 | 3 |
 | Audit and compliance (`AUD`) | 5 | 9 | 5 | 19 | 2 | 4 | 13 |
-| Suggestions (`SUG`) | 0 | 2 | 6 | 8 | 0 | 1 | 7 |
+| Suggestions (`SUG`) | 0 | 2 | 6 | 8 | 2 | 1 | 5 |
 | Reference data (`CFG`) | 4 | 8 | 3 | 15 | 0 | 6 | 9 |
 | Platform and operations (`PLT`) | 5 | 11 | 5 | 21 | 1 | 8 | 12 |
 | Practitioner console (`UXP`) | 4 | 7 | 2 | 13 | 3 | 3 | 7 |
 | Facility console (`UXF`) | 7 | 9 | 0 | 16 | 8 | 1 | 7 |
-| Operations console (`UXO`) | 4 | 10 | 0 | 14 | 3 | 3 | 8 |
+| Operations console (`UXO`) | 4 | 10 | 0 | 14 | 4 | 3 | 7 |
 | Public site (`UXW`) | 6 | 4 | 1 | 11 | 4 | 2 | 5 |
 | Accessibility and low bandwidth (`UXA`) | 6 | 7 | 4 | 17 | 6 | 1 | 10 |
 | Quality and delivery (`QAL`) | 3 | 8 | 1 | 12 | 1 | 2 | 9 |
 
-**Reading the numbers.** About three quarters of the P1 and P2 gaps (223 of 291) are still open, which is what one would expect: Phase 0 went after the pilot blockers. The seven P1 gaps that closed were each closed by a P0 fix to the same root cause (the roster’s cancel action, the in-app inbox, the shift type derived from the hours, the roster’s contact window, the payout account reuse check). No P2 gap closed.
+**Reading the numbers.** About three quarters of the P1 and P2 gaps (219 of 291) are still open, which is what one would expect: Phase 0 went after the pilot blockers. Of the 10 P1 gaps that closed, seven were closed by a P0 fix to the same root cause (the roster’s cancel action, the in-app inbox, the shift type derived from the hours, the roster’s contact window, the payout account reuse check) and three by later work on suggestions (SUG-01, SUG-02, UXO-11). No P2 gap closed.
+
+## Changed since `9a93861`
+
+Four commits on this branch after the merge changed the status of these gaps. They are marked in the tables below with the commit; the counts above include them.
+
+| Gap | Pri | Was | Is | Commit |
+| --- | --- | --- | --- | --- |
+| NOT-02 | P0 | PARTIAL | PARTIAL | `fd6faa8` |
+| UXW-02 | P0 | PARTIAL | PARTIAL | `fd6faa8` |
+| FAC-06 | P1 | PARTIAL | PARTIAL | `0040f00` |
+| SCH-01 | P1 | OPEN | PARTIAL | `064b1b7` |
+| SUG-01 | P1 | OPEN | CLOSED | `cdabc54` |
+| SUG-02 | P1 | OPEN | CLOSED | `cdabc54` |
+| UXO-11 | P1 | OPEN | CLOSED | `cdabc54` |
 
 ## By area
 
@@ -163,7 +177,7 @@ Gap text is shortened; the full text and the evidence at `5c199c1` are in the Bl
 | FAC-03 | P0 | PARTIAL | **A self-registered, unverified facility's owner holds facility_owner immediately**, including the ability to create drafts and look up users by… | Not done: An unverified facility's owner can still create drafts. Gating more of a facility's permissions on verification changes the onboarding flow and wants a decision. |
 | FAC-04 | P0 | CLOSED | CAC number is not normalised at self-registration, so someone can squat another hospital's number in a different spelling, and a duplicate is not… | `3008e5c` |
 | FAC-05 | P0 | CLOSED | **CAC is mandatory**, but government hospitals and primary health centres — most of the facilities in Gombe — have no CAC number. They cannot… | `5551d16` |
-| FAC-06 | P1 | PARTIAL | No suspend action and no licence-expiry sweep. | src/modules/matching/application/match.ts:88-89, assignment.ts:142,593 (54edb3a); src/worker/jobs.ts:42-120… — Lapsed facility now blocked at match, invite and confirm (54edb3a). Still no suspend action, no licence-expiry sweep, and register screen takes no expiry date. |
+| FAC-06 | P1 | PARTIAL | No suspend action and no licence-expiry sweep. | (after 9a93861, `0040f00`) A daily facility.licence_sweep now tells a verified facility's people a month ahead, in the last week and once on lapse (0040f00). Still no suspend action and the register screen still gives no guidance |
 | FAC-07 | P1 | PARTIAL | No facility profile page: no edit screen, no licence upload, no representative change. | src/app/facility/profile/page.tsx (4e578fc); src/modules/facilities/application/facility.ts:430,496-497 — Profile screen with licence upload exists. No representative change; renaming a verified facility via API still needs no review (only licence edits reset). |
 | FAC-08 | P1 | OPEN | Only one representative exists and it is immutable; it is the sole recipient of confirmation messages. | src/modules/notifications/application/handlers.ts:70,99-102 — Confirmation messages still go only to the single immutable representativeUserId; no representative change, other owners and admins not told. |
 | FAC-09 | P1 | PARTIAL | Nobody is told a facility was verified or rejected (facility.verified has no handler; rejection emits no event). | src/modules/notifications/application/event-handlers.ts:183-203; src/worker/handlers.ts:60 (a7a49c7);… — facility.verified now texts the representative. Rejection still publishes no event and nobody is told. |
@@ -230,7 +244,7 @@ Gap text is shortened; the full text and the evidence at `5c199c1` are in the Bl
 | --- | --- | --- | --- | --- |
 | SCH-02 | P0 | CLOSED | **No shift reminder and no early no-show detection.** A no-show is flagged only by the hourly sweep after the shift ends, so an urgent shift cannot… | `ed67c35` |
 | SCH-03 | P0 | CLOSED | Public holidays: six fixed 2026 dates only; none for 2027; no state holidays; not used by scheduling. Display is Africa/Lagos, but the confirmation… | `eab6cb1` |
-| SCH-01 | P1 | OPEN † | No calendar, recurrence, rota template, shift swap, rescheduling or replacement request; no calendar export. | src/modules/scheduling/routes.ts:13 (empty ROUTES); src/modules/scheduling/application (empty) — No calendar, recurrence, rota, swap, rescheduling, replacement request or calendar export found anywhere in src. |
+| SCH-01 | P1 | PARTIAL | No calendar, recurrence, rota template, shift swap, rescheduling or replacement request; no calendar export. | (after 9a93861, `064b1b7`) A day-by-day agenda for the practitioner, and for the facility within a page (064b1b7). Still no recurrence, rota template, swap, rescheduling, replacement request or calendar export |
 
 ### Attendance (`ATT`)
 
@@ -395,7 +409,7 @@ Gap text is shortened; the full text and the evidence at `5c199c1` are in the Bl
 | ID | Pri | Mark | Gap | Evidence and what remains |
 | --- | --- | --- | --- | --- |
 | NOT-01 | P0 | PARTIAL | **Offers, acceptances, cancellations, reminders, verification decisions and expiry warnings send no message.** Only assignment.confirmed has a… | Not done: Nothing has reached a real phone: see NOT-02. Password reset and resend keep the generic answer on a gateway failure, deliberately, so a 503 does not reveal which… |
-| NOT-02 | P0 | PARTIAL | No SMS gateway is implemented, so no one-time code or confirmation can reach a real phone. There is no second provider, no failover and no delivery… | Not done: **Never run against either provider.** There is no account here. Send a real code to a real phone before relying on one. No delivery receipts, no failover to a second… |
+| NOT-02 | P0 | PARTIAL | No SMS gateway is implemented, so no one-time code or confirmation can reach a real phone. There is no second provider, no failover and no delivery… | (after 9a93861, `fd6faa8`) Failover to a second gateway (SMS_FALLBACK_*, off unless set) and delivery reports for Africa's Talking (fd6faa8). Still never run against either provider; no Termii report endpoint; no automatic resend after a reported failure |
 | NOT-03 | P0 | CLOSED | A failed text is recorded as handled and never retried. The handler returns normally, the event becomes PROCESSED, and the duplicate check counts… | `a1c6576`, `bd278ee` |
 | NOT-04 | P0 | CLOSED | A failed code SMS is hidden: the result is ignored and the API answers "code sent". A person waits for a text that was never sent. | `a1c6576`, `bd278ee` |
 | NOT-05 | P0 | CLOSED | Confirmation times are printed in UTC, an hour behind Nigerian time. The rest of the product uses Lagos time. | `a1c6576`, `bd278ee` |
@@ -435,8 +449,8 @@ Gap text is shortened; the full text and the evidence at `5c199c1` are in the Bl
 
 | ID | Pri | Mark | Gap | Evidence and what remains |
 | --- | --- | --- | --- | --- |
-| SUG-01 | P1 | OPEN † | The writer cannot read the status or the response of their own suggestion, though the dialog promises a reply. | src/modules/suggestions/routes.ts:19-24; src/app/api/v1/suggestions/route.ts:35-40;… — List and triage remain PLATFORM-only; no route or screen lets the writer see status or response. Dialog still promises a reply. |
-| SUG-02 | P1 | OPEN † | Nobody is told when a suggestion is answered. | src/modules/suggestions/application/suggestion.ts:158-196; src/lib/events.ts (no suggestion event) — triageSuggestion writes status, response and audit only; no event published and no notification handler. Nobody is told when answered. |
+| SUG-01 | P1 | CLOSED | The writer cannot read the status or the response of their own suggestion, though the dialog promises a reply. | (after 9a93861, `cdabc54`) GET /api/v1/me/suggestions and a "Yours" tab in the suggestion dialog: status and the answer, keyed by the author, no officer named, no decline reason |
+| SUG-02 | P1 | CLOSED | Nobody is told when a suggestion is answered. | (after 9a93861, `cdabc54`) triage to planned, done or declined publishes suggestion.answered; the author is texted which, once per answer, retried if it does not go |
 | SUG-03 | P2 | OPEN † | Only text, area and person are captured; no role, screen or facility (the facility id is used for scope only). | src/modules/suggestions/application/suggestion.ts:73-103;… — Submit still stores only area, body and author. facilityId in the request is used for scope only; no role, screen or facility captured. |
 | SUG-04 | P2 | OPEN | One area of nine values, not tags by module; no status-history table. | prisma/schema.prisma:1821-1851; src/modules/suggestions/presentation/schemas.ts:8-18 — Suggestion model untouched: single nine-value area, no tags, no status-history table. |
 | SUG-05 | P2 | OPEN † | No weekly review that sets suggestions beside the dispute log and refused excusals; the summary covers suggestions only. | src/modules/suggestions/application/suggestion.ts:290-307 — suggestionsByArea still the only summary; nothing sets suggestions beside the dispute log or refused excusals. No weekly review. |
@@ -543,7 +557,7 @@ Gap text is shortened; the full text and the evidence at `5c199c1` are in the Bl
 | UXO-08 | P1 | OPEN † | None of the spec's first-month signals are shown: fill rate against the 70% gate for a second state, time from publish to confirmed, time from… | src/modules/audit-compliance/application/platform-summary.ts:35-43 — No fill-rate gate, publish-to-confirmed, approval-to-paid, verification turnaround or repeat-use signal anywhere in src; summary file untouched. |
 | UXO-09 | P1 | PARTIAL | Disputes: the evidence tab is view-only, there is no facility response, no target resolution time or escalation, and no "amount at stake". | src/app/admin/disputes/dispute-detail.tsx:323-403; src/app/facility/disputes/page.tsx:191-316 — Facility can now add evidence from its own screen. Operator evidence tab still view-only; no target time, escalation or amount at stake. |
 | UXO-10 | P1 | OPEN † | Closing an incident with a suspension notifies nobody, there is no direct suspend, and "refer to the regulator" records no regulator or reference. | src/app/admin/incidents/incident-detail.tsx:60-67; src/modules/clinical-incidents/application/incident.ts:205 — Closing with suspension still notifies nobody (only the reported event is handled); no direct suspend; regulator referral records no regulator or reference. |
-| UXO-11 | P1 | OPEN † | Suggestions: the response is saved but the author has no screen to read it, so the spec's "status visible to the person who submitted it" is not met. | src/app/api/v1/suggestions/route.ts:21,37; src/app/admin/suggestions/suggestion-detail.tsx:105-107 — Only triagers can list suggestions; no author-facing screen or message shows the response or status to the person who submitted it. |
+| UXO-11 | P1 | CLOSED | Suggestions: the response is saved but the author has no screen to read it, so the spec's "status visible to the person who submitted it" is not met. | (after 9a93861, `cdabc54`) the author now has a screen: "Yours" in the suggestion dialog shows status and the answer |
 | UXO-12 | P1 | OPEN | Access to /admin is checked only in the browser, and the menu filter ignores scope. | src/lib/ui/session.tsx:120-125; src/components/app/console-shell.tsx:111-118; src/app/admin/layout.tsx — No middleware or server redirect for /admin; menu still filters on flat permission names ignoring scope. |
 | UXO-13 | P1 | OPEN † | Excusals are decided by a platform officer, not by the facility the practitioner asked, and a facility that habitually refuses is not visible to… | src/app/api/v1/excusals/[id]/decide/route.ts:20; src/app/admin/unhonoured/unhonoured-detail.tsx:348 — Excusals still decided by a platform officer (sanction.apply, PLATFORM); no facility decision and no facility refusal-rate view. |
 | UXO-14 | P1 | OPEN † | No sanction ladder (warning, pause, removal), no appeal, and no facility reliability view. | src/app/admin/unhonoured/unhonoured-detail.tsx:56-70 — Only three fault findings; no warning-pause-removal ladder, appeal or facility reliability view. New /admin/sanctions is a screening list, not conduct… |
@@ -553,7 +567,7 @@ Gap text is shortened; the full text and the evidence at `5c199c1` are in the Bl
 | ID | Pri | Mark | Gap | Evidence and what remains |
 | --- | --- | --- | --- | --- |
 | UXW-01 | P0 | CLOSED | No forgot-password screen. A locked-out user is told to reset and cannot. | `8f1c972` |
-| UXW-02 | P0 | PARTIAL | One-time codes cannot be delivered outside a developer machine: the real SMS adapters throw and the working one is refused in staging and production.… | Not done: **Never run against either provider.** There is no account here. Send a real code to a real phone before relying on one. No delivery receipts, no failover to a second… |
+| UXW-02 | P0 | PARTIAL | One-time codes cannot be delivered outside a developer machine: the real SMS adapters throw and the working one is refused in staging and production.… | (after 9a93861, `fd6faa8`) Failover and delivery reports as for NOT-02 (fd6faa8). Still never run against a provider, and the gateway is not chosen (D04) |
 | UXW-03 | P0 | CLOSED | No contact surface at all: no phone, WhatsApp, email, help or FAQ on the landing page, login, register, footer or consoles. The spec makes a staffed… | `ede2f62` |
 | UXW-04 | P0 | CLOSED | No public Terms of use or Privacy notice, and the sign-up form links to neither and records no acceptance. Terms are shown only inside consoles after… | `ede2f62` |
 | UXW-05 | P0 | CLOSED | The login page tells visitors "Locally, seed-demo.ts creates every demo account… See docs/interfaces.md." | `8f1c972` |

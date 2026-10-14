@@ -9,7 +9,7 @@
 | Version | What changed |
 | --- | --- |
 | v1.0 | The plan as first written, against `main` at `6a2ce43`. |
-| v1.1 | Re-baselined to `9a93861`, which carries the Phase 0 work (87 of the 119 P0 gaps fixed, 18 fixed in part, 14 not done). Section 5 lists what that closed; Section 7 carries an evidence column; task marks in Sections 8 and 9 say what is done, partly done or open; G0 in Section 12 records the evidence. **No module status was promoted**: promotion needs the sign-offs in Section 3, and none has been given. The full gap-by-gap reconciliation of all 410 gaps is in [Gap-Reconciliation.md](Gap-Reconciliation.md): **94 closed, 79 partly closed, 237 open** (P0: 87, 18 and 14; P1: 7, 55 and 163; P2: 0, 6 and 60). The P1 and P2 marks are one reading of the code and were not tested. |
+| v1.1 | Re-baselined to `9a93861`, which carries the Phase 0 work (87 of the 119 P0 gaps fixed, 18 fixed in part, 14 not done). Section 5 lists what that closed; Section 7 carries an evidence column; task marks in Sections 8 and 9 say what is done, partly done or open; G0 in Section 12 records the evidence. **No module status was promoted**: promotion needs the sign-offs in Section 3, and none has been given. The full gap-by-gap reconciliation of all 410 gaps is in [Gap-Reconciliation.md](Gap-Reconciliation.md): **97 closed, 80 partly closed, 233 open** (P0: 87, 18 and 14; P1: 10, 56 and 159; P2: 0, 6 and 60; the P1 changes after `9a93861` are listed in that file). The P1 and P2 marks are one reading of the code and were not tested. |
 
 ---
 
@@ -178,7 +178,7 @@ Pull request 1 merged 71 commits. Each fix was written test-first; the record of
 | Platform | `PLT-03` stranded events reclaimed; `PLT-01`, `PLT-04` in part | `434d1ea` |
 | Readability | `UXA-01`, `UXA-02`, `UXA-03`, `UXA-04`, `UXA-06`, `UXA-08` | `6708bb6`, `3dfbfbb`, `7f83e8e` |
 
-**The register as a whole** (410 gaps, in [Gap-Reconciliation.md](Gap-Reconciliation.md)): 94 closed, 79 partly closed, 237 open. The P1 and P2 gaps (291) were not tracked during Phase 0 and were judged afterwards by reading the code; 223 of them are still open.
+**The register as a whole** (410 gaps, in [Gap-Reconciliation.md](Gap-Reconciliation.md)): 97 closed, 80 partly closed, 233 open. The P1 and P2 gaps (291) were not tracked during Phase 0 and were judged afterwards by reading the code; 219 of them are still open.
 
 **Not closed, and why.** Fourteen P0 gaps remain open and each needs something from outside engineering: `BIL-13` and `BIL-09` (the legal role, the provider, the fee and credit-note decisions), `AUD-05` (counsel and the regulator), `CRE-01`, `CRE-02`, `CFG-01`, `CFG-03`, `UXP-03`, `QAL-06` (the regulators’ requirements for each profession), `UXW-06` (a commercial statement), `INC-02` (a policy), `PLT-02`, `PLT-05`, `QAL-02` (an environment to deploy to, a restored backup, a staging site). Eighteen more are fixed in part.
 
