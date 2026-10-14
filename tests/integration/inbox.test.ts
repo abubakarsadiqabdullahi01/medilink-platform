@@ -6,9 +6,7 @@ vi.mock('next/headers', async () => {
 });
 
 const sms = vi.hoisted(() => ({ send: vi.fn() }));
-vi.mock('@/lib/sms', () => ({
-  trySendSms: (message: { to: string; body: string }) => sms.send(message),
-}));
+vi.mock('@/lib/sms', async () => (await import('./support/sms-double')).gatewayDouble(sms.send));
 
 import { prisma } from '@/lib/db';
 import { GET as getInbox } from '@/app/api/v1/me/notifications/route';
@@ -54,7 +52,7 @@ describe('what is in the inbox', () => {
 
     const outcome = await tell(user.id, 'You have a new offer.');
 
-    expect(outcome).toBe('failed');
+    expect(outcome.sent).toBe(false);
     const inbox = await listInbox(user.id);
     expect(inbox.items).toHaveLength(1);
     expect(inbox.items[0]!.body).toBe('You have a new offer.');

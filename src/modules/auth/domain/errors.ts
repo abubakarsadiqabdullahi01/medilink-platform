@@ -54,11 +54,17 @@ export const AuthErrors = {
       403,
     ),
 
-  smsUnavailable: () =>
+  /**
+   * The gateway did not take the message. Said plainly, because the other
+   * answer — "code sent" — leaves a person staring at a phone that will never
+   * ring. 503, not 4xx: nothing they typed is wrong.
+   */
+  smsNotDelivered: () =>
     new AuthError(
-      'sms_unavailable',
-      'We could not send the code to your phone just now. Try again in a minute.',
+      'sms_not_delivered',
+      'We could not send the code just now. Wait a minute and try again, or call us if it keeps happening.',
       503,
+      60,
     ),
 
   otpInvalid: () => new AuthError('otp_invalid', 'That code is not correct.', 400),

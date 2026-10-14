@@ -1,7 +1,7 @@
 import { prisma } from '@/lib/db';
 import { usersHoldingFacilityPermission } from '@/modules/auth/application/grants';
-import { alreadyNotified, notify, type NotifyOutcome } from './notify';
-import { failIfAnyFailed, formatShift } from './handlers';
+import { notify, requireDelivered, type NotifyOutcome } from './notify';
+import { alreadyNotified, formatShift } from './handlers';
 
 /**
  * Two things nobody was told about until it was too late: a licence about to
@@ -78,8 +78,8 @@ export async function warnExpiringCredentials(now: Date = new Date()): Promise<n
     );
   }
 
-  failIfAnyFailed(outcomes, 'the expiry warnings');
-  return outcomes.filter((outcome) => outcome === 'sent').length;
+  requireDelivered(outcomes);
+  return outcomes.filter((outcome) => outcome.sent).length;
 }
 
 /**
@@ -120,7 +120,7 @@ export async function remindUnapprovedTimesheets(now: Date = new Date()): Promis
     const kind = `timesheet.reminder_${stage}`;
     const days = Math.floor(hoursWaiting / 24);
     const facilityName = assignment.serviceRequest.facility.name;
-    const when = formatShift(assignment.startsAt.toISOString(), assignment.endsAt.toISOString());
+    const when = formatShift(assignment.startsAt, assignment.endsAt);
 
     for (const approver of await usersHoldingFacilityPermission(assignment.facilityId, 'timesheet.approve')) {
       if (await alreadyNotified(approver.id, kind, record.assignmentId)) continue;
@@ -148,6 +148,6 @@ export async function remindUnapprovedTimesheets(now: Date = new Date()): Promis
     }
   }
 
-  failIfAnyFailed(outcomes, 'the approval reminders');
-  return outcomes.filter((outcome) => outcome === 'sent').length;
+  requireDelivered(outcomes);
+  return outcomes.filter((outcome) => outcome.sent).length;
 }

@@ -284,7 +284,10 @@ describe('opening a case', () => {
     await approved(world);
 
     // The officer holds dispute.manage at PLATFORM and still cannot open a
-    // case: one nobody involved wanted is not a dispute, it is an audit.
+    // case: one nobody involved wanted is not a dispute, it is an audit. And the
+    // answer is "not found", not a list of what is wrong with the shift: it used
+    // to be a 409 naming the blockers, which confirmed to an outsider that the
+    // shift exists and what state it was in (AUT-10).
     await expect(
       raiseDispute({
         assignmentId: world.assignmentId,
@@ -292,7 +295,7 @@ describe('opening a case', () => {
         category: 'HOURS',
         reason: COMPLAINT,
       }),
-    ).rejects.toThrow(/not_a_party/);
+    ).rejects.toMatchObject({ code: 'assignment_not_found', status: 404 });
   });
 
   it('tells a facility that has nothing to do with the shift that there is no such shift, not why it was refused', async () => {
@@ -308,10 +311,7 @@ describe('opening a case', () => {
         category: 'HOURS',
         reason: COMPLAINT,
       }),
-      // Not "not a party, not yet decided, already open": that told a stranger the
-      // state of somebody else's shift. The answer is the one an id that does not
-      // exist would get.
-    ).rejects.toThrow(/does not exist/);
+    ).rejects.toMatchObject({ code: 'assignment_not_found', status: 404 });
   });
 
   it('refuses a shift nobody has decided yet', async () => {

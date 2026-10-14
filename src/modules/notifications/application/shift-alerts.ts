@@ -1,7 +1,7 @@
 import { prisma } from '@/lib/db';
 import { initialsOf } from '@/lib/names';
-import { alreadyNotified, notify, type NotifyOutcome } from './notify';
-import { failIfAnyFailed, formatShift } from './handlers';
+import { notify, requireDelivered, type NotifyOutcome } from './notify';
+import { alreadyNotified, formatShift } from './handlers';
 
 /**
  * Two things that used to be noticed only afterwards: that a shift is about to
@@ -56,7 +56,7 @@ export async function sendShiftReminders(now: Date = new Date()): Promise<number
   for (const assignment of due) {
     if (await alreadyNotified(assignment.userId, 'shift.reminder', assignment.id)) continue;
 
-    const when = formatShift(assignment.startsAt.toISOString(), assignment.endsAt.toISOString());
+    const when = formatShift(assignment.startsAt, assignment.endsAt);
     outcomes.push(
       await notify({
         userId: assignment.userId,
@@ -68,8 +68,8 @@ export async function sendShiftReminders(now: Date = new Date()): Promise<number
     );
   }
 
-  failIfAnyFailed(outcomes, 'the shift reminders');
-  return outcomes.filter((outcome) => outcome === 'sent').length;
+  requireDelivered(outcomes);
+  return outcomes.filter((outcome) => outcome.sent).length;
 }
 
 /**
@@ -104,7 +104,7 @@ export async function alertShiftsNotCheckedIn(now: Date = new Date()): Promise<n
   const outcomes: NotifyOutcome[] = [];
   for (const assignment of waiting) {
     const { facility } = assignment.serviceRequest;
-    const when = formatShift(assignment.startsAt.toISOString(), assignment.endsAt.toISOString());
+    const when = formatShift(assignment.startsAt, assignment.endsAt);
 
     if (!(await alreadyNotified(assignment.userId, 'shift.not_checked_in', assignment.id))) {
       outcomes.push(
@@ -131,6 +131,6 @@ export async function alertShiftsNotCheckedIn(now: Date = new Date()): Promise<n
     }
   }
 
-  failIfAnyFailed(outcomes, 'the not-checked-in alerts');
-  return outcomes.filter((outcome) => outcome === 'sent').length;
+  requireDelivered(outcomes);
+  return outcomes.filter((outcome) => outcome.sent).length;
 }

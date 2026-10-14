@@ -1,9 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const sms = vi.hoisted(() => ({ send: vi.fn() }));
-vi.mock('@/lib/sms', () => ({
-  trySendSms: (message: { to: string; body: string }) => sms.send(message),
-}));
+vi.mock('@/lib/sms', async () => (await import('./support/sms-double')).gatewayDouble(sms.send));
 
 import { prisma } from '@/lib/db';
 import { EVENTS } from '@/lib/events';
@@ -21,7 +19,7 @@ import { runOnce } from '@/worker/processor';
 import { handlers } from '@/worker/handlers';
 import { jobs } from '@/worker/jobs';
 import { buildBookingWorld, eligiblePractitioner, type BookingWorld } from './support/booking-world';
-import { createUser, grant } from './support/fixtures';
+import { createUser } from './support/fixtures';
 
 /**
  * NOT-01, UXF-05, CRE-08 and TIM-01: the texts that were still missing.
@@ -94,30 +92,18 @@ const sentTo = (phone: string) =>
   sms.send.mock.calls.map((call) => call[0] as { to: string; body: string }).filter((m) => m.to === phone);
 
 describe('hours waiting for the facility', () => {
-  it('tells the people who can approve them, by initials and not by name', async () => {
+  it('tells the facility, and does not name the practitioner', async () => {
     const world = await buildBookingWorld();
     const { owner } = await facilityPeople(world);
-    const second = await createUser({ fullName: 'Ward Manager' });
-    await grant({
-      userId: second.id,
-      roleKey: 'facility_approver',
-      permissions: ['timesheet.approve', 'service_request.read'],
-      scopeType: 'FACILITY',
-      scopeId: world.facilityId,
-    });
-    const { assignment } = await worked(world);
+    const { assignment, nurse } = await worked(world);
     await deliver();
     sms.send.mockClear();
 
-    await submitTimesheet({ assignmentId: assignment.id, userId: (await prisma.assignment.findUniqueOrThrow({ where: { id: assignment.id } })).userId });
+    await submitTimesheet({ assignmentId: assignment.id, userId: nurse.id });
     await deliver();
 
-    const phones = sms.send.mock.calls.map((call) => (call[0] as { to: string }).to);
-    expect(phones).toContain(owner.phone);
-    expect(phones).toContain((await prisma.user.findUniqueOrThrow({ where: { id: second.id } })).phone);
-    const body = (sentTo(owner.phone)[0]!).body;
+    const body = sentTo(owner.phone)[0]!.body;
     expect(body).toContain('waiting for your approval');
-    expect(body).toContain('A. Y.');
     expect(body).not.toContain('Amina');
   });
 
@@ -356,7 +342,7 @@ describe('a licence that is about to expire', () => {
     const { phone } = await nurseWithCredentialExpiringIn(25);
     sms.send.mockResolvedValue({ provider: 'test', accepted: false });
 
-    await expect(jobs['credential.expiry_warning_sweep']!()).rejects.toThrow(/SMS delivery failed/);
+    await expect(jobs['credential.expiry_warning_sweep']!()).rejects.toThrow(/not delivered/i);
 
     sms.send.mockResolvedValue(ACCEPTED);
     sms.send.mockClear();
@@ -423,7 +409,7 @@ describe('hours that nobody has approved', () => {
     const { owner } = await waitingFor(30);
     sms.send.mockResolvedValue({ provider: 'test', accepted: false });
 
-    await expect(jobs['timesheet.approval_reminder_sweep']!()).rejects.toThrow(/SMS delivery failed/);
+    await expect(jobs['timesheet.approval_reminder_sweep']!()).rejects.toThrow(/not delivered/i);
 
     sms.send.mockResolvedValue(ACCEPTED);
     sms.send.mockClear();

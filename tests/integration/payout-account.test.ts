@@ -8,9 +8,7 @@ vi.mock('next/headers', async () => {
 });
 
 const sms = vi.hoisted(() => ({ send: vi.fn() }));
-vi.mock('@/lib/sms', () => ({
-  trySendSms: (message: { to: string; body: string }) => sms.send(message),
-}));
+vi.mock('@/lib/sms', async () => (await import('./support/sms-double')).gatewayDouble(sms.send));
 
 import { prisma } from '@/lib/db';
 import { GET as getMine, POST as postMine } from '@/app/api/v1/me/payout-account/route';

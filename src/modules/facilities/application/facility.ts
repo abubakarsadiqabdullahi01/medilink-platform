@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma, type Tx } from '@/lib/db';
 import { env } from '@/lib/env';
 import { recordAudit } from '@/lib/audit';
+import { loadGrants } from '@/lib/authz/guard';
 import { publishEvent } from '@/lib/outbox';
 import { EVENTS } from '@/lib/events';
 import { createDownloadUrl, createUploadUrl, headObject } from '@/lib/storage/tigris';
@@ -275,6 +276,65 @@ export async function createFacility(input: CreateFacilityParams): Promise<Facil
     }
     throw error;
   }
+}
+
+/**
+ * Whether this facility may add people to itself, and look people up to do so.
+ *
+ * Registering a facility makes the registrant its owner at once, and the owner's
+ * bundle carries `role.grant` — which includes finding any registered user by
+ * phone number. The permission guard proves permission and scope and never asks
+ * what state the facility is in, so until a facility had been verified its
+ * owner, who had proved nothing to anybody, held a directory search over every
+ * practitioner on the platform (AUT-07).
+ *
+ * `VERIFIED` and nothing else: a facility that is pending, rejected or
+ * suspended has not been checked against its registration. A licence out of date
+ * does not stop it — publishing shifts needs that (`canPublish`), but the
+ * owner of a verified hospital managing their own staff does not.
+ *
+ * "No such facility" gets the same answer as "not verified". The caller's grant
+ * has already been proved by the time this runs, so there is nothing to hide and
+ * nothing to gain from telling the two apart.
+ */
+export async function assertFacilityVerified(facilityId: string): Promise<void> {
+  const facility = await prisma.facility.findFirst({
+    where: { id: facilityId, deletedAt: null },
+    select: { status: true },
+  });
+  if (!facility || facility.status !== 'VERIFIED')
+    throw FacilityErrors.staffNeedsVerifiedFacility();
+}
+
+/**
+ * The route-level form of the above, for a caller the guard has already
+ * approved to give out `role.grant` over `scope`.
+ *
+ * It is a limit on authority that comes *from the facility*: the owner's own
+ * grant, made at registration and never checked by anybody. Somebody who holds
+ * `role.grant` at the platform has been given it by the platform, is the one who
+ * does the verifying, and may add people to a hospital still being onboarded —
+ * that is a step-up-protected, audited act of operations rather than the
+ * facility reaching for itself. So the question is where the caller's authority
+ * comes from, not which scope they named.
+ *
+ * Only a facility scope is checked. Any other scope a facility owner could name
+ * is refused earlier by the guard: their grant is for the facility, and the
+ * facility is an ancestor of nothing else they could name.
+ */
+export async function assertScopeMayAddStaff(
+  scope: { type: string; id?: string },
+  actorId: string,
+): Promise<void> {
+  if (scope.type !== 'FACILITY' || !scope.id) return;
+
+  const grants = await loadGrants(actorId);
+  const grantedByThePlatform = grants.some(
+    (grant) => grant.permission === 'role.grant' && grant.scopeType === 'PLATFORM',
+  );
+  if (grantedByThePlatform) return;
+
+  await assertFacilityVerified(scope.id);
 }
 
 export async function getFacility(facilityId: string): Promise<FacilityView> {

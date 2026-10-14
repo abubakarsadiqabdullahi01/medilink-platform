@@ -72,13 +72,16 @@ export async function startRegistration(
     // A fully registered account gets a code anyway, so the caller learns
     // nothing, but the code is a login code rather than a verification one.
     const purpose = existing.phoneVerifiedAt && existing.passwordHash ? 'LOGIN' : 'PHONE_VERIFICATION';
-    const { expiresAt } = await issueOtp({
+    const { expiresAt, delivered } = await issueOtp({
       userId: existing.id,
       phone,
       purpose,
       ipAddress: input.ipAddress,
       now,
     });
+    // Same answer for a new and an existing number, so saying the text failed
+    // reveals nothing: both paths try to send.
+    if (!delivered) throw AuthErrors.smsNotDelivered();
     return { userId: existing.id, phone, expiresAt, existing: true };
   }
 
@@ -115,13 +118,16 @@ export async function startRegistration(
     return created;
   });
 
-  const { expiresAt } = await issueOtp({
+  const { expiresAt, delivered } = await issueOtp({
     userId: user.id,
     phone,
     purpose: 'PHONE_VERIFICATION',
     ipAddress: input.ipAddress,
     now,
   });
+  // The account exists and the code is on record, so asking again goes through
+  // the "existing number" branch above and sends a fresh one.
+  if (!delivered) throw AuthErrors.smsNotDelivered();
 
   return { userId: user.id, phone, expiresAt, existing: false };
 }

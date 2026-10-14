@@ -447,16 +447,16 @@ export async function reviewCredential(
       });
     }
 
-    // Every decision is an event, because every decision is something the
-    // practitioner has to hear about: they found out a licence had been queried
-    // or refused only by opening the app. The notes stay on the audit row and in
+    // Every decision is an event, so the practitioner is told what an officer
+    // decided about their document (CRE-07). The audit row above is the record;
+    // the event is what reaches a person. The notes stay on the audit row and in
     // the app; the event carries no free text.
     await publishEvent(tx, {
-      eventType: approved
-        ? EVENTS.CredentialVerified
-        : input.decision === 'reject'
-          ? EVENTS.CredentialRejected
-          : EVENTS.CredentialInfoRequested,
+      eventType: {
+        approve: EVENTS.CredentialVerified,
+        reject: EVENTS.CredentialRejected,
+        request_info: EVENTS.CredentialInfoRequested,
+      }[input.decision],
       aggregateType: 'credentials.credential_submissions',
       aggregateId: updated.id,
       payload: {

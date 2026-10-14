@@ -3,7 +3,6 @@ import { normalizeNigerianPhone } from '@/lib/phone';
 import { handleAuthRequest } from '@/modules/auth/presentation/handler';
 import { resendSchema } from '@/modules/auth/presentation/schemas';
 import { issueOtp } from '@/modules/auth/application/otp-service';
-import { AuthError } from '@/modules/auth/domain/errors';
 
 /**
  * POST /api/v1/auth/resend-code
@@ -28,20 +27,12 @@ export async function POST(request: Request) {
         user.status !== 'SUSPENDED' &&
         user.status !== 'DEACTIVATED'
       ) {
-        try {
-          await issueOtp({
-            userId: user.id,
-            phone,
-            purpose: input.purpose,
-            ipAddress: context.ipAddress,
-          });
-        } catch (error) {
-          // A gateway that is down would otherwise answer 503 for a registered
-          // number and 202 for an unknown one, which tells anybody asking which
-          // numbers have accounts. The failure is audited and logged by
-          // issueOtp; everything else (throttling included) still propagates.
-          if (!(error instanceof AuthError) || error.code !== 'sms_unavailable') throw error;
-        }
+        await issueOtp({
+          userId: user.id,
+          phone,
+          purpose: input.purpose,
+          ipAddress: context.ipAddress,
+        });
       }
 
       return { status: 'code_sent_if_registered' };

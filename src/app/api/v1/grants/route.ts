@@ -1,10 +1,8 @@
 import { handleGuardedRequest } from '@/lib/http/guarded-handler';
-import {
-  grantRoleSchema,
-  listGrantsSchema,
-} from '@/modules/auth/presentation/grant-schemas';
+import { grantRoleSchema, listGrantsSchema } from '@/modules/auth/presentation/grant-schemas';
 import { loadGrants, type Grant } from '@/lib/authz/guard';
 import { grantRole, listGrants, grantableRoles } from '@/modules/auth/application/grants';
+import { assertScopeMayAddStaff } from '@/modules/facilities/application/facility';
 
 /**
  * POST /api/v1/grants — give somebody a role over a scope.
@@ -15,6 +13,11 @@ import { grantRole, listGrants, grantableRoles } from '@/modules/auth/applicatio
  *
  * `role.grant` requires step-up authentication, which the guard enforces —
  * it is the permission that decides what everybody else may do.
+ *
+ * A facility may add people only once it is verified (AUT-07): the guard proves
+ * the permission and the scope, and neither says anything about whether the
+ * facility has been checked. Run after the guard, so the answer is only ever
+ * given to somebody who held the permission.
  */
 export async function POST(request: Request) {
   return handleGuardedRequest(request, {
@@ -22,8 +25,9 @@ export async function POST(request: Request) {
     schema: grantRoleSchema,
     permission: 'role.grant',
     scope: (input) => ({ type: input.scopeType, id: input.scopeId }),
-    action: async ({ input, session }) =>
-      grantRole({
+    action: async ({ input, session }) => {
+      await assertScopeMayAddStaff({ type: input.scopeType, id: input.scopeId }, session.userId);
+      return grantRole({
         userId: input.userId,
         roleKey: input.roleKey,
         scopeType: input.scopeType,
@@ -32,8 +36,11 @@ export async function POST(request: Request) {
         // The escalation check: nobody can grant what they do not hold. The
         // session carries only an id, so the grants are loaded here — the
         // same list the guard itself resolves against.
-        actorPermissions: (await loadGrants(session.userId)).map((grant: Grant) => grant.permission),
-      }),
+        actorPermissions: (await loadGrants(session.userId)).map(
+          (grant: Grant) => grant.permission,
+        ),
+      });
+    },
   });
 }
 

@@ -1,0 +1,9 @@
+version: 2
+
+secret:
+  ignored_matches:
+    # A test fixture, not a credential: the first-administrator test hands this
+    # string to the password policy to prove that a password containing the
+    # person's own phone number is refused (tests/integration/first-administrator.test.ts).
+    - name: Weak-password fixture in the first-administrator test
+      match: Hadiza-0803-555-0101-ok

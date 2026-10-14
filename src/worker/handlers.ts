@@ -5,18 +5,26 @@ import { screenPractitioner } from '../modules/practitioners/application/screeni
 import {
   notifyAssignmentCancelled,
   notifyAssignmentConfirmed,
-  notifyCredentialDecision,
-  notifyDisputeEvent,
+  notifyDisputeStage,
   notifyIncidentReported,
   notifyInvoiceIssued,
   notifyPayoutAccountReviewed,
   notifyPayoutAccountSubmitted,
   notifyPayoutSettled,
+  notifyTimesheetRejected,
+} from '../modules/notifications/application/handlers';
+import {
+  notifyCredentialExpired,
+  notifyCredentialInfoRequested,
+  notifyCredentialRejected,
+  notifyCredentialVerified,
+  notifyDisputeOpened,
+  notifyFacilityVerified,
   notifyShiftAccepted,
   notifyShiftInvited,
-  notifyTimesheetDecision,
+  notifyTimesheetApproved,
   notifyTimesheetSubmitted,
-} from '../modules/notifications/application/handlers';
+} from '../modules/notifications/application/event-handlers';
 import { computeAndSaveTimesheet } from '../modules/timesheets/application/timesheet';
 import type { EventHandler } from './processor';
 
@@ -35,26 +43,24 @@ export const handlers: Record<string, EventHandler> = {
     await notifyAssignmentConfirmed(payload);
   },
 
-  // Every decision on a credential, told to the practitioner it concerns.
-  [EVENTS.CredentialVerified]: (payload) => notifyCredentialDecision('credential.verified', payload),
-  [EVENTS.CredentialRejected]: (payload) => notifyCredentialDecision('credential.rejected', payload),
-  [EVENTS.CredentialInfoRequested]: (payload) =>
-    notifyCredentialDecision('credential.info_requested', payload),
-
-  // The offer and the answer to it, each as a text: the premise is that a nurse
-  // is told and answers in minutes, and nothing was sent.
-  [EVENTS.ShiftInvited]: async (payload) => {
-    await notifyShiftInvited(payload);
-  },
-  [EVENTS.ShiftAccepted]: async (payload) => {
-    await notifyShiftAccepted(payload);
-  },
-
   // The other direction: a facility releasing somebody, or cancelling the
   // whole shift, has to reach the practitioner who would otherwise turn up.
   [EVENTS.AssignmentCancelled]: async (payload) => {
     await notifyAssignmentCancelled(payload);
   },
+
+  // NOT-01: the messages people were never sent. Each throws if the text did
+  // not go, so the outbox retries it; see notifications/application/notify.ts.
+  [EVENTS.ShiftInvited]: async (payload) => notifyShiftInvited(payload),
+  [EVENTS.ShiftAccepted]: async (payload) => notifyShiftAccepted(payload),
+  [EVENTS.CredentialVerified]: async (payload) => notifyCredentialVerified(payload),
+  [EVENTS.CredentialRejected]: async (payload) => notifyCredentialRejected(payload),
+  [EVENTS.CredentialInfoRequested]: async (payload) => notifyCredentialInfoRequested(payload),
+  [EVENTS.CredentialExpired]: async (payload) => notifyCredentialExpired(payload),
+  [EVENTS.FacilityVerified]: async (payload) => notifyFacilityVerified(payload),
+  [EVENTS.TimesheetSubmitted]: async (payload) => notifyTimesheetSubmitted(payload),
+  [EVENTS.TimesheetApproved]: async (payload) => notifyTimesheetApproved(payload),
+  [EVENTS.DisputeOpened]: async (payload) => notifyDisputeOpened(payload),
 
   /**
    * Step 7.4, the half that was missing: the timesheet is worked out when the
@@ -80,16 +86,13 @@ export const handlers: Record<string, EventHandler> = {
     await notifyIncidentReported(payload);
   },
 
-  // The four things that happen to a dispute, each told to the people in it.
-  [EVENTS.DisputeOpened]: (payload) => notifyDisputeEvent('dispute.opened', payload),
-  [EVENTS.DisputeUnderReview]: (payload) => notifyDisputeEvent('dispute.under_review', payload),
-  [EVENTS.DisputeResolved]: (payload) => notifyDisputeEvent('dispute.resolved', payload),
-  [EVENTS.DisputeWithdrawn]: (payload) => notifyDisputeEvent('dispute.withdrawn', payload),
+  // What happens to a dispute after it is opened (opening is above), told to the people in it.
+  [EVENTS.DisputeUnderReview]: (payload) => notifyDisputeStage('dispute.under_review', payload),
+  [EVENTS.DisputeResolved]: (payload) => notifyDisputeStage('dispute.resolved', payload),
+  [EVENTS.DisputeWithdrawn]: (payload) => notifyDisputeStage('dispute.withdrawn', payload),
 
-  // Hours, bills and payments: told to whoever has to act on them or is owed them.
-  [EVENTS.TimesheetSubmitted]: (payload) => notifyTimesheetSubmitted(payload),
-  [EVENTS.TimesheetApproved]: (payload) => notifyTimesheetDecision('approved', payload),
-  [EVENTS.TimesheetRejected]: (payload) => notifyTimesheetDecision('rejected', payload),
+  // Hours sent back, bills and payments: told to whoever has to act on them or is owed them.
+  [EVENTS.TimesheetRejected]: (payload) => notifyTimesheetRejected(payload),
   [EVENTS.InvoiceIssued]: (payload) => notifyInvoiceIssued(payload),
   [EVENTS.PayoutSettled]: (payload) => notifyPayoutSettled(payload),
   [EVENTS.PayoutAccountSubmitted]: (payload) => notifyPayoutAccountSubmitted(payload),

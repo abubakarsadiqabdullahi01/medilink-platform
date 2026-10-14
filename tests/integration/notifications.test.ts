@@ -1,12 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const sms = vi.hoisted(() => ({ send: vi.fn() }));
-vi.mock('@/lib/sms', () => ({
-  trySendSms: (message: { to: string; body: string }) => sms.send(message),
-}));
+vi.mock('@/lib/sms', async () => (await import('./support/sms-double')).gatewayDouble(sms.send));
 
 import { prisma } from '@/lib/db';
 import { EVENTS } from '@/lib/events';
+import { watWindow } from '@/lib/wat';
 import {
   confirmAssignment,
   invitePractitioners,
@@ -88,7 +87,7 @@ describe('a text that does not go', () => {
       where: { eventType: EVENTS.AssignmentConfirmed, aggregateId: assignment.id },
     });
     expect(event.status).toBe('FAILED');
-    expect(event.lastError).toMatch(/delivery failed/i);
+    expect(event.lastError).toMatch(/not delivered/i);
 
     // The failure is on the record, as a failure.
     const mine = await prisma.notificationMessage.findMany({ where: { userId: nurse.id } });
@@ -118,12 +117,14 @@ describe('a text that does not go', () => {
     });
     expect(event.status).toBe('PROCESSED');
 
-    // Exactly one message actually went to the practitioner, after one failure.
+    // One message to the practitioner, whatever it took to send it: the row that
+    // failed is the row that went, and no longer says it failed.
     const mine = await prisma.notificationMessage.findMany({
       where: { userId: nurse.id, relatedId: assignment.id },
     });
-    expect(mine.filter((row) => row.sentAt !== null)).toHaveLength(1);
-    expect(mine.filter((row) => row.sentAt === null)).toHaveLength(1);
+    expect(mine).toHaveLength(1);
+    expect(mine[0]!.sentAt).not.toBeNull();
+    expect(mine[0]!.failureReason).toBeNull();
 
     // The facility's representative had been told on the first pass and is not
     // told again: one extra call on the retry, for the one who was missed.
@@ -157,13 +158,15 @@ describe('the time in a message', () => {
     await confirmed(world);
     await runOnce({ handlers });
 
-    const wat = new Date(world.startsAt.getTime() + 60 * 60 * 1000);
-    const watEnd = new Date(world.endsAt.getTime() + 60 * 60 * 1000);
-    const expected = `${wat.toISOString().slice(0, 10)} ${wat.toISOString().slice(11, 16)} to ${watEnd
-      .toISOString()
-      .slice(11, 16)} WAT`;
+    const expected = watWindow(world.startsAt, world.endsAt);
 
-    const bodies = sms.send.mock.calls.map(([message]) => String(message.body));
+    // Every message that is about a shift: the offer, the answer and the confirmation.
+    // (A facility being verified has no time in it.)
+    const bodies = (
+      await prisma.notificationMessage.findMany({
+        where: { kind: { in: ['shift.invited', 'shift.accepted', 'assignment.confirmed'] } },
+      })
+    ).map((row) => row.body);
     expect(bodies.length).toBeGreaterThan(0);
     for (const body of bodies) {
       expect(body).toContain(expected);
@@ -172,37 +175,16 @@ describe('the time in a message', () => {
   });
 });
 
-describe('a one-time code that does not go', () => {
-  const PHONE = '08031234999';
-
-  it('says so, instead of answering that a code was sent', async () => {
-    sms.send.mockResolvedValue(null);
-
-    await expect(
-      startRegistration({ phone: PHONE, fullName: 'Amina Yusuf' }),
-    ).rejects.toMatchObject({ code: 'sms_unavailable', status: 503 });
-
-    // The undelivered code is not left outstanding, and the failure is on the record.
-    expect(await prisma.otpCode.count({ where: { consumedAt: null } })).toBe(0);
-    expect(await prisma.auditLog.count({ where: { action: 'auth.otp_delivery_failed' } })).toBe(1);
-  });
-
-  it('treats a gateway that did not accept the message as a failure too', async () => {
-    sms.send.mockResolvedValue({ provider: 'test', providerMessageId: null, accepted: false });
-
-    await expect(
-      startRegistration({ phone: PHONE, fullName: 'Amina Yusuf' }),
-    ).rejects.toMatchObject({ code: 'sms_unavailable' });
-  });
-
+describe('a one-time code that goes', () => {
+  // A code that does not go is said to the person who asked, and is covered in
+  // notification-delivery.test.ts.
   it('carries on as before when the gateway takes the message', async () => {
     await expect(
-      startRegistration({ phone: PHONE, fullName: 'Amina Yusuf' }),
+      startRegistration({ phone: '08031234999', fullName: 'Amina Yusuf' }),
     ).resolves.toMatchObject({ existing: false });
     expect(await prisma.otpCode.count({ where: { consumedAt: null } })).toBe(1);
   });
 });
-
 
 describe('a serious clinical incident', () => {
   /**
@@ -352,7 +334,8 @@ describe('a dispute, from the point of view of the people in it', () => {
     expect(await messagesFor(representativeId)).toHaveLength(1);
     expect(await messagesFor(nurse.id)).toHaveLength(0);
     // The reason somebody gave for opening it is not in a text message.
-    expect((await messagesFor(representativeId))[0]!.body).toContain('Owerri General Hospital');
+    expect((await messagesFor(representativeId))[0]!.body).toContain('A dispute was opened');
+    expect((await messagesFor(representativeId))[0]!.body).not.toContain('HOURS');
   });
 
   it('tells a practitioner when the facility opened it', async () => {
@@ -582,7 +565,7 @@ describe('a decision on a credential', () => {
 
   it.each([
     ['approve', 'credential.verified', /verified/i],
-    ['reject', 'credential.rejected', /not (been )?approved|refused|could not/i],
+    ['reject', 'credential.rejected', /not accepted/i],
     ['request_info', 'credential.info_requested', /more information|needs more/i],
   ] as const)('tells the practitioner when it is %s', async (decision, kind, wording) => {
     const { nurse, submission, officer } = await submitted();
