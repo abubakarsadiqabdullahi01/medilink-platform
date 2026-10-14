@@ -355,7 +355,7 @@ export default function InvoicesPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap items-end gap-3">
-          <div className="min-w-[18rem] space-y-1.5">
+          <div className="w-full space-y-1.5 sm:w-auto sm:min-w-[18rem]">
             <Label htmlFor="facility">Facility</Label>
             {/* Searchable: a plain dropdown is fine over four hospitals and
                 not over four hundred, and this list grows with the pilot. */}

@@ -542,8 +542,7 @@ def main():
             {
                 "facilityId": own_facility_id,
                 "professionalCategoryId": category_id,
-                "shiftType": "DAY",
-                "startsAt": iso(datetime.now(timezone.utc) + timedelta(hours=3)),
+                    "startsAt": iso(datetime.now(timezone.utc) + timedelta(hours=3)),
                 "endsAt": iso(datetime.now(timezone.utc) + timedelta(hours=11)),
                 "headcount": 1,
                 "hourlyRateKobo": 700000,
@@ -606,7 +605,6 @@ def main():
         {
             "facilityId": facility_id,
             "professionalCategoryId": category_id,
-            "shiftType": "DAY",
             "startsAt": iso(datetime.now(timezone.utc) + timedelta(hours=3)),
             "endsAt": iso(datetime.now(timezone.utc) + timedelta(hours=11)),
             "headcount": 1,
@@ -728,7 +726,6 @@ def main():
         {
             "facilityId": facility_id,
             "professionalCategoryId": category_id,
-            "shiftType": "DAY",
             "startsAt": iso(starts),
             "endsAt": iso(ends),
             "headcount": 1,
@@ -748,7 +745,6 @@ def main():
         {
             "facilityId": facility_id,
             "professionalCategoryId": category_id,
-            "shiftType": "DAY",
             "startsAt": iso(starts),
             "endsAt": iso(ends),
             "headcount": 1,

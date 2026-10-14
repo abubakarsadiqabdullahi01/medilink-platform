@@ -233,7 +233,7 @@ export default function LandingPage() {
               <div className="mt-9 flex flex-wrap items-center gap-x-5 gap-y-3">
                 <Link
                   href="/register"
-                  className={cn(buttonVariants({ size: 'lg' }), 'h-11 px-7 text-[15px]')}
+                  className={cn(buttonVariants({ size: 'lg' }), 'h-11 px-7 text-base')}
                 >
                   Create an account <ArrowRight aria-hidden="true" />
                 </Link>
@@ -430,7 +430,7 @@ export default function LandingPage() {
                 href="/register"
                 className={cn(
                   buttonVariants({ size: 'lg' }),
-                  'h-11 w-fit shrink-0 px-7 text-[15px]',
+                  'h-11 w-fit shrink-0 px-7 text-base',
                 )}
               >
                 Create an account <ArrowRight aria-hidden="true" />

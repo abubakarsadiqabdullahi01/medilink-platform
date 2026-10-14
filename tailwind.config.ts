@@ -76,10 +76,12 @@ export default {
   			}
   		},
   		// Secondary text was 12px and content 14px, too small for the pilot's readers
-  		// (UXA-01). One step up each, and nothing is set below 13px.
+  		// (UXA-01). Content is now 16px, the floor the blueprint asks for, and secondary text
+  		// 14px, with nothing set below that. Everything else is sized in rem, so the larger-text
+  		// switch still scales from here.
   		fontSize: {
-  			xs: ['0.8125rem', { lineHeight: '1.25rem' }],
-  			sm: ['0.9375rem', { lineHeight: '1.4rem' }]
+  			xs: ['0.875rem', { lineHeight: '1.3rem' }],
+  			sm: ['1rem', { lineHeight: '1.5rem' }]
   		},
   		borderRadius: {
   			lg: 'var(--radius)',

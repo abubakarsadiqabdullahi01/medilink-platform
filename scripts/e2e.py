@@ -242,11 +242,12 @@ def main():
         {
             "facilityId": facility_id,
             "professionalCategoryId": ref["professionalCategoryId"],
-            "shiftType": "DAY",
+            # No shiftType: it is worked out from the hours (a shift three hours from now is
+            # day or night depending on when this runs), and the rate has to clear both floors.
             "startsAt": iso(starts),
             "endsAt": iso(starts + timedelta(hours=8)),
             "headcount": 1,
-            "hourlyRateKobo": 500000,
+            "hourlyRateKobo": 700000,
             "urgency": "ROUTINE",
             "cancellationTerms": "Either party may cancel up to 24 hours before the shift.",
         },
