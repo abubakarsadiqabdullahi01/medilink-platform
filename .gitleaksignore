@@ -2,3 +2,10 @@
 # password-setup token (src/modules/auth/domain/setup-token.test.ts). It is not
 # a credential and appears nowhere else in the repository.
 52353b65084b9a2efca8b3ec95653a45483e633b:src/modules/auth/domain/setup-token.test.ts:generic-api-key:8
+
+# Two findings, by fingerprint: the placeholder receipt secret the integration test gives the
+# delivery-report endpoint (tests/integration/sms-receipts.test.ts, commit fd6faa8). It is a
+# literal in a test, is used nowhere else and is not a credential; the real SMS_RECEIPT_SECRET
+# is set in the environment and never in the repository.
+fd6faa80571455d58562796cafe9c80091c5ce5a:tests/integration/sms-receipts.test.ts:generic-api-key:172
+fd6faa80571455d58562796cafe9c80091c5ce5a:tests/integration/sms-receipts.test.ts:generic-api-key:238
