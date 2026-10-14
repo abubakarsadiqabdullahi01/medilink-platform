@@ -47,7 +47,12 @@ export default function LevelsPage() {
   const [drafts, setDrafts] = useState<Record<string, { name: string; rank: string }>>({});
   const [category, setCategory] = useState({ name: '', supervisionRequired: false });
 
-  const refresh = () => void queryClient.invalidateQueries({ queryKey: ['hierarchy'] });
+  // The reference data is cached for the session and carries the same lists to every
+  // form, so it is refreshed with them.
+  const refresh = () => {
+    void queryClient.invalidateQueries({ queryKey: ['hierarchy'] });
+    void queryClient.invalidateQueries({ queryKey: ['reference'] });
+  };
 
   const addLevel = useMutation({
     mutationFn: ({ professionId }: { professionId: string }) => {

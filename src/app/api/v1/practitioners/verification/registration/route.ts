@@ -28,6 +28,8 @@ export async function POST(request: Request) {
         practiceType: input.practiceType,
         location: input.location,
         expiresAt: input.expiresAt,
+        cadreLevelId: input.cadreLevelId,
+        registrationCategoryId: input.registrationCategoryId,
         actorId: session.userId,
       }),
     successStatus: 201,

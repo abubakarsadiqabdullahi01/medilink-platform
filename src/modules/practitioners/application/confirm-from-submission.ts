@@ -126,6 +126,9 @@ export async function confirmRegistrationFromSubmission(input: {
   /** What the licence shows. Required unless a provider answers instead. */
   registrationStatus?: RegistrationStatusValue;
   expiresAt?: Date;
+  /** Where they stand on the register, as the licence shows it. Left out keeps what is recorded. */
+  cadreLevelId?: string | null;
+  registrationCategoryId?: string | null;
   actorId: string;
 }): Promise<{ outcome: ConfirmOutcome; registration: ProfessionalRegistrationView }> {
   const submission = await loadConfirmable(input.submissionId, input.actorId, 'mdcn_status_check');
@@ -164,6 +167,8 @@ export async function confirmRegistrationFromSubmission(input: {
     folioNumber: submission.referenceNumber,
     registrationStatus: input.registrationStatus,
     expiresAt: input.expiresAt,
+    cadreLevelId: input.cadreLevelId,
+    registrationCategoryId: input.registrationCategoryId,
     actorId: input.actorId,
   });
 

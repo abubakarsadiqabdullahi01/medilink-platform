@@ -346,6 +346,7 @@ model CadreLevel {
   createdAt              DateTime @default(now()) @map("created_at")
 
   category ProfessionalCategory @relation(fields: [professionalCategoryId], references: [id])
+  registrations ProfessionalRegistration[]
 
   @@unique([professionalCategoryId, rank])
   @@map("cadre_levels")
@@ -363,6 +364,8 @@ model RegistrationCategory {
   isActive            Boolean  @default(true) @map("is_active")
   owner               String
   createdAt           DateTime @default(now()) @map("created_at")
+
+  registrations ProfessionalRegistration[]
 
   @@map("registration_categories")
   @@schema("config")
@@ -780,6 +783,10 @@ model ProfessionalRegistration {
   practiceType        String?            @map("practice_type")
   registrationStatus  RegistrationStatus @map("registration_status")
   location            String?
+  // Where they stand, as the officer read it from the register (PRA-01, PRA-02). Null
+  // until somebody records it, and only ever one a profession actually has.
+  cadreLevelId           String? @map("cadre_level_id") @db.Uuid
+  registrationCategoryId String? @map("registration_category_id") @db.Uuid
   evidenceRetrievedAt DateTime           @map("evidence_retrieved_at")
   expiresAt           DateTime?          @map("expires_at")
   source              VerificationSource
@@ -788,7 +795,9 @@ model ProfessionalRegistration {
   updatedAt           DateTime           @updatedAt @map("updated_at")
   deletedAt           DateTime?          @map("deleted_at")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user                 User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cadreLevel           CadreLevel?           @relation(fields: [cadreLevelId], references: [id])
+  registrationCategory RegistrationCategory? @relation(fields: [registrationCategoryId], references: [id])
 
   // One registration per regulator per practitioner: a doctor holds one MDCN
   // folio, not several.

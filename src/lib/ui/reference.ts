@@ -14,6 +14,9 @@ export interface ReferenceData {
     requiredForCategoryIds: string[];
   }[];
   facilityTypes: { id: string; name: string }[];
+  /** The levels within each profession in use now, lowest first. Empty for a profession with none defined. */
+  cadreLevels: { id: string; key: string; name: string; rank: number; categoryId: string }[];
+  registrationCategories: { id: string; key: string; name: string; supervisionRequired: boolean }[];
   states: { id: string; name: string; zone: string }[];
   lgas: { id: string; name: string; stateId: string }[];
   verification: { identityAutomated: boolean; registrationAutomated: boolean };

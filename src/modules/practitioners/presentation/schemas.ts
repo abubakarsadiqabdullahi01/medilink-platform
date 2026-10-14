@@ -102,6 +102,9 @@ export const recordRegistrationSchema = z.object({
   practiceType: z.string().trim().max(100).optional(),
   location: z.string().trim().max(200).optional(),
   expiresAt: z.coerce.date().optional(),
+  /** Where they stand on the register (PRA-01, PRA-02). Left out keeps what is recorded; null clears. */
+  cadreLevelId: z.string().uuid().nullable().optional(),
+  registrationCategoryId: z.string().uuid().nullable().optional(),
 });
 export type RecordRegistrationInput = z.infer<typeof recordRegistrationSchema>;
 
@@ -125,6 +128,9 @@ export const confirmFromSubmissionSchema = z.discriminatedUnion('kind', [
     /** What the licence shows. Required unless a provider answers. */
     registrationStatus: z.enum(['ACTIVE', 'SUSPENDED', 'EXPIRED', 'STRUCK_OFF', 'UNKNOWN']).optional(),
     expiresAt: z.coerce.date().optional(),
+    /** Where they stand, as the licence and the register show it. Left out keeps what is recorded. */
+    cadreLevelId: z.string().uuid().nullable().optional(),
+    registrationCategoryId: z.string().uuid().nullable().optional(),
   }),
 ]);
 export type ConfirmFromSubmissionInput = z.infer<typeof confirmFromSubmissionSchema>;
@@ -156,3 +162,11 @@ export const clearScreeningSchema = z.object({
   // no reason is indistinguishable, later, from one cleared without looking.
   notes: z.string().trim().min(20).max(1000),
 });
+
+/** Where somebody stands on the register, set or cleared as a whole. `null` clears one. */
+export const recordStandingSchema = z.object({
+  userId: z.string().uuid(),
+  cadreLevelId: z.string().uuid().nullable(),
+  registrationCategoryId: z.string().uuid().nullable(),
+});
+export type RecordStandingInput = z.infer<typeof recordStandingSchema>;

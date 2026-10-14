@@ -63,6 +63,13 @@ export const ROUTES: RouteDefinition[] = [
     permission: 'credential.review',
     scopeType: 'PLATFORM',
   },
+  // Where somebody stands on the register: their level and registration category.
+  {
+    method: 'POST',
+    path: '/api/v1/practitioners/verification/standing',
+    permission: 'credential.review',
+    scopeType: 'PLATFORM',
+  },
   // Records the identity or registration from what the practitioner submitted
   // and decides the submission in the same act.
   {

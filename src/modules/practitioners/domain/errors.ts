@@ -80,6 +80,27 @@ export const PractitionerErrors = {
       422,
     ),
 
+  levelWrongProfession: () =>
+    new PractitionerError(
+      'level_wrong_profession',
+      'That is not a level in use for this practitioner\'s profession. Pick one from the list for their profession.',
+      422,
+    ),
+
+  registrationCategoryInvalid: () =>
+    new PractitionerError(
+      'registration_category_invalid',
+      'That is not a registration category in use.',
+      422,
+    ),
+
+  registrationRequired: () =>
+    new PractitionerError(
+      'registration_required',
+      'Record their registration first, so the level has a licence checked against the register to rest on.',
+      409,
+    ),
+
   registrationStatusRequired: () =>
     new PractitionerError(
       'registration_status_required',

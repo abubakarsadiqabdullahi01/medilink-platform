@@ -28,6 +28,8 @@ interface Verification {
     registrationStatus: string;
     expiresAt: string | null;
     usable: boolean;
+    cadreLevel: { name: string } | null;
+    registrationCategory: { name: string; supervisionRequired: boolean } | null;
   }[];
 }
 
@@ -159,6 +161,15 @@ export function OnRecord({ blockers, eligible }: { blockers: string[]; eligible:
                     {row.expiresAt ? (
                       <span className="text-xs text-muted-foreground">
                         expires {formatDate(row.expiresAt)}
+                      </span>
+                    ) : null}
+                    {/* Where an officer read from the register that they stand. */}
+                    {row.cadreLevel || row.registrationCategory ? (
+                      <span className="w-full text-xs text-muted-foreground">
+                        {[row.cadreLevel?.name, row.registrationCategory?.name].filter(Boolean).join(' · ')}
+                        {row.registrationCategory?.supervisionRequired
+                          ? ' · works under supervision, so only shifts that offer it'
+                          : ''}
                       </span>
                     ) : null}
                   </div>
