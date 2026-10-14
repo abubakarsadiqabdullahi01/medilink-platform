@@ -175,9 +175,12 @@ const MATCHING_PURPOSES: ConsentPurposeValue[] = ['CREDENTIAL_SHARING', 'PROFILE
  * predates consent being recorded at registration, and treating its silence
  * as a withdrawal would silently remove every such practitioner from work.
  */
-export async function withdrawnFromMatching(userIds: string[]): Promise<Set<string>> {
+export async function withdrawnFromMatching(
+  userIds: string[],
+  db: Pick<Tx, 'consentRecord'> = prisma,
+): Promise<Set<string>> {
   if (userIds.length === 0) return new Set();
-  const rows = await prisma.consentRecord.findMany({
+  const rows = await db.consentRecord.findMany({
     where: { userId: { in: userIds }, purpose: { in: MATCHING_PURPOSES as never[] } },
     orderBy: { grantedAt: 'desc' },
     select: { userId: true, purpose: true, granted: true },
@@ -356,7 +359,9 @@ export async function publishAgreement(input: {
   // Checked rather than left to the unique index, which surfaced as a 500:
   // the identifier is how an acceptance names what was agreed, so reusing one
   // is a mistake worth explaining, not a crash.
-  const taken = await prisma.agreementVersion.findUnique({ where: { identifier: input.identifier } });
+  const taken = await prisma.agreementVersion.findUnique({
+    where: { identifier: input.identifier },
+  });
   if (taken) throw ConsentErrors.identifierTaken();
 
   return prisma.$transaction(async (tx: Tx) => {

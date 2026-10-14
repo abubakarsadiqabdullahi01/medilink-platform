@@ -16,7 +16,10 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
       source: 'body',
       schema: evidenceUploadUrlSchema,
       permission: 'dispute.manage',
-      scope: (_input, session) => ({ type: 'SELF', id: session.userId }),
+      scope: (input, session) =>
+        input.facilityId
+          ? { type: 'FACILITY', id: input.facilityId }
+          : { type: 'SELF', id: session.userId },
       action: async ({ input, session }) =>
         requestEvidenceUploadUrl({
           disputeId: input.id,

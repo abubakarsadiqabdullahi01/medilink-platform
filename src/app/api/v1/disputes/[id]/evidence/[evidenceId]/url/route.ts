@@ -13,15 +13,19 @@ import { requestEvidenceDownloadUrl } from '@/modules/disputes/application/evide
  * credential viewer, found the same way: by building the screen that needed
  * it.
  *
- * Guarded on `dispute.manage`, which an adjudicator holds at PLATFORM and a
- * party holds at SELF — and the permission says nothing about *this* case, so
+ * Guarded on `dispute.manage`, which an adjudicator holds at PLATFORM, a
+ * practitioner at SELF and a facility member at FACILITY — and the permission
+ * says nothing about *this* case, so
  * the application layer checks the caller is one of its two sides or an
  * adjudicator, and that the evidence is on the case in the path. The URL is
  * issued per read and the read is audited —
  * a dispute's evidence is the most sensitive thing this module holds, and a
  * permanent link would outlive any reason to hold it.
  */
-export async function POST(request: Request, props: { params: Promise<{ id: string; evidenceId: string }> }) {
+export async function POST(
+  request: Request,
+  props: { params: Promise<{ id: string; evidenceId: string }> },
+) {
   const params = await props.params;
   return handleGuardedRequest(
     request,
@@ -29,7 +33,10 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
       source: 'body',
       schema: evidenceUrlSchema,
       permission: 'dispute.manage',
-      scope: (_input, session) => ({ type: 'SELF', id: session.userId }),
+      scope: (input, session) =>
+        input.facilityId
+          ? { type: 'FACILITY', id: input.facilityId }
+          : { type: 'SELF', id: session.userId },
       action: async ({ input, session }) =>
         requestEvidenceDownloadUrl({
           disputeId: input.id,

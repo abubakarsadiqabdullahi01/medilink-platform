@@ -1,8 +1,5 @@
 import { handleGuardedRequest } from '@/lib/http/guarded-handler';
-import {
-  attachEvidenceSchema,
-  disputeIdSchema,
-} from '@/modules/disputes/presentation/schemas';
+import { attachEvidenceSchema, disputeIdSchema } from '@/modules/disputes/presentation/schemas';
 import { attachEvidence, listEvidence } from '@/modules/disputes/application/evidence';
 
 /**
@@ -21,7 +18,10 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
       source: 'body',
       schema: attachEvidenceSchema,
       permission: 'dispute.manage',
-      scope: (_input, session) => ({ type: 'SELF', id: session.userId }),
+      scope: (input, session) =>
+        input.facilityId
+          ? { type: 'FACILITY', id: input.facilityId }
+          : { type: 'SELF', id: session.userId },
       action: async ({ input, session }) =>
         attachEvidence({
           disputeId: input.id,

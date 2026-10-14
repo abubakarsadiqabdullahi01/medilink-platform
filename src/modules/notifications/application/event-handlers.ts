@@ -166,7 +166,8 @@ export const notifyCredentialInfoRequested = credentialDecision(
 /** `credential.expired`: the document has lapsed and offers will stop until it is renewed. */
 export const notifyCredentialExpired = credentialDecision(
   'credential.expired',
-  (type) => `Your ${type} has expired. Upload a renewed copy in Medilink to keep receiving shift offers.`,
+  (type) =>
+    `Your ${type} has expired. Upload a renewed copy in Medilink to keep receiving shift offers.`,
 );
 
 /** `facility.verified`: the hospital can now publish shifts. */
@@ -260,7 +261,14 @@ export async function notifyTimesheetApproved(payload: Record<string, unknown>):
 export async function notifyDisputeOpened(payload: Record<string, unknown>): Promise<void> {
   const disputeId = text(payload.disputeId);
   const assignmentId = text(payload.assignmentId);
-  if (!disputeId || !assignmentId) {
+  const practitionerId = text(payload.userId);
+  const raisedParty = text(payload.raisedParty);
+  if (
+    !disputeId ||
+    !assignmentId ||
+    !practitionerId ||
+    (raisedParty !== 'PRACTITIONER' && raisedParty !== 'FACILITY')
+  ) {
     logger.warn('dispute.opened event missing ids; skipping notification');
     return;
   }
@@ -269,7 +277,9 @@ export async function notifyDisputeOpened(payload: Record<string, unknown>): Pro
 
   await tellAll([
     {
-      userId: facts.facility.representativeUserId,
+      // Tell the other side. Telling the party who just opened the case gives
+      // them a redundant text and leaves the respondent unaware of it.
+      userId: raisedParty === 'FACILITY' ? practitionerId : facts.facility.representativeUserId,
       kind: 'dispute.opened',
       body: `A dispute was opened about the shift on ${facts.when}. Open Medilink to see it.`,
       relatedType: 'disputes.disputes',

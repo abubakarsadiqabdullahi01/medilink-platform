@@ -1,6 +1,6 @@
-import { prisma } from '@/lib/db';
+import { prisma, type Tx } from '@/lib/db';
 import { withdrawnFromMatching } from '@/modules/audit-compliance/application/consent';
-import { getEligibilityFor } from './eligibility';
+import { getEligibilityFor, type EligibilityReader } from './eligibility';
 
 /**
  * Why somebody cannot be offered, accept, or be confirmed onto a shift *now*.
@@ -17,21 +17,26 @@ import { getEligibilityFor } from './eligibility';
  */
 export type BookingBlocker = 'not_eligible' | 'wrong_profession' | 'consent_withdrawn';
 
+type BookingReader = EligibilityReader & Pick<Tx, 'practitionerProfile' | 'consentRecord'>;
+
 export async function bookingBlockersFor(
   userIds: string[],
   professionalCategoryId: string,
   now: Date = new Date(),
+  db: BookingReader = prisma,
 ): Promise<Map<string, BookingBlocker[]>> {
   const ids = [...new Set(userIds)];
   const [eligibility, profiles, withdrawn] = await Promise.all([
-    getEligibilityFor(ids, now),
-    prisma.practitionerProfile.findMany({
+    getEligibilityFor(ids, now, db),
+    db.practitionerProfile.findMany({
       where: { userId: { in: ids }, deletedAt: null },
       select: { userId: true, professionalCategoryId: true },
     }),
-    withdrawnFromMatching(ids),
+    withdrawnFromMatching(ids, db),
   ]);
-  const categoryOf = new Map(profiles.map((profile) => [profile.userId, profile.professionalCategoryId]));
+  const categoryOf = new Map(
+    profiles.map((profile) => [profile.userId, profile.professionalCategoryId]),
+  );
 
   const result = new Map<string, BookingBlocker[]>();
   for (const userId of ids) {
@@ -48,6 +53,11 @@ export async function bookingBlockers(
   userId: string,
   professionalCategoryId: string,
   now: Date = new Date(),
+  db: BookingReader = prisma,
 ): Promise<BookingBlocker[]> {
-  return (await bookingBlockersFor([userId], professionalCategoryId, now)).get(userId) ?? ['not_eligible'];
+  return (
+    (await bookingBlockersFor([userId], professionalCategoryId, now, db)).get(userId) ?? [
+      'not_eligible',
+    ]
+  );
 }

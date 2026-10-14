@@ -22,10 +22,7 @@ import {
   respondToInvitation,
 } from '@/modules/matching/application/assignment';
 import { getAttendance, recordManualAttendance } from '@/modules/attendance/application/attendance';
-import {
-  reviewTimesheet,
-  submitTimesheet,
-} from '@/modules/timesheets/application/timesheet';
+import { reviewTimesheet, submitTimesheet } from '@/modules/timesheets/application/timesheet';
 import {
   beginReview,
   getDispute,
@@ -43,6 +40,9 @@ import {
 import { issueSession } from '@/modules/auth/application/session-service';
 import { GET as listForAssignmentRoute } from '@/app/api/v1/assignments/[id]/disputes/route';
 import { POST as evidenceUrlRoute } from '@/app/api/v1/disputes/[id]/evidence/[evidenceId]/url/route';
+import { POST as evidenceUploadUrlRoute } from '@/app/api/v1/disputes/[id]/evidence/upload-url/route';
+import { POST as attachEvidenceRoute } from '@/app/api/v1/disputes/[id]/evidence/route';
+import { POST as withdrawDisputeRoute } from '@/app/api/v1/disputes/[id]/withdraw/route';
 import { DISPUTE_WINDOW_DAYS } from '@/modules/disputes/domain/dispute';
 import { ROUTES } from '@/modules/disputes/routes';
 import { clearCookies } from './support/cookie-jar';
@@ -585,9 +585,9 @@ describe('resolving a case', () => {
     expect((await listDisputes()).disputes.map((row) => row.id)).not.toContain(dispute.id);
     // Resolved cases are still reachable — the point of moving beyond a
     // hard-wired "live only" queue — just not under the live default.
-    expect(
-      (await listDisputes({ status: 'RESOLVED' })).disputes.map((row) => row.id),
-    ).toContain(dispute.id);
+    expect((await listDisputes({ status: 'RESOLVED' })).disputes.map((row) => row.id)).toContain(
+      dispute.id,
+    );
   });
 });
 
@@ -709,7 +709,6 @@ describe('the route table', () => {
   });
 });
 
-
 describe('who may see a case and what is attached to it', () => {
   /**
    * `dispute.manage` is held by practitioners (at SELF), facility owners and
@@ -792,7 +791,7 @@ describe('who may see a case and what is attached to it', () => {
     expect(await prisma.storedObject.count({ where: { ownerUserId: otherReviewer } })).toBe(0);
   });
 
-  it('refuses an outsider attaching their own file to somebody else\'s case', async () => {
+  it("refuses an outsider attaching their own file to somebody else's case", async () => {
     const { dispute } = await caseWithEvidence();
     const { otherPractitioner } = await outsiders();
     // They can ask storage for a URL for a case of their own, so they hold a
@@ -852,7 +851,68 @@ describe('who may see a case and what is attached to it', () => {
     ).toBe(0);
   });
 
-  it('will not serve evidence from a different case under this case\'s path', async () => {
+  it('authorises the facility side through the upload, attach and download routes', async () => {
+    const { world, dispute, evidence } = await caseWithEvidence();
+    await issueSession({ userId: world.reviewerId });
+
+    const uploadResponse = await evidenceUploadUrlRoute(
+      new Request(`http://localhost/api/v1/disputes/${dispute.id}/evidence/upload-url`, {
+        method: 'POST',
+        body: JSON.stringify({ ...PHOTO, facilityId: world.facilityId }),
+      }),
+      { params: Promise.resolve({ id: dispute.id }) },
+    );
+    expect(uploadResponse.status).toBe(200);
+    const upload = (await uploadResponse.json()) as { objectKey: string };
+
+    const attachResponse = await attachEvidenceRoute(
+      new Request(`http://localhost/api/v1/disputes/${dispute.id}/evidence`, {
+        method: 'POST',
+        body: JSON.stringify({
+          facilityId: world.facilityId,
+          objectKey: upload.objectKey,
+          note: 'The facility copy of the ward log.',
+        }),
+      }),
+      { params: Promise.resolve({ id: dispute.id }) },
+    );
+    expect(attachResponse.status).toBe(200);
+
+    const downloadResponse = await evidenceUrlRoute(
+      new Request(`http://localhost/api/v1/disputes/${dispute.id}/evidence/${evidence.id}/url`, {
+        method: 'POST',
+        body: JSON.stringify({ facilityId: world.facilityId }),
+      }),
+      { params: Promise.resolve({ id: dispute.id, evidenceId: evidence.id }) },
+    );
+    expect(downloadResponse.status).toBe(200);
+  });
+
+  it('lets the facility withdraw a case it raised through the route', async () => {
+    const world = await buildWorld();
+    await approved(world);
+    const dispute = await raiseDispute({
+      assignmentId: world.assignmentId,
+      actorId: world.reviewerId,
+      facilityId: world.facilityId,
+      category: 'HOURS',
+      reason: 'The ward has now found the signed paper record and no longer disputes the hours.',
+    });
+    await issueSession({ userId: world.reviewerId });
+
+    const response = await withdrawDisputeRoute(
+      new Request(`http://localhost/api/v1/disputes/${dispute.id}/withdraw`, {
+        method: 'POST',
+        body: JSON.stringify({ facilityId: world.facilityId }),
+      }),
+      { params: Promise.resolve({ id: dispute.id }) },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ status: 'WITHDRAWN' });
+  });
+
+  it("will not serve evidence from a different case under this case's path", async () => {
     const first = await caseWithEvidence();
     const second = await caseWithEvidence();
 
@@ -894,10 +954,10 @@ describe('who may see a case and what is attached to it', () => {
       );
     const link = () =>
       evidenceUrlRoute(
-        new Request(
-          `http://localhost/api/v1/disputes/${dispute.id}/evidence/${evidence.id}/url`,
-          { method: 'POST', body: '{}' },
-        ),
+        new Request(`http://localhost/api/v1/disputes/${dispute.id}/evidence/${evidence.id}/url`, {
+          method: 'POST',
+          body: '{}',
+        }),
         { params: Promise.resolve({ id: dispute.id, evidenceId: evidence.id }) },
       );
 

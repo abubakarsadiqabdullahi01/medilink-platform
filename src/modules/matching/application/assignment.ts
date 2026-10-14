@@ -62,7 +62,11 @@ export const AssignmentErrors = {
       409,
     ),
   cannotConfirm: (blockers: string[]) =>
-    new HttpError('cannot_confirm', `This confirmation cannot proceed: ${blockers.join(', ')}.`, 409),
+    new HttpError(
+      'cannot_confirm',
+      `This confirmation cannot proceed: ${blockers.join(', ')}.`,
+      409,
+    ),
   invalidTransition: (from: string, to: string) =>
     new HttpError('invalid_transition', `A ${from} assignment cannot become ${to}.`, 409),
 } as const;
@@ -133,9 +137,12 @@ export async function invitePractitioners(input: InviteParams): Promise<Invitati
   // could not now be matched.
   const now = new Date();
   if (request.startsAt.getTime() <= now.getTime()) throw AssignmentErrors.shiftStarted();
-  if (!(await getFacility(request.facilityId)).canPublish) throw AssignmentErrors.facilityNotActive();
+  if (!(await getFacility(request.facilityId)).canPublish)
+    throw AssignmentErrors.facilityNotActive();
   const blockers = await bookingBlockersFor(input.userIds, request.professionalCategoryId, now);
-  const refused = input.userIds.filter((userId) => (blockers.get(userId) ?? ['not_eligible']).length > 0);
+  const refused = input.userIds.filter(
+    (userId) => (blockers.get(userId) ?? ['not_eligible']).length > 0,
+  );
   if (refused.length > 0) throw AssignmentErrors.notBookable(refused.length);
 
   const expiresAt = new Date(
@@ -484,15 +491,6 @@ export async function confirmAssignment(input: ConfirmParams): Promise<Assignmen
   });
   if (!known) throw AssignmentErrors.assignmentNotFound();
 
-  // The facility and the practitioner are re-checked at the moment of booking, not
-  // trusted from the match that preceded it. Read before the transaction opens:
-  // neither is something this booking can race against within its own lock.
-  const now = new Date();
-  const [facility, bookingBlockersNow] = await Promise.all([
-    getFacility(known.facilityId),
-    bookingBlockers(input.userId, known.professionalCategoryId, now),
-  ]);
-
   return prisma.$transaction(async (tx: Tx) => {
     await lockRequest(tx, known.id);
     await lockPractitioner(tx, input.userId);
@@ -501,8 +499,19 @@ export async function confirmAssignment(input: ConfirmParams): Promise<Assignmen
     // already be stale — a concurrent confirmation may just have filled the shift.
     const request = await tx.serviceRequest.findUniqueOrThrow({ where: { id: known.id } });
 
-    // Everything below is read inside the locks, so what it sees cannot change
-    // under it.
+    // These are the final booking checks, so run them only after every lock wait
+    // has finished, at a fresh time, and through this transaction. Checking them
+    // before the locks allowed a suspension, consent withdrawal, licence lapse
+    // or even the shift start itself to happen while confirmation was waiting.
+    const checkedAt = new Date();
+    const [facility, bookingBlockersNow] = await Promise.all([
+      getFacility(request.facilityId, tx),
+      bookingBlockers(input.userId, request.professionalCategoryId, checkedAt, tx),
+    ]);
+
+    // Capacity and conflicting assignments are read inside their request and
+    // practitioner locks, so another confirmation cannot change them underneath
+    // this one.
     const [invitation, confirmedCount, alreadyAssigned, conflicting] = await Promise.all([
       tx.invitation.findUnique({
         where: { serviceRequestId_userId: { serviceRequestId: request.id, userId: input.userId } },
@@ -524,7 +533,7 @@ export async function confirmAssignment(input: ConfirmParams): Promise<Assignmen
 
     const blockers = confirmBlockers({
       requestStatus: request.status,
-      shiftStarted: request.startsAt.getTime() <= now.getTime(),
+      shiftStarted: request.startsAt.getTime() <= checkedAt.getTime(),
       facilityActive: facility.canPublish,
       practitionerBookable: bookingBlockersNow.length === 0,
       headcount: request.headcount,
@@ -694,9 +703,7 @@ async function cancelConfirmedBooking(
  * — attended, absent, excused — and that belongs to attendance and the
  * no-show sweep, not to a cancellation that would rewrite it after the fact.
  */
-export async function cancelAssignment(
-  input: CancelAssignmentParams,
-): Promise<AssignmentView> {
+export async function cancelAssignment(input: CancelAssignmentParams): Promise<AssignmentView> {
   const known = await prisma.assignment.findFirst({
     where: { id: input.assignmentId, facilityId: input.facilityId },
   });
