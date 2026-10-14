@@ -212,6 +212,14 @@ export async function raiseDispute(input: RaiseDisputeParams): Promise<DisputeVi
     facilityMember,
   });
 
+  // Somebody with no part in this shift is told nothing about it: not that it has
+  // an open case, not that it is undecided. "Not found" is what an id that does not
+  // exist would get. An adjudicator is told the real reason, which is that they
+  // adjudicate and do not open (and they could read the case anyway).
+  if (party === null && (await sideOnCase(input.actorId, assignment)) === null) {
+    throw DisputeErrors.assignmentNotFound();
+  }
+
   const attendance = await getAttendance(input.assignmentId);
   const live = await prisma.dispute.count({
     where: { assignmentId: input.assignmentId, status: { in: LIVE } },
@@ -424,6 +432,10 @@ export async function withdrawDispute(input: {
   actorId: string;
 }): Promise<DisputeView> {
   const { row, assignment } = await loadCase(input.disputeId);
+
+  // Somebody with no part in the case gets "not found", not a refusal that confirms
+  // it exists. Only then is the question whether they are the one who raised it.
+  if ((await sideOnCase(input.actorId, assignment)) === null) throw DisputeErrors.notFound();
 
   const blockers = withdrawBlockers({
     status: row.status as DisputeStatusValue,

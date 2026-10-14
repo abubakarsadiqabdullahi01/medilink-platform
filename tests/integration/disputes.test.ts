@@ -295,7 +295,7 @@ describe('opening a case', () => {
     ).rejects.toThrow(/not_a_party/);
   });
 
-  it('refuses a facility that has nothing to do with the shift', async () => {
+  it('tells a facility that has nothing to do with the shift that there is no such shift, not why it was refused', async () => {
     const world = await buildWorld();
     const other = await buildWorld();
     await approved(world);
@@ -308,7 +308,10 @@ describe('opening a case', () => {
         category: 'HOURS',
         reason: COMPLAINT,
       }),
-    ).rejects.toThrow(/not_a_party/);
+      // Not "not a party, not yet decided, already open": that told a stranger the
+      // state of somebody else's shift. The answer is the one an id that does not
+      // exist would get.
+    ).rejects.toThrow(/does not exist/);
   });
 
   it('refuses a shift nobody has decided yet', async () => {
