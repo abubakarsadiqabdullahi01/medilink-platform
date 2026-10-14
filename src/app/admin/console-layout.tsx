@@ -18,6 +18,7 @@ import {
   FileSignature,
   Gauge,
   CalendarDays,
+  Scale,
   Activity,
   ShieldAlert,
 } from 'lucide-react';
@@ -138,6 +139,12 @@ const SECTIONS: NavSection[] = [
         href: '/admin/holidays',
         label: 'Public holidays',
         icon: CalendarDays,
+        permission: 'config.manage',
+      },
+      {
+        href: '/admin/rate-floors',
+        label: 'Pay floors',
+        icon: Scale,
         permission: 'config.manage',
       },
     ],

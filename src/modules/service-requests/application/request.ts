@@ -166,6 +166,8 @@ export async function createServiceRequest(
   if (!verdict.ok && verdict.minHourlyKobo !== null) {
     throw ServiceRequestErrors.belowRateFloor(verdict.minHourlyKobo);
   }
+  // No floor is not a pass: see checkAgainstFloor.
+  if (!verdict.ok) throw ServiceRequestErrors.noRateFloor(category.name, input.shiftType);
 
   return prisma.$transaction(async (tx: Tx) => {
     const created = await tx.serviceRequest.create({
@@ -248,6 +250,13 @@ export async function publishServiceRequest(
   }
   if (blockers.includes('below_rate_floor') && verdict.minHourlyKobo !== null) {
     throw ServiceRequestErrors.belowRateFloor(verdict.minHourlyKobo);
+  }
+  if (blockers.includes('below_rate_floor')) {
+    const profession = await prisma.professionalCategory.findUnique({
+      where: { id: request.professionalCategoryId },
+      select: { name: true },
+    });
+    throw ServiceRequestErrors.noRateFloor(profession?.name ?? 'this profession', request.shiftType);
   }
   if (blockers.includes('starts_in_the_past')) throw ServiceRequestErrors.startsInThePast();
   if (blockers.includes('not_a_draft')) throw ServiceRequestErrors.notADraft();

@@ -1,3 +1,5 @@
+import { isDateOnly, lagosDate } from '@/lib/lagos-date';
+
 /**
  * Rate floors: pure, no database.
  *
@@ -68,17 +70,52 @@ export function resolveRateFloor(
 
 export interface FloorVerdict {
   ok: boolean;
+  /** The floor the rate was held to; null when there is none, which is itself a refusal. */
   minHourlyKobo: number | null;
 }
 
 /**
  * At the floor is fine; below it is not. A floor is a minimum, and refusing
  * an offer that exactly meets it would make the published number a lie.
+ *
+ * **No floor is a refusal, not a pass** (RAT-01). A missing floor used to let any
+ * rate through, so for every profession nobody had set one for, the wage
+ * protection silently did not exist. Now a profession and shift type with no
+ * floor cannot be published until somebody sets one: `ok` is false and
+ * `minHourlyKobo` is null, which a caller reads as "there is no minimum to name".
  */
 export function checkAgainstFloor(
   hourlyRateKobo: number,
   floor: RateFloorLike | null,
 ): FloorVerdict {
-  if (!floor) return { ok: true, minHourlyKobo: null };
+  if (!floor) return { ok: false, minHourlyKobo: null };
   return { ok: hourlyRateKobo >= floor.minHourlyKobo, minHourlyKobo: floor.minHourlyKobo };
+}
+
+/** No real hourly rate is above this; a floor above it is a typo, and one that would stop every shift. */
+export const MAX_FLOOR_HOURLY_KOBO = 100_000_000;
+
+export type FloorProblem = 'amount' | 'date' | 'past';
+
+/**
+ * What is wrong with a floor somebody is setting, or null.
+ *
+ * It cannot start in the past: floors are versioned by date, so an earlier one
+ * can still explain a shift priced under it, and a floor dated back would change
+ * what a shift already published was held to.
+ */
+export function floorProblem(
+  floor: { minHourlyKobo: number; effectiveFrom: string },
+  now: Date,
+): FloorProblem | null {
+  if (
+    !Number.isInteger(floor.minHourlyKobo) ||
+    floor.minHourlyKobo < 1 ||
+    floor.minHourlyKobo > MAX_FLOOR_HOURLY_KOBO
+  ) {
+    return 'amount';
+  }
+  if (!isDateOnly(floor.effectiveFrom)) return 'date';
+  if (floor.effectiveFrom < lagosDate(now)) return 'past';
+  return null;
 }

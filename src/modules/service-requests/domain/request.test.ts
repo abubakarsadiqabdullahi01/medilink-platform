@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   ANY_SPECIALTY,
   checkAgainstFloor,
+  floorProblem,
+  MAX_FLOOR_HOURLY_KOBO,
   resolveRateFloor,
   type RateFloorLike,
 } from './rate-floor';
@@ -113,8 +115,11 @@ describe('checkAgainstFloor', () => {
     expect(checkAgainstFloor(649_999, floor())).toEqual({ ok: false, minHourlyKobo: 650_000 });
   });
 
-  it('accepts anything when no floor is published', () => {
-    expect(checkAgainstFloor(1, null)).toEqual({ ok: true, minHourlyKobo: null });
+  it('refuses when no floor is published, and says there is none to name', () => {
+    // RAT-01: a missing floor used to let any rate through, which is a wage
+    // protection that silently does not exist for any profession nobody set one for.
+    expect(checkAgainstFloor(1, null)).toEqual({ ok: false, minHourlyKobo: null });
+    expect(checkAgainstFloor(100_000_000, null)).toEqual({ ok: false, minHourlyKobo: null });
   });
 });
 
@@ -193,5 +198,39 @@ describe('publishBlockers', () => {
     expect(publishBlockers(hopeless, now).sort()).toEqual(
       ['below_rate_floor', 'facility_cannot_publish', 'not_a_draft', 'starts_in_the_past'].sort(),
     );
+  });
+});
+
+describe('a floor being set', () => {
+  const today = new Date('2026-10-14T10:00:00.000Z');
+  const ok = { minHourlyKobo: 650_000, effectiveFrom: '2026-10-14' };
+
+  it('is accepted when it is a positive whole number of kobo and starts today or later', () => {
+    expect(floorProblem(ok, today)).toBeNull();
+    expect(floorProblem({ ...ok, effectiveFrom: '2027-01-01' }, today)).toBeNull();
+  });
+
+  it('is refused at zero, negative, fractional, or beyond any real hourly rate', () => {
+    expect(floorProblem({ ...ok, minHourlyKobo: 0 }, today)).toBe('amount');
+    expect(floorProblem({ ...ok, minHourlyKobo: -1 }, today)).toBe('amount');
+    expect(floorProblem({ ...ok, minHourlyKobo: 650_000.5 }, today)).toBe('amount');
+    expect(floorProblem({ ...ok, minHourlyKobo: MAX_FLOOR_HOURLY_KOBO + 1 }, today)).toBe('amount');
+    expect(floorProblem({ ...ok, minHourlyKobo: MAX_FLOOR_HOURLY_KOBO }, today)).toBeNull();
+  });
+
+  it('is refused if it would start in the past: floors are versioned, not rewritten', () => {
+    expect(floorProblem({ ...ok, effectiveFrom: '2026-10-13' }, today)).toBe('past');
+  });
+
+  it('counts today by Lagos, not UTC', () => {
+    const justAfterMidnight = new Date('2026-10-14T23:30:00.000Z');
+
+    expect(floorProblem({ ...ok, effectiveFrom: '2026-10-14' }, justAfterMidnight)).toBe('past');
+    expect(floorProblem({ ...ok, effectiveFrom: '2026-10-15' }, justAfterMidnight)).toBeNull();
+  });
+
+  it('is refused if the date is not one', () => {
+    expect(floorProblem({ ...ok, effectiveFrom: '14/10/2026' }, today)).toBe('date');
+    expect(floorProblem({ ...ok, effectiveFrom: '2026-02-30' }, today)).toBe('date');
   });
 });
