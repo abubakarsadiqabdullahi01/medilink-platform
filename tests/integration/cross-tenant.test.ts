@@ -787,6 +787,8 @@ const NO_TENANT_IDENTIFIER: Record<string, string> = {
   sanctions: 'the platform’s register of listed people; takes no tenant identifier',
   'suggestions/summary': 'the platform’s aggregate; takes no identifier',
   unhonoured: 'the platform’s queue; takes no identifier',
+  'webhooks/sms/africastalking':
+    'called by the SMS gateway with its own message id and a shared secret; it names no tenant, reads no record and can only move a message’s delivery state forward (sms-receipts.test.ts attacks it)',
 };
 
 /** Platform-scoped routes that take an identifier in the body or query: refused for any hospital. */

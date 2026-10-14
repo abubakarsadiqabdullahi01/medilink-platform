@@ -56,10 +56,15 @@ export async function notify(input: NotifyParams): Promise<NotifyOutcome> {
   }
 
   const attempt = await attemptSms({ to: user.phone, body: input.body });
+  // Which gateway took it, under what id, and whether a second one had to (M16-05). Nothing for a
+  // message nobody took: the reason says why.
   const fields = {
     body: input.body,
     sentAt: attempt.delivered ? new Date() : null,
     failureReason: attempt.delivered ? null : (attempt.reason ?? 'The SMS was not delivered.'),
+    provider: attempt.delivered ? (attempt.result?.provider ?? null) : null,
+    providerMessageId: attempt.delivered ? (attempt.result?.providerMessageId ?? null) : null,
+    failedOverFrom: attempt.delivered ? (attempt.failedOverFrom ?? null) : null,
   };
 
   const unsent = input.relatedId

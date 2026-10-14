@@ -1260,10 +1260,22 @@ model NotificationMessage {
   relatedId   String?   @map("related_id") @db.Uuid
   sentAt      DateTime? @map("sent_at")
   failureReason String? @map("failure_reason")
+  // The gateway that took the message and the id it gave it (M16-05). Null for a
+  // message nobody took. `failedOverFrom` names the gateway that failed first when a
+  // second one had to take over.
+  provider           String?   @map("provider")
+  providerMessageId  String?   @map("provider_message_id")
+  failedOverFrom     String?   @map("failed_over_from")
+  // What the gateway later reported: PENDING, DELIVERED or FAILED. Null is no report,
+  // which is all there is until a gateway has been told where to send them.
+  deliveryStatus     String?   @map("delivery_status")
+  deliveryReportedAt DateTime? @map("delivery_reported_at")
+  deliveryDetail     String?   @map("delivery_detail")
   // When the person opened it in the app's inbox. Null is unread (UXP-01).
   readAt      DateTime? @map("read_at")
   createdAt   DateTime  @default(now()) @map("created_at")
 
+  @@index([provider, providerMessageId])
   @@index([userId, createdAt])
   @@index([userId, readAt, createdAt])
   @@index([relatedType, relatedId])

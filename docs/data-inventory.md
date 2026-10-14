@@ -216,7 +216,7 @@ A scheduled job (`retention.purge_sweep`, daily) deletes only what no obligation
 ### Messages sent
 
 - **Tables:** `notifications.messages`
-- **Holds:** Every text or notice sent: who to (masked), what it said, when, and whether it arrived. The wording can mention a shift, an amount or a decision.
+- **Holds:** Every text or notice sent: who to (masked), what it said, when, which gateway took it and the id that gateway gave it, and whether it arrived (the gateway's reported status and a short reason code; never the number). The wording can mention a shift, an amount or a decision.
 - **Purpose:** To avoid telling a person the same thing twice, and to show what they were told.
 - **Proposed basis:** Contract, and legitimate interest.
 - **Owner:** Operations

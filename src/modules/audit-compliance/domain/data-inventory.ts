@@ -399,7 +399,7 @@ export const DATA_CATEGORIES: DataCategory[] = [
     name: 'Messages sent',
     tables: ['notifications.messages'],
     holds:
-      'Every text or notice sent: who to (masked), what it said, when, and whether it arrived. The wording can mention a shift, an amount or a decision.',
+      'Every text or notice sent: who to (masked), what it said, when, which gateway took it and the id that gateway gave it, and whether it arrived (the gateway\'s reported status and a short reason code; never the number). The wording can mention a shift, an amount or a decision.',
     purpose: 'To avoid telling a person the same thing twice, and to show what they were told.',
     basis: 'Contract, and legitimate interest.',
     owner: 'Operations',

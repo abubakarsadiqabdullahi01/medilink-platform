@@ -53,6 +53,12 @@ interface Payload {
   status: 'ok' | 'degraded';
   problems: Problem[];
   outbox: { pending: number; failed: number; deadLetter: number };
+  messages: {
+    receiptsEnabled: boolean;
+    failedOver24h: number;
+    failedAfterAccepted24h: number;
+    unconfirmed: number | null;
+  };
   jobs: Job[];
   events: TroubledEvent[];
 }
@@ -138,6 +144,47 @@ export default function SystemPage() {
                 </Card>
               ))}
             </div>
+
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm">Texts in the last 24 hours</CardTitle>
+                <CardDescription className="text-xs">
+                  A text counts as sent once a gateway has taken it. These say what happened to the
+                  ones that did not go smoothly. Nothing here pages anybody.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  {(
+                    [
+                      [
+                        'Taken by the second gateway',
+                        system.data.messages.failedOver24h,
+                        'The first gateway failed and the second took them. A text can arrive twice when this happens.',
+                      ],
+                      [
+                        'Taken, then reported failed',
+                        system.data.messages.failedAfterAccepted24h,
+                        'A gateway accepted them and then said it could not deliver them.',
+                      ],
+                      [
+                        'Taken, no report yet',
+                        system.data.messages.unconfirmed,
+                        system.data.messages.receiptsEnabled
+                          ? 'Taken more than half an hour ago and not yet reported delivered.'
+                          : 'Not known: no gateway has been asked to send reports.',
+                      ],
+                    ] as [string, number | null, string][]
+                  ).map(([label, value, note]) => (
+                    <div key={label}>
+                      <p className="text-xs text-muted-foreground">{label}</p>
+                      <p className="tabular mt-1 text-2xl font-semibold">{value ?? 'Unknown'}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">{note}</p>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
 
             <Card>
               <CardHeader className="pb-3">

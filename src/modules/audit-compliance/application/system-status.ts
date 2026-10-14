@@ -1,4 +1,5 @@
 import { prisma, type Tx } from '@/lib/db';
+import { env } from '@/lib/env';
 import { recordAudit } from '@/lib/audit';
 import { HttpError } from '@/lib/http/errors';
 import { assessSystem, type Problem, type SystemSnapshot } from '../domain/system-health';
@@ -36,11 +37,56 @@ export interface JobStatusView {
   failureCount: number;
 }
 
+/**
+ * How texts have fared in the last day (M16-05). Information, not a problem: a failover is the
+ * system working, and what to page on is a threshold somebody should choose.
+ */
+export interface MessageDeliveryView {
+  /** Whether any gateway has been told where to send reports; without it "unconfirmed" means nothing. */
+  receiptsEnabled: boolean;
+  /** Messages a second gateway had to take because the first did not. */
+  failedOver24h: number;
+  /** Messages a gateway took and then reported it could not deliver. */
+  failedAfterAccepted24h: number;
+  /** Taken more than thirty minutes ago and still no final report; null when reports are not enabled. */
+  unconfirmed: number | null;
+}
+
 export interface SystemStatusView {
   status: 'ok' | 'degraded';
   problems: Problem[];
   outbox: SystemSnapshot['outbox'];
   jobs: JobStatusView[];
+  messages: MessageDeliveryView;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** How long a gateway is given to report before a message with no report is counted as unconfirmed. */
+const REPORT_GRACE_MS = 30 * 60 * 1000;
+
+async function messageDelivery(now: Date): Promise<MessageDeliveryView> {
+  const since = new Date(now.getTime() - DAY_MS);
+  const receiptsEnabled = Boolean(env.SMS_RECEIPT_SECRET);
+  const [failedOver24h, failedAfterAccepted24h, unconfirmed] = await Promise.all([
+    prisma.notificationMessage.count({
+      where: { channel: 'sms', failedOverFrom: { not: null }, createdAt: { gte: since } },
+    }),
+    prisma.notificationMessage.count({
+      where: { channel: 'sms', deliveryStatus: 'FAILED', createdAt: { gte: since } },
+    }),
+    receiptsEnabled
+      ? prisma.notificationMessage.count({
+          where: {
+            channel: 'sms',
+            provider: { not: null },
+            createdAt: { gte: since },
+            sentAt: { not: null, lte: new Date(now.getTime() - REPORT_GRACE_MS) },
+            OR: [{ deliveryStatus: null }, { deliveryStatus: 'PENDING' }],
+          },
+        })
+      : Promise.resolve(null),
+  ]);
+  return { receiptsEnabled, failedOver24h, failedAfterAccepted24h, unconfirmed };
 }
 
 /**
@@ -52,7 +98,7 @@ export interface SystemStatusView {
  * worker, how long it has been gone.
  */
 export async function systemStatus(now: Date = new Date()): Promise<SystemStatusView> {
-  const [grouped, oldestDue, jobs] = await Promise.all([
+  const [grouped, oldestDue, jobs, messages] = await Promise.all([
     prisma.outboxEvent.groupBy({
       by: ['status'],
       where: { status: { in: ['PENDING', 'FAILED', 'DEAD_LETTER'] } },
@@ -64,6 +110,7 @@ export async function systemStatus(now: Date = new Date()): Promise<SystemStatus
       select: { availableAt: true },
     }),
     prisma.scheduledJob.findMany({ orderBy: { key: 'asc' } }),
+    messageDelivery(now),
   ]);
 
   const count = (status: string) => grouped.find((row) => row.status === status)?._count._all ?? 0;
@@ -87,7 +134,7 @@ export async function systemStatus(now: Date = new Date()): Promise<SystemStatus
   }));
 
   const problems = assessSystem({ outbox, jobs: jobViews }, now);
-  return { status: problems.length === 0 ? 'ok' : 'degraded', problems, outbox, jobs: jobViews };
+  return { status: problems.length === 0 ? 'ok' : 'degraded', problems, outbox, jobs: jobViews, messages };
 }
 
 export interface TroubledEventView {
