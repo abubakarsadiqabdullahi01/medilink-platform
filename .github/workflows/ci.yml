@@ -169,12 +169,14 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       # MinIO stands in for Tigris, as it does in docker-compose. Started by
-      # hand because a service container cannot be given `server /data`.
+      # hand because a service container cannot be given `server /data`. The
+      # images come from quay.io: MinIO no longer publishes to Docker Hub, which
+      # answers "pull access denied" for minio/minio.
       - name: object storage
         run: |
-          docker run -d --name minio -p 9000:9000             -e MINIO_ROOT_USER=medilink -e MINIO_ROOT_PASSWORD=medilink-secret             minio/minio server /data
+          docker run -d --name minio -p 9000:9000             -e MINIO_ROOT_USER=medilink -e MINIO_ROOT_PASSWORD=medilink-secret             quay.io/minio/minio server /data
           for i in $(seq 1 30); do curl -sf http://localhost:9000/minio/health/live && break; sleep 2; done
-          docker run --rm --network host --entrypoint sh minio/mc -c             "mc alias set local http://localhost:9000 medilink medilink-secret && mc mb --ignore-existing local/medilink-documents"
+          docker run --rm --network host --entrypoint sh quay.io/minio/mc -c             "mc alias set local http://localhost:9000 medilink medilink-secret && mc mb --ignore-existing local/medilink-documents"
       - run: pnpm prisma migrate deploy && pnpm db:seed
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm build
