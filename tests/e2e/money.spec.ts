@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { confirmPassword, signIn } from './support/session';
-import { card, confirmItIsYou, expectToast, lagosLocal } from './support/ui';
+import { card, confirmItIsYou, expectToast, lagosLocal, toastsGone } from './support/ui';
 import { world } from './support/world';
 
 /**
@@ -46,6 +46,8 @@ test('an administrator raises an invoice for the approved work and issues it', a
   });
   gross = (await invoice.locator('p.tabular.text-lg').innerText()).trim();
   expect(gross).toMatch(/^₦[\d,]+\.\d{2}$/);
+  // The draft's toast can sit over this button once it is scrolled into view, and then never leaves.
+  await toastsGone(page);
   await invoice.getByRole('button', { name: 'Issue it' }).click();
   await expectToast(page, 'Issued');
 });

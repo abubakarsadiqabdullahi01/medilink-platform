@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, Search, TriangleAlert, Users } from 'lucide-react';
 import { api } from '@/lib/ui/api';
 import { useFacilityId } from '@/lib/ui/facility';
+import { agenda } from '@/lib/ui/agenda';
 import { useQueueAction } from '@/lib/ui/queue';
 import { useSession } from '@/lib/ui/session';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -122,6 +123,13 @@ export default function RosterPage() {
   const nextCursor = queue.data?.nextCursor ?? null;
   const filtered = Boolean(applied) || Boolean(from) || Boolean(to);
   const showsAttendance = status === 'CONFIRMED';
+  // The confirmed tab reads as an agenda: by the day each shift starts, in Lagos time (M08-01). The
+  // list is paged on the server, so this groups what is on the page; the date filters above narrow
+  // it across pages.
+  const groups: { key: string; heading: string | null; items: Assignment[] }[] = showsAttendance
+    ? agenda(rows, new Date(), 'all').groups
+    : [{ key: 'all', heading: null, items: rows }];
+  const columns = 4 + (showsAttendance ? 1 : 0) + (showsAttendance && canCancel ? 1 : 0);
 
   function clearFilters() {
     setSearch('');
@@ -260,62 +268,73 @@ export default function RosterPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map((row) => {
-                const started = new Date(row.startsAt) <= new Date();
+              {groups.map((group) => (
+                <Fragment key={group.key}>
+                  {group.heading ? (
+                    <TableRow className="bg-muted/40 hover:bg-muted/40">
+                      <TableCell colSpan={columns} className="py-1.5 text-xs font-semibold">
+                        {group.heading}
+                      </TableCell>
+                    </TableRow>
+                  ) : null}
+                  {group.items.map((row) => {
+                    const started = new Date(row.startsAt) <= new Date();
 
-                return (
-                  <TableRow key={row.id}>
-                    <TableCell>
-                      <p className="font-medium">{row.practitionerName}</p>
-                      {row.practitionerPhone ? (
-                        <p className="font-mono text-xs text-muted-foreground">
-                          {row.practitionerPhone}
-                        </p>
-                      ) : (
-                        <p className="text-xs text-muted-foreground">
-                          Phone shown from 2 days before the shift
-                        </p>
-                      )}
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap text-xs">
-                      <p>{formatWhen(row.startsAt)}</p>
-                      <p className="text-muted-foreground">
-                        {started ? 'started' : 'starts'} {formatAgo(row.startsAt)}
-                      </p>
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap text-xs">
-                      {formatWhen(row.endsAt)}
-                    </TableCell>
-                    <TableCell>
-                      <StatusBadge status={row.status} />
-                    </TableCell>
-                    {showsAttendance ? (
-                      <TableCell className="min-w-[260px]">
-                        {facilityId ? (
-                          <AttendancePanel assignmentId={row.id} facilityId={facilityId} attendance={row.attendance} />
+                    return (
+                      <TableRow key={row.id}>
+                        <TableCell>
+                          <p className="font-medium">{row.practitionerName}</p>
+                          {row.practitionerPhone ? (
+                            <p className="font-mono text-xs text-muted-foreground">
+                              {row.practitionerPhone}
+                            </p>
+                          ) : (
+                            <p className="text-xs text-muted-foreground">
+                              Phone shown from 2 days before the shift
+                            </p>
+                          )}
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-xs">
+                          <p>{formatWhen(row.startsAt)}</p>
+                          <p className="text-muted-foreground">
+                            {started ? 'started' : 'starts'} {formatAgo(row.startsAt)}
+                          </p>
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-xs">
+                          {formatWhen(row.endsAt)}
+                        </TableCell>
+                        <TableCell>
+                          <StatusBadge status={row.status} />
+                        </TableCell>
+                        {showsAttendance ? (
+                          <TableCell className="min-w-[260px]">
+                            {facilityId ? (
+                              <AttendancePanel assignmentId={row.id} facilityId={facilityId} attendance={row.attendance} />
+                            ) : null}
+                          </TableCell>
                         ) : null}
-                      </TableCell>
-                    ) : null}
-                    {showsAttendance && canCancel ? (
-                      <TableCell>
-                        {new Date(row.endsAt) > new Date() ? (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="text-destructive-text hover:bg-destructive/10 hover:text-destructive-text"
-                            onClick={() => {
-                              setCancelling(row);
-                              setReason('');
-                            }}
-                          >
-                            Cancel
-                          </Button>
+                        {showsAttendance && canCancel ? (
+                          <TableCell>
+                            {new Date(row.endsAt) > new Date() ? (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="text-destructive-text hover:bg-destructive/10 hover:text-destructive-text"
+                                onClick={() => {
+                                  setCancelling(row);
+                                  setReason('');
+                                }}
+                              >
+                                Cancel
+                              </Button>
+                            ) : null}
+                          </TableCell>
                         ) : null}
-                      </TableCell>
-                    ) : null}
-                  </TableRow>
-                );
-              })}
+                      </TableRow>
+                    );
+                  })}
+                </Fragment>
+              ))}
             </TableBody>
           </Table>
         </Card>

@@ -53,6 +53,19 @@ export async function expectToast(page: Page, title: string | RegExp): Promise<v
 }
 
 /**
+ * Waits for every toast to go.
+ *
+ * A toast sits at the bottom right and pauses its own timer while the mouse is over it. A button
+ * that Playwright has to scroll into view lands at the bottom edge, under the toast; the click
+ * moves the mouse onto the toast, the toast then never goes, and the click is intercepted for ever
+ * (money.spec.ts, "Issue it"). Wait with the mouse elsewhere, and the click lands.
+ */
+export async function toastsGone(page: Page): Promise<void> {
+  await page.mouse.move(0, 0);
+  await expect(page.locator('[data-sonner-toast]')).toHaveCount(0, { timeout: 30_000 });
+}
+
+/**
  * Answers the "Confirm it is you" dialog a money act opens, with the password the world
  * signs people in with. The act that opened it then carries on by itself.
  */

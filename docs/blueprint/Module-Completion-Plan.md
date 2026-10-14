@@ -233,7 +233,7 @@ The **Status** column is v1.0’s, unchanged: no module has been promoted, becau
 | M05 | Availability | PARTIAL | Free tonight, all day, one date; Lagos time. | PILOT READY | G1 |
 | M06 | Service requests | CORE READY | Level and supervision on the request; shift type from the hours; terms shown and kept; no publish without a floor. | PILOT READY | G1–G2 |
 | M07 | Matching and assignment | CORE READY; integration and browser validation green in CI on `9a93861` | Lock and revalidate, privacy of contact, level matching. | PILOT READY | G1–G2 |
-| M08 | Scheduling | STUB | A reminder before the start; Lagos time. Agenda views, rota and swaps not built. | Minimum pilot schedule ready | G1; full at G5 |
+| M08 | Scheduling | STUB | A reminder before the start; Lagos time; confirmed shifts as a day-by-day agenda for the practitioner and, within a page, the facility. Rota, swaps and a calendar not built. | Minimum pilot schedule ready | G1; full at G5 |
 | M09 | Attendance | CORE READY; validated in CI | Code and facility ownership checks; an alert thirty minutes into a missed shift. Weak-network fallback not built. | PILOT READY | G1 |
 | M10 | Timesheets | CORE READY; validated in CI | Approval shows the billed amount. Deadline policy open. | PILOT READY | G1 |
 | M11 | Rates and contracts | PARTIAL | Floors required, per level, set on a screen; premiums fixed at booking; holidays to 2030. Figures are the regulators’; cancellation fees and counsel’s terms open. | PILOT READY | G1–G2 |
@@ -441,7 +441,7 @@ The **Status** column is v1.0’s, unchanged: no module has been promoted, becau
 
 ### Ordered work
 
-- [ ] `M08-01` Deliver pilot agenda/day/week views from confirmed bookings.
+- [~] `M08-01` Deliver pilot agenda/day/week views from confirmed bookings. *Done: the practitioner’s confirmed shifts are an agenda, grouped under the day each starts in Lagos time (Today, Tomorrow, then the weekday and date) with Today / Next 7 days / All and a count of what the range left out; one under way is listed under today even if it began last night, and one that has ended and is still confirmed is shown first in every range, because it is the one that needs hours or an excuse. The facility’s roster groups the confirmed tab the same way within each page. Not done: a facility range switch (its list is paged on the server, so a page-wide filter would be wrong across pages), a week grid or calendar, and the other tabs.*
 - [~] `M08-02` Add configurable 24-hour and near-start reminders (`SCH-02`). *A reminder three hours before a confirmed shift; nobody is told twice (`ed67c35`). Not configurable, and no 24-hour reminder.*
 - [~] `M08-03` Detect missing check-in early enough for the facility to respond. *Practitioner and facility are told thirty minutes into a shift with no check-in (`ed67c35`). The replacement search is not built (`SAN-01` in part).*
 - [~] `M08-04` Maintain federal and selected state holidays as versioned data (`SCH-03`). *Fixed and Easter-derived holidays generated to 2030, a screen to add declared Islamic holidays, and a coverage check that says what is missing (`20fb06d`). State holidays not checked.*
