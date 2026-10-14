@@ -1200,9 +1200,12 @@ model NotificationMessage {
   relatedId   String?   @map("related_id") @db.Uuid
   sentAt      DateTime? @map("sent_at")
   failureReason String? @map("failure_reason")
+  // When the person opened it in the app's inbox. Null is unread (UXP-01).
+  readAt      DateTime? @map("read_at")
   createdAt   DateTime  @default(now()) @map("created_at")
 
   @@index([userId, createdAt])
+  @@index([userId, readAt, createdAt])
   @@index([relatedType, relatedId])
   @@index([userId, kind, relatedId])
   @@map("messages")

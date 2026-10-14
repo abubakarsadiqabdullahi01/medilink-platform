@@ -29,6 +29,7 @@ import {
 import { cn } from '@/lib/utils';
 import { Avatar } from '@/components/app/avatar';
 import { SuggestionDialog } from '@/components/app/suggestion-dialog';
+import { NotificationBell } from '@/components/app/notification-bell';
 import { TextSizeControl } from '@/components/app/text-size-control';
 import { api } from '@/lib/ui/api';
 import { useSession } from '@/lib/ui/session';
@@ -318,6 +319,7 @@ export function ConsoleShell({
           <p className="truncate font-semibold tracking-tight lg:hidden">{title}</p>
 
           <div className="ml-auto flex items-center gap-1">
+            <NotificationBell />
             <TextSizeControl />
             <Button variant="ghost" size="icon" onClick={toggleTheme} aria-label="Toggle theme">
               {dark ? <Sun /> : <Moon />}
