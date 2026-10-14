@@ -2,6 +2,7 @@ import { handleGuardedRequest } from '@/lib/http/guarded-handler';
 import {
   attachEvidenceSchema,
   disputeIdSchema,
+  partyScope,
 } from '@/modules/disputes/presentation/schemas';
 import { attachEvidence, listEvidence } from '@/modules/disputes/application/evidence';
 
@@ -21,7 +22,8 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
       source: 'body',
       schema: attachEvidenceSchema,
       permission: 'dispute.manage',
-      scope: (_input, session) => ({ type: 'SELF', id: session.userId }),
+      // Either side: a practitioner as themselves, a facility's owner for the facility.
+      scope: partyScope,
       action: async ({ input, session }) =>
         attachEvidence({
           disputeId: input.id,

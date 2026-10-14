@@ -4,6 +4,7 @@ import {
   Building2,
   CalendarPlus,
   FileText,
+  Gavel,
   LayoutDashboard,
   Percent,
   ReceiptText,
@@ -64,6 +65,12 @@ const SECTIONS: NavSection[] = [
         label: 'Invoices',
         icon: FileText,
         permission: 'invoice.read',
+      },
+      {
+        href: '/facility/disputes',
+        label: 'Disputes',
+        icon: Gavel,
+        permission: 'dispute.manage',
       },
       {
         href: '/facility/rates',

@@ -604,3 +604,58 @@ export async function listDisputes(
     nextCursor: rows.length > limit ? (page[page.length - 1]?.id ?? null) : null,
   };
 }
+
+
+/** A case as the facility it is over sees it in a list. */
+export interface FacilityDisputeRow extends DisputeView {
+  practitionerName: string;
+  shiftStartsAt: Date;
+  /** Whether it was the facility's side that raised it. */
+  raisedByFacility: boolean;
+}
+
+/**
+ * Every case over this facility's own shifts, newest first, every status: a case
+ * decided last month is still something the facility answers for.
+ *
+ * The facility is the shift's, not the caller's word: the filter is the
+ * assignment's own facility. The route has already proved the caller holds
+ * `dispute.manage` over it.
+ */
+export async function listDisputesForFacility(
+  facilityId: string,
+  status?: DisputeStatusValue,
+): Promise<FacilityDisputeRow[]> {
+  const rows = await prisma.dispute.findMany({
+    where: { assignment: { facilityId }, ...(status ? { status } : {}) },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    take: 200,
+    include: {
+      assignment: {
+        select: { userId: true, facilityId: true, startsAt: true, user: { select: { fullName: true } } },
+      },
+    },
+  });
+
+  return rows.map((row) => ({
+    ...toView(row, row.assignment.userId, row.assignment.facilityId),
+    practitionerName: row.assignment.user.fullName,
+    shiftStartsAt: row.assignment.startsAt,
+    raisedByFacility: row.raisedParty === 'FACILITY',
+  }));
+}
+
+/**
+ * One case, for somebody who is a party to it or the adjudicator, and for nobody
+ * else: a stranger gets "not found", the answer an id that does not exist would
+ * get. Also says which side the viewer is on.
+ */
+export async function getCaseForParty(
+  disputeId: string,
+  viewerId: string,
+): Promise<{ dispute: DisputeView; side: CaseSide }> {
+  const { row, assignment } = await loadCase(disputeId);
+  const side = await sideOnCase(viewerId, assignment);
+  if (side === null) throw DisputeErrors.notFound();
+  return { dispute: toView(row, assignment.userId, assignment.facilityId), side };
+}

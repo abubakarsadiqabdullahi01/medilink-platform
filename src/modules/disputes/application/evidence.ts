@@ -286,3 +286,37 @@ export async function requestEvidenceDownloadUrl(input: {
 
   return { url };
 }
+
+
+/** Evidence as a party to the case reads it: by side, never by the name of whoever attached it. */
+export interface PartyEvidenceItem {
+  id: string;
+  note: string | null;
+  createdAt: Date;
+  attachedBySide: 'PRACTITIONER' | 'FACILITY';
+  /** Whether it was the reader, or their own side, who attached it. */
+  bySide: boolean;
+}
+
+/**
+ * Everything attached to the case, for one of its two sides or the adjudicator.
+ *
+ * The other side's evidence is read like the party's own, because a case argued
+ * from evidence one side cannot see is not an argument. What they do not get is
+ * the name of the person who attached it, or the file's key: the file is read
+ * through `requestEvidenceDownloadUrl`, which is audited.
+ */
+export async function listEvidenceForParty(
+  disputeId: string,
+  viewerId: string,
+): Promise<PartyEvidenceItem[]> {
+  const { side } = await caseFor(disputeId, viewerId);
+  const items = await listEvidence(disputeId);
+  return items.map((item) => ({
+    id: item.id,
+    note: item.note,
+    createdAt: item.createdAt,
+    attachedBySide: item.attachedBySide,
+    bySide: item.attachedBySide === side,
+  }));
+}

@@ -28,13 +28,31 @@ export const listDisputesSchema = z.object({
 export const disputeIdSchema = z.object({ id: uuid });
 
 /**
+ * A party's act on a case. A practitioner acts as themselves; somebody acting for
+ * a facility says which, and the guard proves they hold `dispute.manage` over
+ * *that* facility. Whether the case is theirs is the application's to prove: it
+ * is checked against the shift's own facility, never trusted from here.
+ */
+export const partyDisputeSchema = z.object({ id: uuid, facilityId: uuid.optional() });
+
+/** The scope a party's act is authorised against: the facility they act for, or themselves. */
+export function partyScope(
+  input: { facilityId?: string },
+  session: { userId: string },
+): { type: 'FACILITY'; id: string } | { type: 'SELF'; id: string } {
+  return input.facilityId
+    ? { type: 'FACILITY', id: input.facilityId }
+    : { type: 'SELF', id: session.userId };
+}
+
+/**
  * One piece of evidence, identified by both ids.
  *
  * The dispute id comes from the path and the evidence id with it, so a
  * request cannot name evidence belonging to a different case and have the
  * scope check pass on the one it claims.
  */
-export const evidenceUrlSchema = z.object({ id: uuid, evidenceId: uuid });
+export const evidenceUrlSchema = z.object({ id: uuid, evidenceId: uuid, facilityId: uuid.optional() });
 
 export const resolveDisputeSchema = z.object({
   id: uuid,
@@ -47,6 +65,7 @@ export type ResolveDisputeInput = z.infer<typeof resolveDisputeSchema>;
 
 export const evidenceUploadUrlSchema = z.object({
   id: uuid,
+  facilityId: uuid.optional(),
   filename: z.string().trim().min(1).max(255),
   contentType: z.string().trim().min(1).max(120),
   sizeBytes: z.coerce.number().int().positive(),
@@ -55,12 +74,18 @@ export type EvidenceUploadUrlInput = z.infer<typeof evidenceUploadUrlSchema>;
 
 export const attachEvidenceSchema = z.object({
   id: uuid,
+  facilityId: uuid.optional(),
   objectKey: z.string().trim().min(1).max(500),
   note: z.string().trim().max(500).optional(),
 });
 export type AttachEvidenceInput = z.infer<typeof attachEvidenceSchema>;
 
 export const disputeQueueSchema = z.object({
+  /**
+   * Set when a facility reads the cases over its own shifts. Without it this is the
+   * adjudicator's queue, and needs `dispute.manage` over the whole platform.
+   */
+  facilityId: uuid.optional(),
   status: z.enum(['OPEN', 'UNDER_REVIEW', 'RESOLVED', 'WITHDRAWN']).optional(),
   /** Matches the practitioner's name or the facility's. */
   search: z.string().trim().max(120).optional(),

@@ -1,5 +1,5 @@
 import { handleGuardedRequest } from '@/lib/http/guarded-handler';
-import { evidenceUploadUrlSchema } from '@/modules/disputes/presentation/schemas';
+import { evidenceUploadUrlSchema, partyScope } from '@/modules/disputes/presentation/schemas';
 import { requestEvidenceUploadUrl } from '@/modules/disputes/application/evidence';
 
 /**
@@ -16,7 +16,7 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
       source: 'body',
       schema: evidenceUploadUrlSchema,
       permission: 'dispute.manage',
-      scope: (_input, session) => ({ type: 'SELF', id: session.userId }),
+      scope: partyScope,
       action: async ({ input, session }) =>
         requestEvidenceUploadUrl({
           disputeId: input.id,
