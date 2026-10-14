@@ -1,5 +1,7 @@
 import { prisma, type Tx } from '@/lib/db';
 import { recordAudit } from '@/lib/audit';
+import { EVENTS } from '@/lib/events';
+import { publishEvent } from '@/lib/outbox';
 import { HttpError } from '@/lib/http/errors';
 import {
   DECLINE_REASON_AREA,
@@ -180,6 +182,23 @@ export async function triageSuggestion(input: TriageParams): Promise<SuggestionV
 
     const row = await tx.suggestion.findUniqueOrThrow({ where: { id: existing.id } });
 
+    // An answer, not housekeeping, goes back to the person who wrote it: planned, done or declined.
+    // No author, no event: a decline reason has none and must not acquire one. The event says that
+    // there is an answer and nothing of what was written or answered; the screen has that.
+    if (ANSWER_STATUSES.includes(input.status) && row.raisedBy) {
+      await publishEvent(tx, {
+        eventType: EVENTS.SuggestionAnswered,
+        aggregateType: 'suggestions.suggestions',
+        aggregateId: row.id,
+        payload: {
+          suggestionId: row.id,
+          userId: row.raisedBy,
+          status: row.status,
+          answeredAt: row.triagedAt?.toISOString(),
+        },
+      });
+    }
+
     await recordAudit(tx, {
       action: 'suggestion.triaged',
       entityType: 'suggestions.suggestions',
@@ -192,6 +211,51 @@ export async function triageSuggestion(input: TriageParams): Promise<SuggestionV
     });
 
     return toView(row);
+  });
+}
+
+/** Statuses that tell the author something: it is going to be done, it is done, or it will not be. */
+export const ANSWER_STATUSES: SuggestionStatusValue[] = ['PLANNED', 'DONE', 'DECLINED'];
+
+/**
+ * What a person may read of their own suggestion: what they wrote, where it stands, and the answer.
+ * No officer's name or id, and nothing else the platform holds about it.
+ */
+export interface MySuggestionView {
+  id: string;
+  area: SuggestionAreaValue;
+  body: string;
+  status: SuggestionStatusValue;
+  /** The answer, written for the author (the triage screen calls it "Answer"). Null until there is one. */
+  response: string | null;
+  /** When it was planned, done or declined; null while it is new or only triaged. */
+  answeredAt: Date | null;
+  createdAt: Date;
+}
+
+/**
+ * The caller's own suggestions, newest first (SUG-01).
+ *
+ * Keyed by the author and by nothing else, so there is no way to ask for somebody else's. A decline
+ * reason has no author and is never here. The form promised a reply; this is where the author finds it.
+ */
+export async function listMySuggestions(userId: string, limit = 100): Promise<MySuggestionView[]> {
+  const rows = await prisma.suggestion.findMany({
+    where: { raisedBy: userId },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    take: limit,
+  });
+  return rows.map((row) => {
+    const status = row.status as SuggestionStatusValue;
+    return {
+      id: row.id,
+      area: row.area as SuggestionAreaValue,
+      body: row.body,
+      status,
+      response: row.response,
+      answeredAt: ANSWER_STATUSES.includes(status) ? row.triagedAt : null,
+      createdAt: row.createdAt,
+    };
   });
 }
 

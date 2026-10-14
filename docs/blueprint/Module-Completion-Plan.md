@@ -243,7 +243,7 @@ The **Status** column is v1.0’s, unchanged: no module has been promoted, becau
 | M15 | Clinical incidents | PARTIAL | Severe-incident alert; no patient identity in a summary. Interim restriction and clinical-governance process open. | PILOT READY | G1 |
 | M16 | Notifications | PARTIAL | Texts for the main transitions, retry, in-app inbox, Termii and Africa’s Talking adapters (never run live). No provider account, receipts or failover. | PILOT READY with real provider | G1 |
 | M17 | Audit, consent and compliance | PARTIAL | Erasure that deletes, audit trail free of personal data, data inventory, purge job. Retention and bases unsigned by counsel. | PILOT READY | G1 |
-| M18 | Suggestions and feedback | BASIC | No change. | Closed feedback loop | G1 |
+| M18 | Suggestions and feedback | BASIC | The author can see where each suggestion stands and read the answer, and is texted when it is planned, done or declined. Categories, duplicate linking and measurement open. | Closed feedback loop | G1 |
 | X01 | Reference data and configuration | PARTIAL | Screens for levels and registration categories, pay floors, holidays, sanctions. Credential requirements and fee policy not built; no maker-checker. | PILOT READY for selected scope | G1–G2 |
 | X02 | Platform and operations | PARTIAL | CI runs every suite; image carries the worker; health screen; stranded events reclaimed. Nothing deploys; no alert channel; no restored backup; no staging. | PILOT READY | G0–G1 |
 | X03 | Practitioner console | PARTIAL | Inbox, forgot-password, free-tonight, offer terms, larger text. | PILOT READY | G1–G3 |
@@ -693,8 +693,8 @@ The **Status** column is v1.0’s, unchanged: no module has been promoted, becau
 ### Ordered work
 
 - [ ] `M18-01` Add categories, severity, duplicate linking and responsible team.
-- [ ] `M18-02` Let the author track status without exposing internal/private notes.
-- [ ] `M18-03` Add acknowledgement, request-for-information and resolution messages.
+- [x] `M18-02` Let the author track status without exposing internal/private notes. *`GET /api/v1/me/suggestions` and a “Yours” view in the suggestion dialog show what they wrote, where it stands (received, being looked at, planned, done, not taken forward) and the answer written for them. Keyed by the author only; no officer’s name or id; a decline reason, which has no author, is never in it (`SUG-01`).*
+- [~] `M18-03` Add acknowledgement, request-for-information and resolution messages. *Resolution done: when a suggestion is planned, done or declined the author is texted which, and it is in their inbox, once per answer and retried if the text does not go; the text never carries what they wrote or the answer, which are on their screen (`SUG-02`). Acknowledgement is the “Received” status in “Yours”, not a text. Request-for-information is not built: there is no state for it.*
 - [ ] `M18-04` Measure response time, recurring themes and changes produced by feedback.
 - [ ] `M18-05` Keep clinical incidents, disputes and account support out of the suggestion queue through clear routing.
 

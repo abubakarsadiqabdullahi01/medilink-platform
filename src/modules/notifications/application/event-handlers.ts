@@ -203,6 +203,43 @@ export async function notifyFacilityVerified(payload: Record<string, unknown>): 
   ]);
 }
 
+/**
+ * `suggestion.answered`: the author is told their suggestion was planned, done or declined (SUG-02).
+ *
+ * Only that it was, and which: the answer is on their screen behind the sign-in, and a text carries
+ * neither what they wrote nor what they were told. A suggestion that is planned and later done is two
+ * answers and two texts; one answer is told once however often the event is retried.
+ */
+const SUGGESTION_ANSWERS: Record<string, string> = {
+  PLANNED: 'Your suggestion to Medilink is planned: we are going to do it.',
+  DONE: 'Your suggestion to Medilink is done: we made the change.',
+  DECLINED: 'Your suggestion to Medilink was looked at and will not be taken forward.',
+};
+
+export async function notifySuggestionAnswered(payload: Record<string, unknown>): Promise<void> {
+  const suggestionId = text(payload.suggestionId);
+  const userId = text(payload.userId);
+  const status = text(payload.status);
+  const answeredAt = new Date(text(payload.answeredAt));
+  const wording = SUGGESTION_ANSWERS[status];
+  if (!suggestionId || !userId || !wording || Number.isNaN(answeredAt.getTime())) {
+    logger.warn('suggestion.answered event missing or unreadable fields; skipping notification');
+    return;
+  }
+
+  await tellAll([
+    {
+      userId,
+      kind: 'suggestion.answered',
+      body: `${wording} Open Medilink to read the reply. Medilink.`,
+      relatedType: 'suggestions.suggestions',
+      relatedId: suggestionId,
+      // Told about *this* answer: one sent for an earlier one does not count.
+      since: answeredAt,
+    },
+  ]);
+}
+
 async function assignmentFacts(assignmentId: string) {
   const assignment = await prisma.assignment.findUnique({
     where: { id: assignmentId },

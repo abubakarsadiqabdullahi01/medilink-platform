@@ -775,6 +775,7 @@ const NO_TENANT_IDENTIFIER: Record<string, string> = {
   'me/notifications/read':
     'the caller’s own inbox: the ids in the body are matched against the session’s own messages, which inbox.test.ts attacks',
   'me/payout-account': 'the caller’s own account, read from the session',
+  'me/suggestions': 'the caller’s own suggestions, read from the session; suggestion-feedback.test.ts attacks it',
   'payout-accounts': 'the platform’s review queue; takes no identifier',
   'practitioners/me': 'the caller’s own profile, read from the session',
   'practitioners/me/photo-upload-url': 'the caller’s own photograph; takes no identifier',

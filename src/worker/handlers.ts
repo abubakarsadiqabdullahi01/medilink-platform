@@ -22,6 +22,7 @@ import {
   notifyFacilityVerified,
   notifyShiftAccepted,
   notifyShiftInvited,
+  notifySuggestionAnswered,
   notifyTimesheetApproved,
   notifyTimesheetSubmitted,
 } from '../modules/notifications/application/event-handlers';
@@ -58,6 +59,7 @@ export const handlers: Record<string, EventHandler> = {
   [EVENTS.CredentialInfoRequested]: async (payload) => notifyCredentialInfoRequested(payload),
   [EVENTS.CredentialExpired]: async (payload) => notifyCredentialExpired(payload),
   [EVENTS.FacilityVerified]: async (payload) => notifyFacilityVerified(payload),
+  [EVENTS.SuggestionAnswered]: async (payload) => notifySuggestionAnswered(payload),
   [EVENTS.TimesheetSubmitted]: async (payload) => notifyTimesheetSubmitted(payload),
   [EVENTS.TimesheetApproved]: async (payload) => notifyTimesheetApproved(payload),
   [EVENTS.DisputeOpened]: async (payload) => notifyDisputeOpened(payload),
