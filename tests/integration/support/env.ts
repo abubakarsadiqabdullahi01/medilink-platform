@@ -32,3 +32,8 @@ process.env.MDCN_VERIFICATION_PROVIDER = process.env.TEST_MDCN_VERIFICATION_PROV
 // which buries a test failure under the worker's own commentary. TEST_LOG_LEVEL
 // turns it back on when a test needs to be watched.
 process.env.LOG_LEVEL = process.env.TEST_LOG_LEVEL ?? 'error';
+
+// Releasing a payout needs somebody other than the person who prepared it. Most
+// of the suite prepares and releases as one person because it is about something
+// else, so the control is off for the run; the cases that are about it unset it.
+process.env.PAYOUT_SECOND_APPROVER = 'off';

@@ -40,6 +40,8 @@ const REDACTED_KEYS = new Set([
   'passwordHash', 'password', 'codeHash', 'tokenHash', 'accountNumber',
   'bvn', 'nin', 'secret', 'apiKey',
   'fullName', 'email', 'contactEmail', 'contactPhone', 'dateOfBirth', 'addressLine',
+  // A payment's payer, and the bank reference that so often carries their name.
+  'payerName', 'paymentReference',
 ]);
 
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;

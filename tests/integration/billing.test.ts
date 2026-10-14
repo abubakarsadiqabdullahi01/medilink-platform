@@ -1,5 +1,5 @@
 import { Prisma } from '@prisma/client';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/modules/practitioners/application/bookable', () => import('./support/always-bookable'));
 
@@ -237,6 +237,22 @@ const period = (world: World) => ({
   periodStart: PERIOD_START,
   periodEnd: PERIOD_END,
   actorId: world.financeId,
+});
+
+/** What a payment record has to say, for an invoice paid in full today. */
+const lagosToday = () => new Date(Date.now() + 3600_000).toISOString().slice(0, 10);
+const paidInFull = (
+  invoice: { id: string; grossKobo: number },
+  world: World,
+  overrides: Record<string, unknown> = {},
+) => ({
+  invoiceId: invoice.id,
+  actorId: world.financeId,
+  reference: 'FBN/TRF/0042',
+  amountKobo: invoice.grossKobo,
+  paidOn: lagosToday(),
+  payerName: 'Kano Teaching Hospital',
+  ...overrides,
 });
 
 beforeEach(() => {
@@ -608,7 +624,7 @@ describe('the ledger', () => {
     expect(await amountOwed(world.practitionerId)).toBe(4_000_000);
 
     await issueInvoice({ invoiceId: invoice.id, actorId: world.financeId });
-    await recordPayment({ invoiceId: invoice.id, actorId: world.financeId });
+    await recordPayment(paidInFull(invoice, world));
 
     expect(await accountBalance('FACILITY_PAYABLE', world.facilityId)).toBe(0);
     expect(await accountBalance('CASH')).toBe(4_000_000);
@@ -631,7 +647,7 @@ describe('the ledger', () => {
     const world = await buildWorld();
     const invoice = await generateInvoice(period(world));
     await issueInvoice({ invoiceId: invoice.id, actorId: world.financeId });
-    await recordPayment({ invoiceId: invoice.id, actorId: world.financeId });
+    await recordPayment(paidInFull(invoice, world));
 
     const rows = await prisma.ledgerEntry.groupBy({
       by: ['transactionId'],
@@ -649,7 +665,7 @@ describe('paying a practitioner', () => {
     const world = await buildWorld();
     const invoice = await generateInvoice(period(world));
     await issueInvoice({ invoiceId: invoice.id, actorId: world.financeId });
-    await recordPayment({ invoiceId: invoice.id, actorId: world.financeId });
+    await recordPayment(paidInFull(invoice, world));
 
     const prepared = await preparePayout({
       practitionerId: world.practitionerId,
@@ -769,6 +785,40 @@ describe('paying a practitioner', () => {
       new Request(`http://localhost/api/v1/payouts?scopeType=SELF&scopeId=${world.practitionerId}`),
     );
     expect(self.status).toBe(403);
+  });
+
+  it('tells staff whether they prepared a payout, and tells the practitioner nothing about who did', async () => {
+    const world = await buildWorld();
+    await grant({
+      userId: world.practitionerId,
+      roleKey: 'practitioner',
+      permissions: ['invoice.read'],
+      scopeType: 'SELF',
+      scopeId: world.practitionerId,
+    });
+    await generateInvoice(period(world));
+    await preparePayout({ practitionerId: world.practitionerId, actorId: world.financeId });
+
+    await issueSession({ userId: world.financeId });
+    const staff = await getPayoutsRoute(
+      new Request(`http://localhost/api/v1/payouts?scopeType=PLATFORM&scopeId=${world.practitionerId}`),
+    );
+    const staffBody = (await staff.json()) as {
+      payouts: Record<string, unknown>[];
+      secondApproverRequired: boolean;
+    };
+    expect(staffBody.payouts[0]).toMatchObject({ preparedByYou: true });
+    expect(staffBody.payouts[0]).not.toHaveProperty('preparedBy');
+    expect(typeof staffBody.secondApproverRequired).toBe('boolean');
+
+    clearCookies();
+    await issueSession({ userId: world.practitionerId });
+    const own = await getPayoutsRoute(new Request('http://localhost/api/v1/payouts?scopeType=SELF'));
+    const ownBody = (await own.json()) as { payouts: Record<string, unknown>[] };
+    expect(ownBody.payouts).toHaveLength(1);
+    expect(JSON.stringify(ownBody)).not.toContain(world.financeId);
+    expect(ownBody.payouts[0]).not.toHaveProperty('preparedBy');
+    expect(ownBody.payouts[0]).not.toHaveProperty('preparedByYou');
   });
 
   it('tells a practitioner what they are owed as well as what has been paid', async () => {
@@ -1182,7 +1232,7 @@ describe('invoice status', () => {
     const invoice = await generateInvoice(period(world));
 
     await expect(
-      recordPayment({ invoiceId: invoice.id, actorId: world.financeId }),
+      recordPayment(paidInFull(invoice, world)),
     ).rejects.toThrow(/cannot become PAID/);
   });
 
@@ -1194,5 +1244,225 @@ describe('invoice status', () => {
     await expect(
       issueInvoice({ invoiceId: invoice.id, actorId: world.financeId }),
     ).rejects.toThrow(/cannot become ISSUED/);
+  });
+});
+
+describe('recording a payment', () => {
+  async function issued() {
+    const world = await buildWorld();
+    const invoice = await generateInvoice(period(world));
+    await issueInvoice({ invoiceId: invoice.id, actorId: world.financeId });
+    return { world, invoice };
+  }
+
+  const unpaid = async (invoiceId: string) => {
+    const row = await prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
+    expect(row.status).toBe('ISSUED');
+    expect(await prisma.ledgerEntry.count({ where: { account: 'CASH' } })).toBe(0);
+  };
+
+  it('keeps the reference, the amount, the date and the payer on the invoice', async () => {
+    const { world, invoice } = await issued();
+
+    const paid = await recordPayment(
+      paidInFull(invoice, world, { reference: '  GTB/INW/77881  ', payerName: ' Kano Teaching Hospital ' }),
+    );
+
+    expect(paid).toMatchObject({
+      status: 'PAID',
+      paymentReference: 'GTB/INW/77881',
+      paymentAmountKobo: invoice.grossKobo,
+      paidOn: lagosToday(),
+      payerName: 'Kano Teaching Hospital',
+    });
+    const row = await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } });
+    expect(row.paymentReference).toBe('GTB/INW/77881');
+    expect(row.paymentAmountKobo).toBe(invoice.grossKobo);
+    expect(row.payerName).toBe('Kano Teaching Hospital');
+    expect(row.paidOn?.toISOString().slice(0, 10)).toBe(lagosToday());
+  });
+
+  it('refuses an amount that is not the invoice, and records nothing', async () => {
+    const { world, invoice } = await issued();
+
+    await expect(
+      recordPayment(paidInFull(invoice, world, { amountKobo: invoice.grossKobo - 100 })),
+    ).rejects.toMatchObject({ code: 'payment_amount_mismatch', status: 422 });
+
+    await unpaid(invoice.id);
+  });
+
+  it('says what the invoice comes to when it refuses the amount', async () => {
+    const { world, invoice } = await issued();
+
+    await expect(
+      recordPayment(paidInFull(invoice, world, { amountKobo: 1 })),
+    ).rejects.toThrow(/40,000/);
+  });
+
+  it('refuses a missing reference or payer', async () => {
+    const { world, invoice } = await issued();
+
+    await expect(recordPayment(paidInFull(invoice, world, { reference: ' ' }))).rejects.toMatchObject({
+      code: 'payment_reference_required',
+    });
+    await expect(recordPayment(paidInFull(invoice, world, { payerName: '' }))).rejects.toMatchObject({
+      code: 'payment_payer_required',
+    });
+    await unpaid(invoice.id);
+  });
+
+  it('refuses a date in the future, one that is not a date, and one before the invoice existed', async () => {
+    const { world, invoice } = await issued();
+    const tomorrow = new Date(Date.now() + 3600_000 + 86_400_000).toISOString().slice(0, 10);
+
+    await expect(recordPayment(paidInFull(invoice, world, { paidOn: tomorrow }))).rejects.toMatchObject({
+      code: 'payment_date_invalid',
+    });
+    await expect(recordPayment(paidInFull(invoice, world, { paidOn: '13/10/2026' }))).rejects.toMatchObject({
+      code: 'payment_date_invalid',
+    });
+    await expect(recordPayment(paidInFull(invoice, world, { paidOn: '2020-01-01' }))).rejects.toMatchObject({
+      code: 'payment_date_invalid',
+    });
+    await unpaid(invoice.id);
+  });
+
+  it('writes the audit row with the amount and date but not the payer or the reference', async () => {
+    const { world, invoice } = await issued();
+
+    await recordPayment(paidInFull(invoice, world, { reference: 'TRF FROM ADAMU BELLO 123', payerName: 'Adamu Bello' }));
+
+    const row = await prisma.auditLog.findFirstOrThrow({ where: { action: 'invoice.paid' } });
+    const written = JSON.stringify(row);
+    expect(written).toContain(String(invoice.grossKobo));
+    expect(written).toContain(lagosToday());
+    expect(written).not.toContain('Adamu');
+    expect(written).not.toContain('ADAMU');
+  });
+
+  it('is what the payment event and the ledger rest on, as before', async () => {
+    const { world, invoice } = await issued();
+
+    await recordPayment(paidInFull(invoice, world));
+
+    expect(await accountBalance('CASH')).toBe(invoice.grossKobo);
+    const events = await prisma.outboxEvent.findMany({ where: { eventType: EVENTS.PaymentCompleted } });
+    expect(events).toHaveLength(1);
+    expect(JSON.stringify(events[0]!.payload)).not.toContain('Kano Teaching Hospital');
+  });
+});
+
+describe('a payout needs a second person', () => {
+  /**
+   * UXO-03. The same holder of payout.manage could prepare a payout and release
+   * it, so one person alone could move money out. The person who prepares one
+   * cannot release it. A pilot with one finance person can turn that off on
+   * purpose; the default is that it is on.
+   */
+  const SETTING = 'PAYOUT_SECOND_APPROVER';
+  const original = process.env[SETTING];
+
+  beforeEach(() => {
+    // The suite runs with it off, so the other cases can prepare and release as one
+    // person; these are about the rule itself, so they run with it unset.
+    delete process.env[SETTING];
+  });
+  afterAll(() => {
+    if (original === undefined) delete process.env[SETTING];
+    else process.env[SETTING] = original;
+  });
+
+  async function preparedPayout() {
+    const world = await buildWorld();
+    await generateInvoice(period(world));
+    const payout = await preparePayout({ practitionerId: world.practitionerId, actorId: world.financeId });
+    const colleague = await createUser({ fullName: 'Second Finance Officer' });
+    await grant({
+      userId: colleague.id,
+      roleKey: 'finance_officer_2',
+      permissions: ['payout.manage', 'invoice.read'],
+      scopeType: 'PLATFORM',
+    });
+    return { world, payout, colleague };
+  }
+
+  const status = async (id: string) => (await prisma.payout.findUniqueOrThrow({ where: { id } })).status;
+
+  it('refuses the person who prepared it, and sends nothing', async () => {
+    const { world, payout } = await preparedPayout();
+
+    await expect(releasePayout({ payoutId: payout.id, actorId: world.financeId })).rejects.toMatchObject({
+      code: 'second_approver_required',
+      status: 403,
+    });
+
+    const row = await prisma.payout.findUniqueOrThrow({ where: { id: payout.id } });
+    expect(row.status).toBe('PREPARED');
+    expect(row.providerReference).toBeNull();
+    expect(row.releasedBy).toBeNull();
+    expect(await prisma.ledgerEntry.count({ where: { payoutId: payout.id } })).toBe(0);
+  });
+
+  it('lets somebody else release it, and records who', async () => {
+    const { payout, colleague } = await preparedPayout();
+
+    await releasePayout({ payoutId: payout.id, actorId: colleague.id });
+
+    const row = await prisma.payout.findUniqueOrThrow({ where: { id: payout.id } });
+    expect(row.status).toBe('SETTLED');
+    expect(row.releasedBy).toBe(colleague.id);
+  });
+
+  it('records who prepared it, from the start', async () => {
+    const { world, payout } = await preparedPayout();
+
+    const row = await prisma.payout.findUniqueOrThrow({ where: { id: payout.id } });
+    expect(row.preparedBy).toBe(world.financeId);
+  });
+
+  it('can be turned off on purpose, for a pilot with one finance person', async () => {
+    const { world, payout } = await preparedPayout();
+    process.env[SETTING] = 'off';
+
+    await releasePayout({ payoutId: payout.id, actorId: world.financeId });
+
+    expect(await status(payout.id)).toBe('SETTLED');
+  });
+
+  it('is on for anything but the word off, so a typo does not remove the control', async () => {
+    const { world, payout } = await preparedPayout();
+    process.env[SETTING] = 'false';
+
+    await expect(releasePayout({ payoutId: payout.id, actorId: world.financeId })).rejects.toMatchObject({
+      code: 'second_approver_required',
+    });
+  });
+
+  it('does not hold one prepared before it was recorded who prepared it', async () => {
+    const { world, payout } = await preparedPayout();
+    await prisma.payout.update({ where: { id: payout.id }, data: { preparedBy: null } });
+
+    await releasePayout({ payoutId: payout.id, actorId: world.financeId });
+
+    expect(await status(payout.id)).toBe('SETTLED');
+  });
+
+  it('is told to the person over the API, and the payout stays prepared', async () => {
+    const { world, payout } = await preparedPayout();
+    await issueSession({ userId: world.financeId, stepUp: true });
+
+    const response = await releasePayoutRoute(
+      new Request(`http://localhost/api/v1/payouts/${payout.id}/release`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({}),
+      }),
+      { params: Promise.resolve({ id: payout.id }) },
+    );
+
+    expect(response.status).toBe(403);
+    expect(((await response.json()) as { error: { code: string } }).error.code).toBe('second_approver_required');
+    expect(await status(payout.id)).toBe('PREPARED');
   });
 });

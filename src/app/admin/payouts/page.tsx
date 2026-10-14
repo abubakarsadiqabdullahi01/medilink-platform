@@ -31,6 +31,8 @@ interface Payout {
   releasedAt: string | null;
   settledAt: string | null;
   createdAt: string;
+  /** Whether the person looking prepared it, which decides whether they may release it. */
+  preparedByYou: boolean;
 }
 
 /**
@@ -65,7 +67,12 @@ export default function PayoutsPage() {
   const payouts = useQuery({
     queryKey: ['payouts', selected?.userId],
     queryFn: () =>
-      api.get<{ payouts: Payout[]; owedKobo: number; heldKobo: number }>(
+      api.get<{
+        payouts: Payout[];
+        owedKobo: number;
+        heldKobo: number;
+        secondApproverRequired: boolean;
+      }>(
         `/api/v1/payouts?scopeType=PLATFORM&scopeId=${selected!.userId}`,
       ),
     enabled: Boolean(selected),
@@ -267,13 +274,22 @@ export default function PayoutsPage() {
                 ) : null}
 
                 {payout.status === 'PREPARED' ? (
-                  <Button
-                    loading={release.isPending && release.variables?.id === payout.id}
-                    onClick={() => release.mutate(payout)}
-                  >
-                    <Send />
-                    Release {formatNaira(payout.amountKobo)}
-                  </Button>
+                  <div className="space-y-2">
+                    <Button
+                      disabled={payouts.data.secondApproverRequired && payout.preparedByYou}
+                      loading={release.isPending && release.variables?.id === payout.id}
+                      onClick={() => release.mutate(payout)}
+                    >
+                      <Send />
+                      Release {formatNaira(payout.amountKobo)}
+                    </Button>
+                    {payouts.data.secondApproverRequired && payout.preparedByYou ? (
+                      <p className="text-xs text-muted-foreground">
+                        You prepared this one, so a colleague who can manage payouts has to release
+                        it. Two people, not one, between a balance and the bank.
+                      </p>
+                    ) : null}
+                  </div>
                 ) : null}
               </CardContent>
             </Card>

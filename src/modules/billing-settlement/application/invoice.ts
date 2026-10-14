@@ -4,7 +4,9 @@ import { recordAudit } from '@/lib/audit';
 import { publishEvent } from '@/lib/outbox';
 import { EVENTS } from '@/lib/events';
 import { HttpError } from '@/lib/http/errors';
+import { lagosDate } from '@/lib/lagos-date';
 import { lockPayouts } from './payout';
+import { paymentProblem, type PaymentProblem } from '../domain/payment';
 import { termsOfBooking } from '@/modules/rates-contracts/application/rate-card';
 import { priceStoredTimesheet } from '@/modules/rates-contracts/domain/pricing';
 import {
@@ -39,6 +41,8 @@ export const InvoiceErrors = {
     ),
   wrongStatus: (from: string, to: string) =>
     new HttpError('invoice_wrong_status', `A ${from} invoice cannot become ${to}.`, 409),
+  payment: (problem: PaymentProblem, grossKobo: number) =>
+    new HttpError(...paymentError(problem, grossKobo)),
   paidOut: () =>
     new HttpError(
       'invoice_paid_out',
@@ -46,6 +50,29 @@ export const InvoiceErrors = {
       409,
     ),
 };
+
+const naira = (kobo: number) => `₦${(kobo / 100).toLocaleString('en-NG', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+
+function paymentError(problem: PaymentProblem, grossKobo: number): [string, string, number] {
+  switch (problem) {
+    case 'reference':
+      return ['payment_reference_required', 'Enter the bank\'s reference for the transfer (3 to 100 characters).', 422];
+    case 'payer':
+      return ['payment_payer_required', 'Enter who paid, as the bank statement names them.', 422];
+    case 'amount':
+      return [
+        'payment_amount_mismatch',
+        `The amount must be what the invoice comes to, ${naira(grossKobo)}. Part payments, over-payments and one transfer covering several invoices are not supported yet; do not record them as paid in full.`,
+        422,
+      ];
+    case 'date':
+      return ['payment_date_invalid', 'Enter the date the money arrived, as year-month-day.', 422];
+    case 'future':
+      return ['payment_date_invalid', 'The date the money arrived cannot be in the future.', 422];
+    case 'before_issue':
+      return ['payment_date_invalid', 'The money cannot have arrived before the invoice was issued.', 422];
+  }
+}
 
 /** Read from configuration, so 3.1 is a deployment decision rather than a deploy. */
 function platformFeeBp(): number {
@@ -78,15 +105,22 @@ export interface InvoiceView {
   status: string;
   issuedAt: Date | null;
   paidAt: Date | null;
+  /** The bank's reference for the transfer, as recorded when it was marked paid. */
+  paymentReference: string | null;
+  paymentAmountKobo: number | null;
+  /** The date the money arrived, `YYYY-MM-DD`. */
+  paidOn: string | null;
+  payerName: string | null;
   lines: InvoiceLineView[];
 }
 
-interface InvoiceRow extends Omit<InvoiceView, 'lines'> {
+interface InvoiceRow extends Omit<InvoiceView, 'lines' | 'paidOn'> {
+  paidOn: Date | null;
   lines: InvoiceLineView[];
 }
 
 function toView(row: InvoiceRow): InvoiceView {
-  return { ...row, lines: row.lines };
+  return { ...row, paidOn: row.paidOn?.toISOString().slice(0, 10) ?? null, lines: row.lines };
 }
 
 /** Writes one balanced transaction. `entriesFor*` has already refused it if it does not balance. */
@@ -402,15 +436,46 @@ export async function issueInvoice(input: {
 export async function recordPayment(input: {
   invoiceId: string;
   actorId: string;
+  /** The bank's own reference for the transfer. */
+  reference: string;
+  /** What arrived. Must equal the invoice: there is no model for part payments. */
+  amountKobo: number;
+  /** The date the money arrived, `YYYY-MM-DD`. */
+  paidOn: string;
+  /** Who paid, as the bank statement names them. */
+  payerName: string;
+  now?: Date;
 }): Promise<InvoiceView> {
   const existing = await prisma.invoice.findUnique({ where: { id: input.invoiceId } });
   if (!existing) throw InvoiceErrors.notFound();
   if (existing.status !== 'ISSUED') throw InvoiceErrors.wrongStatus(existing.status, 'PAID');
 
+  // Checked before anything is written, and against what the invoice says rather
+  // than what the screen showed: the amount the person types is the check.
+  const now = input.now ?? new Date();
+  const problem = paymentProblem(
+    {
+      reference: input.reference,
+      amountKobo: input.amountKobo,
+      paidOn: input.paidOn,
+      payerName: input.payerName,
+    },
+    { grossKobo: existing.grossKobo, issuedOn: existing.issuedAt ? lagosDate(existing.issuedAt) : null },
+    now,
+  );
+  if (problem) throw InvoiceErrors.payment(problem, existing.grossKobo);
+
   return prisma.$transaction(async (tx: Tx) => {
     const applied = await tx.invoice.updateMany({
       where: { id: input.invoiceId, status: 'ISSUED' },
-      data: { status: 'PAID', paidAt: new Date() },
+      data: {
+        status: 'PAID',
+        paidAt: now,
+        paymentReference: input.reference.trim(),
+        paymentAmountKobo: input.amountKobo,
+        paidOn: new Date(`${input.paidOn}T00:00:00.000Z`),
+        payerName: input.payerName.trim(),
+      },
     });
     if (applied.count !== 1) throw InvoiceErrors.wrongStatus(existing.status, 'PAID');
 
@@ -425,6 +490,9 @@ export async function recordPayment(input: {
       include: { lines: true },
     });
 
+    // The amount and the date, and not who paid or the bank's reference: a
+    // reference often carries the payer's name, and the audit trail is kept for
+    // good. Both are on the invoice, which is the billing record.
     await recordAudit(tx, {
       action: 'invoice.paid',
       entityType: 'billing.invoices',
@@ -432,7 +500,7 @@ export async function recordPayment(input: {
       actorId: input.actorId,
       scopeType: 'FACILITY',
       scopeId: invoice.facilityId,
-      after: { status: invoice.status, amountKobo: invoice.grossKobo },
+      after: { status: invoice.status, amountKobo: invoice.grossKobo, paidOn: input.paidOn, referenceRecorded: true },
     });
 
     await publishEvent(tx, {

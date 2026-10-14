@@ -7,6 +7,7 @@ import {
   listPayouts,
   payoutPosition,
   preparePayout,
+  secondApproverRequired,
 } from '@/modules/billing-settlement/application/payout';
 
 /**
@@ -49,7 +50,15 @@ export async function GET(request: Request) {
         listPayouts(practitionerId),
         payoutPosition(practitionerId),
       ]);
-      return { payouts, ...position };
+      // The practitioner is shown their payout, not which member of staff prepared
+      // it. Staff are told whether it was they, which is what decides whether they
+      // can release it (UXO-03).
+      const shaped = payouts.map(({ preparedBy, ...rest }) =>
+        input.scopeType === 'PLATFORM' ? { ...rest, preparedByYou: preparedBy === session.userId } : rest,
+      );
+      return input.scopeType === 'PLATFORM'
+        ? { payouts: shaped, ...position, secondApproverRequired: secondApproverRequired() }
+        : { payouts: shaped, ...position };
     },
   });
 }

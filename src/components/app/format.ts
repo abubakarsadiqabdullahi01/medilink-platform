@@ -82,6 +82,20 @@ export function formatAgo(value: string | Date | null | undefined): string {
 }
 
 /**
+ * What somebody typed as an amount in naira, as integer kobo, or null if it is
+ * not an amount. No floating point: "40,000.10" is 4,000,010 kobo and must not
+ * become 4,000,009.999999999. At most two decimal places, because a third is
+ * money that does not exist.
+ */
+export function parseNairaToKobo(text: string): number | null {
+  const cleaned = text.replace(/[₦,\s]/g, '');
+  const match = /^(\d+)(?:\.(\d{1,2}))?$/.exec(cleaned);
+  if (!match) return null;
+  const kobo = Number(match[1]) * 100 + Number((match[2] ?? '').padEnd(2, '0') || '0');
+  return Number.isSafeInteger(kobo) ? kobo : null;
+}
+
+/**
  * Integer kobo in, naira out. Rule 3: money is only ever computed in kobo,
  * and this is the single place it becomes something with a decimal point.
  */

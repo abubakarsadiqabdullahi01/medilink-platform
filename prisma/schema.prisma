@@ -1893,6 +1893,16 @@ model Invoice {
   issuedAt DateTime?     @map("issued_at")
   paidAt   DateTime?     @map("paid_at")
 
+  // What was recorded when somebody marked it paid, so the payment can be checked
+  // against a bank statement later (BIL-07). `paidAt` is when it was recorded;
+  // `paidOn` is when the money arrived. The amount must equal `grossKobo` today,
+  // because there is no model for part payments. Null on an invoice paid before
+  // these were captured.
+  paymentReference  String? @map("payment_reference")
+  paymentAmountKobo Int?    @map("payment_amount_kobo")
+  paidOn            DateTime? @map("paid_on") @db.Date
+  payerName         String? @map("payer_name")
+
   createdBy String   @map("created_by") @db.Uuid
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -2000,6 +2010,9 @@ model Payout {
   providerReference String? @map("provider_reference")
   failureReason     String? @map("failure_reason")
 
+  // Who prepared it, so release can refuse the same person (UXO-03). Null on a
+  // payout prepared before this was recorded, which nothing then holds back.
+  preparedBy String?   @map("prepared_by") @db.Uuid
   releasedBy String?   @map("released_by") @db.Uuid
   releasedAt DateTime? @map("released_at")
   settledAt  DateTime? @map("settled_at")

@@ -32,7 +32,7 @@ import { Combobox } from '@/components/app/combobox';
 import { StatusBadge } from '@/components/app/status-badge';
 import { EmptyState, PageHeader, QueueSkeleton } from '@/components/app/page-shell';
 import { useStepUp } from '@/components/app/step-up';
-import { formatDate, formatMinutes, formatNaira } from '@/components/app/format';
+import { formatDate, formatMinutes, formatNaira, parseNairaToKobo } from '@/components/app/format';
 
 interface FacilitySummary {
   id: string;
@@ -63,6 +63,10 @@ interface Invoice {
   grossKobo: number;
   platformFeeKobo: number;
   status: string;
+  /** What was recorded when it was marked paid. */
+  paymentReference: string | null;
+  paidOn: string | null;
+  payerName: string | null;
   lines: InvoiceLine[];
 }
 
@@ -117,6 +121,29 @@ export default function InvoicesPage() {
   const [voiding, setVoiding] = useState<Invoice | null>(null);
   const [voidReason, setVoidReason] = useState('');
 
+  // Recording a payment says which transfer it was, so it can be checked against
+  // the bank statement later (BIL-07). The amount is typed, not prefilled: typing
+  // it is the check that what the bank shows is what the invoice says.
+  const [paying, setPaying] = useState<Invoice | null>(null);
+  const [payment, setPayment] = useState({ reference: '', amount: '', paidOn: '', payer: '' });
+  const amountKobo = parseNairaToKobo(payment.amount);
+  const paymentReady =
+    payment.reference.trim().length >= 3 &&
+    payment.payer.trim().length >= 2 &&
+    amountKobo !== null &&
+    payment.paidOn !== '';
+
+  function startPayment(invoice: Invoice) {
+    setPaying(invoice);
+    setPayment({
+      reference: '',
+      amount: '',
+      // Today in Lagos, which is when somebody is recording a transfer they can see.
+      paidOn: new Date(Date.now() + 3600_000).toISOString().slice(0, 10),
+      payer: (facilities.data?.facilities ?? []).find((row) => row.id === invoice.facilityId)?.name ?? '',
+    });
+  }
+
   const generate = useMutation({
     mutationFn: () =>
       api.post('/api/v1/invoices', {
@@ -169,11 +196,18 @@ export default function InvoicesPage() {
 
   const pay = useMutation({
     mutationFn: (invoice: Invoice) =>
-      api.post(`/api/v1/invoices/${invoice.id}/pay`, { facilityId: invoice.facilityId }),
+      api.post(`/api/v1/invoices/${invoice.id}/pay`, {
+        facilityId: invoice.facilityId,
+        paymentReference: payment.reference.trim(),
+        amountKobo,
+        paidOn: payment.paidOn,
+        payerName: payment.payer.trim(),
+      }),
     onSuccess: () => {
       toast.success('Recorded as paid', {
         description: 'The ledger now shows the facility owing nothing on it.',
       });
+      setPaying(null);
       refresh();
     },
     onError: (error, invoice) => {
@@ -226,6 +260,84 @@ export default function InvoicesPage() {
               onClick={() => voiding && voidIt.mutate(voiding)}
             >
               Void invoice
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={paying !== null} onOpenChange={(open) => (open ? null : setPaying(null))}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Record payment of {paying?.number}</DialogTitle>
+            <DialogDescription>
+              There is no gateway to capture a payment, so this records a transfer you can see in
+              the bank. Enter what the statement shows; the invoice is {paying ? formatNaira(paying.grossKobo) : ''}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="pay-reference">Bank reference for the transfer</Label>
+              <Input
+                id="pay-reference"
+                value={payment.reference}
+                maxLength={100}
+                onChange={(event) => setPayment({ ...payment, reference: event.target.value })}
+              />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="pay-amount">Amount received (₦)</Label>
+                <Input
+                  id="pay-amount"
+                  inputMode="decimal"
+                  value={payment.amount}
+                  onChange={(event) => setPayment({ ...payment, amount: event.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="pay-date">Date it arrived</Label>
+                <Input
+                  id="pay-date"
+                  type="date"
+                  value={payment.paidOn}
+                  onChange={(event) => setPayment({ ...payment, paidOn: event.target.value })}
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="pay-payer">Paid by, as the statement names them</Label>
+              <Input
+                id="pay-payer"
+                value={payment.payer}
+                maxLength={120}
+                onChange={(event) => setPayment({ ...payment, payer: event.target.value })}
+              />
+            </div>
+            {payment.amount !== '' && amountKobo === null ? (
+              <p className="text-xs text-destructive-text">That is not an amount in naira.</p>
+            ) : null}
+            {paying && amountKobo !== null && amountKobo !== paying.grossKobo ? (
+              <Alert variant="warning">
+                <TriangleAlert />
+                <AlertDescription>
+                  That is not the invoice amount, {formatNaira(paying.grossKobo)}. Part payments and
+                  one transfer for several invoices cannot be recorded yet, and the system will
+                  refuse it.
+                </AlertDescription>
+              </Alert>
+            ) : null}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPaying(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="success"
+              disabled={!paymentReady}
+              loading={pay.isPending}
+              onClick={() => paying && pay.mutate(paying)}
+            >
+              <Wallet />
+              Record payment
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -387,8 +499,7 @@ export default function InvoicesPage() {
                     {invoice.status === 'ISSUED' ? (
                       <Button
                         variant="success"
-                        loading={pay.isPending && pay.variables?.id === invoice.id}
-                        onClick={() => pay.mutate(invoice)}
+                        onClick={() => startPayment(invoice)}
                       >
                         <Wallet />
                         Record payment
@@ -396,6 +507,13 @@ export default function InvoicesPage() {
                     ) : null}
                   </div>
                 </div>
+
+                {invoice.status === 'PAID' && invoice.paymentReference ? (
+                  <p className="text-xs text-muted-foreground">
+                    Paid on {formatDate(invoice.paidOn)} by {invoice.payerName}, bank reference{' '}
+                    <span className="font-mono">{invoice.paymentReference}</span>.
+                  </p>
+                ) : null}
 
                 {invoice.status === 'ISSUED' ? (
                   <Alert variant="info">

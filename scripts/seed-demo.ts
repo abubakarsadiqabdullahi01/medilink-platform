@@ -39,6 +39,7 @@
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { prisma } from '../src/lib/db';
 import { env } from '../src/lib/env';
+import { lagosDate } from '../src/lib/lagos-date';
 import { s3 } from '../src/lib/storage/tigris';
 import { ROLE_PERMISSIONS } from '../src/lib/authz/permissions';
 
@@ -2309,7 +2310,14 @@ async function main(): Promise<void> {
       if (unpaid) continue;
       const paidAt = addDays(issuedAt, between(9, 24));
       const payMark = new Date(Date.now() - 1000);
-      await recordPayment({ invoiceId: invoice.id, actorId: finance.id });
+      await recordPayment({
+        invoiceId: invoice.id,
+        actorId: finance.id,
+        reference: `DEMO-TRF-${invoice.number}`,
+        amountKobo: invoice.grossKobo,
+        paidOn: lagosDate(paidAt),
+        payerName: facility.name,
+      });
       await prisma.invoice.update({ where: { id: invoice.id }, data: { paidAt } });
       await prisma.ledgerEntry.updateMany({
         where: { invoiceId: invoice.id, createdAt: { gte: payMark } },
@@ -2337,7 +2345,9 @@ async function main(): Promise<void> {
       await prisma.payout.update({ where: { id: payout.id }, data: { createdAt: runAt } });
       if (lastRun && chance(0.4)) continue;
       const releaseMark = new Date(Date.now() - 1000);
-      await releasePayout({ payoutId: payout.id, actorId: finance.id });
+      // Somebody other than the person who prepared it: a payout cannot be released by
+      // its own preparer (UXO-03), and the demo should show the rule as it works.
+      await releasePayout({ payoutId: payout.id, actorId: superAdmin.id });
       const releasedAt = notAfterNow(addDays(runAt, 1));
       await prisma.payout.update({ where: { id: payout.id }, data: { releasedAt } });
       await prisma.ledgerEntry.updateMany({

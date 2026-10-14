@@ -39,7 +39,25 @@ export const PayoutErrors = {
     new HttpError('payout_wrong_status', `A ${from} payout cannot become ${to}.`, 409),
   gatewayUnavailable: (message: string) =>
     new HttpError('payment_gateway_unavailable', message, 503),
+  secondApproverRequired: () =>
+    new HttpError(
+      'second_approver_required',
+      'A payout has to be released by someone other than the person who prepared it. Ask a colleague who can manage payouts to release this one.',
+      403,
+    ),
 };
+
+/**
+ * Whether the person who prepared a payout is barred from releasing it.
+ *
+ * On unless the setting says exactly `off`: a typo must not remove a control on
+ * moving money. `off` is for a pilot with one person who can do this, and is a
+ * decision somebody takes on purpose (UXO-03). Read each time rather than once,
+ * so changing it does not wait for a restart and a test can change it.
+ */
+export function secondApproverRequired(): boolean {
+  return process.env.PAYOUT_SECOND_APPROVER !== 'off';
+}
 
 export interface PayoutView {
   id: string;
@@ -48,6 +66,11 @@ export interface PayoutView {
   status: string;
   providerReference: string | null;
   failureReason: string | null;
+  /**
+   * Who prepared it. For staff: the route turns this into "prepared by you" and
+   * does not send the identifier to the practitioner the payout is for.
+   */
+  preparedBy: string | null;
   releasedBy: string | null;
   releasedAt: Date | null;
   settledAt: Date | null;
@@ -55,7 +78,19 @@ export interface PayoutView {
 }
 
 function toView(row: PayoutView): PayoutView {
-  return row;
+  return {
+    id: row.id,
+    practitionerId: row.practitionerId,
+    amountKobo: row.amountKobo,
+    status: row.status,
+    providerReference: row.providerReference,
+    failureReason: row.failureReason,
+    preparedBy: row.preparedBy,
+    releasedBy: row.releasedBy,
+    releasedAt: row.releasedAt,
+    settledAt: row.settledAt,
+    createdAt: row.createdAt,
+  };
 }
 
 /**
@@ -180,7 +215,7 @@ export async function preparePayout(input: {
     if (amountKobo <= 0) throw PayoutErrors.held();
 
     const payout = await tx.payout.create({
-      data: { practitionerId: input.practitionerId, amountKobo },
+      data: { practitionerId: input.practitionerId, amountKobo, preparedBy: input.actorId },
     });
 
     await recordAudit(tx, {
@@ -213,6 +248,11 @@ export async function releasePayout(input: {
   if (!existing) throw PayoutErrors.notFound();
   if (existing.status !== 'PREPARED') {
     throw PayoutErrors.wrongStatus(existing.status, 'RELEASED');
+  }
+  // Two people, not one, between a balance and the bank (UXO-03). Said before
+  // anything is claimed or sent, so a refusal leaves the payout as it was.
+  if (secondApproverRequired() && existing.preparedBy !== null && existing.preparedBy === input.actorId) {
+    throw PayoutErrors.secondApproverRequired();
   }
 
   // Compare-and-set before the send, so two officers releasing at once cannot

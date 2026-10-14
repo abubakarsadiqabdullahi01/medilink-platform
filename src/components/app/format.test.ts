@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { expiryOf, formatDate, recordLabel } from './format';
+import { expiryOf, formatDate, parseNairaToKobo, recordLabel } from './format';
 
 describe('recordLabel', () => {
   it('turns the tables the audit trail actually writes into nouns', () => {
@@ -62,5 +62,27 @@ describe('expiryOf', () => {
 
   it('has nothing to say for a credential that does not expire', () => {
     expect(expiryOf({ expiresAt: null, documentExpiresOn: null })).toBeNull();
+  });
+});
+
+describe('parseNairaToKobo', () => {
+  it('reads an amount as people write it', () => {
+    expect(parseNairaToKobo('40000')).toBe(4_000_000);
+    expect(parseNairaToKobo('40,000')).toBe(4_000_000);
+    expect(parseNairaToKobo('₦40,000.00')).toBe(4_000_000);
+    expect(parseNairaToKobo(' 40 000 ')).toBe(4_000_000);
+  });
+
+  it('keeps the kobo exactly, with no floating-point drift', () => {
+    expect(parseNairaToKobo('40,000.10')).toBe(4_000_010);
+    expect(parseNairaToKobo('0.07')).toBe(7);
+    expect(parseNairaToKobo('1.5')).toBe(150);
+    expect(parseNairaToKobo('19.99')).toBe(1_999);
+  });
+
+  it('refuses what is not an amount, or has money that does not exist', () => {
+    for (const bad of ['', 'abc', '-5', '1.234', '1.2.3', '12e3', '₦']) {
+      expect(parseNairaToKobo(bad), bad).toBeNull();
+    }
   });
 });
