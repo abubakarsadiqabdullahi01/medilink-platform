@@ -3,6 +3,7 @@ import { activateEligiblePractitioners } from '../modules/practitioners/applicat
 import { expireRegistrations } from '../modules/practitioners/application/expiry';
 import { expireCredentials } from '../modules/credentials/application/expiry';
 import { expireStartedRequests } from '../modules/service-requests/application/expiry';
+import { purgeExpiredData } from '../modules/audit-compliance/application/retention';
 import { sweepUnhonouredAssignments } from '../modules/cancellations-sanctions/application/fault';
 import {
   alertShiftsNotCheckedIn,
@@ -99,9 +100,18 @@ export const JOB_DEFINITIONS: JobDefinition[] = [
       'Remind a facility about hours waiting for approval after a day and again after three, and tell the practitioner at three days that they are being chased. Hourly. Decides nothing: whether hours are approved, and any deadline after which they are approved for the facility, are not this job\'s to settle.',
     intervalSeconds: HOURLY,
   },
+  {
+    key: 'retention.purge_sweep',
+    description:
+      'Delete what the data inventory says is not worth keeping: one-time codes, sessions that have ended, the sign-in log, queue entries already delivered and uploads nobody finished, each on its own period. Daily. Touches nothing else: the rest is kept, or removed by an erasure request. Writes one audit row with counts on a run that deleted anything.',
+    intervalSeconds: DAILY,
+  },
 ];
 
 export const jobs: Record<string, JobHandler> = {
+  'retention.purge_sweep': async () => {
+    await purgeExpiredData();
+  },
   'credential.expiry_warning_sweep': async () => {
     await warnExpiringCredentials();
   },
