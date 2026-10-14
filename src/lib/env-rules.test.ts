@@ -15,6 +15,14 @@ describe('deploymentProblems', () => {
     expect(deploymentProblems(staging, true)).toEqual([]);
   });
 
+  it('allows paying by hand in staging and production: it claims nothing it has not been told', () => {
+    // The console gateway reports money as moved that did not; the manual one moves
+    // nothing and waits for a person to say which transfer they made (BIL-05).
+    for (const appEnv of ['staging', 'production'] as const) {
+      expect(deploymentProblems({ ...staging, APP_ENV: appEnv, PAYMENT_PROVIDER: 'manual' }, true)).toEqual([]);
+    }
+  });
+
   it('refuses a production process that never said where it is running', () => {
     const problems = deploymentProblems({ ...staging, APP_ENV: 'local' }, false);
     expect(problems).toHaveLength(1);

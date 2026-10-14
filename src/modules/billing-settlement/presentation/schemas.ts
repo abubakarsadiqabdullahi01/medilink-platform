@@ -43,6 +43,20 @@ export const preparePayoutSchema = z.object({ practitionerId: uuid });
 
 export const payoutIdSchema = z.object({ id: uuid });
 
+/**
+ * A transfer made by hand, as finance record it. What counts as a plausible
+ * reference and date is the application's to say, so it can say why.
+ */
+export const settlePayoutSchema = payoutIdSchema.extend({
+  bankReference: z.string().trim().min(1).max(200),
+  paidOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Write the date as year-month-day.'),
+});
+
+/** Failing or cancelling a payout says why, once, and the reason is kept with it. */
+export const payoutReasonSchema = payoutIdSchema.extend({
+  reason: z.string().trim().min(1).max(500),
+});
+
 export const myPayoutsSchema = z.object({
   scopeType: z.enum(['SELF', 'PLATFORM']),
   scopeId: uuid.optional(),

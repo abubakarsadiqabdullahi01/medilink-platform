@@ -842,7 +842,14 @@ describe('paying a practitioner', () => {
     };
 
     // Credited when the work was invoiced, and nothing paid out yet.
-    expect(await read()).toEqual({ payouts: [], owedKobo: 4_000_000, heldKobo: 0 });
+    // The suite runs with the collection rule off (support/env.ts), so all of it is payable.
+    expect(await read()).toEqual({
+      payouts: [],
+      owedKobo: 4_000_000,
+      heldKobo: 0,
+      payableKobo: 4_000_000,
+      awaitingKobo: 0,
+    });
 
     const payout = await preparePayout({
       practitionerId: world.practitionerId,

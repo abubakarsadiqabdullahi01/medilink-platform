@@ -9,6 +9,7 @@ import {
   preparePayout,
   secondApproverRequired,
 } from '@/modules/billing-settlement/application/payout';
+import { paidByHand } from '@/modules/billing-settlement/infrastructure/gateway';
 
 /**
  * POST /api/v1/payouts — prepare one for everything a practitioner is owed.
@@ -57,7 +58,14 @@ export async function GET(request: Request) {
         input.scopeType === 'PLATFORM' ? { ...rest, preparedByYou: preparedBy === session.userId } : rest,
       );
       return input.scopeType === 'PLATFORM'
-        ? { payouts: shaped, ...position, secondApproverRequired: secondApproverRequired() }
+        ? {
+            payouts: shaped,
+            ...position,
+            secondApproverRequired: secondApproverRequired(),
+            // Whether finance make the bank transfer and record it, which decides
+            // what the screen offers for a payout that has been released.
+            paidByHand: paidByHand(),
+          }
         : { payouts: shaped, ...position };
     },
   });

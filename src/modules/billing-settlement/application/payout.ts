@@ -5,9 +5,12 @@ import { publishEvent } from '@/lib/outbox';
 import { EVENTS } from '@/lib/events';
 import { HttpError } from '@/lib/http/errors';
 import { assignmentsUnderDispute } from '@/modules/disputes/application/dispute';
+import { lagosDate } from '@/lib/lagos-date';
 import { entriesForPayout } from '../domain/ledger';
 import { heldForDisputes, netOfLine } from '../domain/holds';
-import { PaymentGatewayUnavailable, sendPayout } from '../infrastructure/gateway';
+import { collectionRequired, payableKobo } from '../domain/payable';
+import { transferProblem, type TransferProblem } from '../domain/transfer';
+import { PaymentGatewayUnavailable, paidByHand, sendPayout } from '../infrastructure/gateway';
 
 /**
  * Paying a practitioner.
@@ -39,6 +42,21 @@ export const PayoutErrors = {
     new HttpError('payout_wrong_status', `A ${from} payout cannot become ${to}.`, 409),
   gatewayUnavailable: (message: string) =>
     new HttpError('payment_gateway_unavailable', message, 503),
+  nothingCollected: () =>
+    new HttpError(
+      'nothing_collected',
+      'The facilities this practitioner worked for have not paid for this work yet, so there is nothing collected to pay it out of. It can be paid once the invoice is recorded as paid.',
+      409,
+    ),
+  notByHand: () =>
+    new HttpError(
+      'payout_not_by_hand',
+      'Payouts are completed by the payment gateway here, not recorded by hand. Recording a transfer as well would pay the practitioner twice.',
+      409,
+    ),
+  transfer: (problem: TransferProblem) => new HttpError(...transferError(problem)),
+  reasonRequired: () =>
+    new HttpError('payout_reason_required', 'Say why (a few words is enough).', 422),
   secondApproverRequired: () =>
     new HttpError(
       'second_approver_required',
@@ -46,6 +64,37 @@ export const PayoutErrors = {
       403,
     ),
 };
+
+function transferError(problem: TransferProblem): [string, string, number] {
+  switch (problem) {
+    case 'reference':
+      return ['transfer_invalid', 'Enter the bank\'s reference for the transfer (3 to 100 characters).', 422];
+    case 'date':
+      return ['transfer_invalid', 'Enter the date the money left the bank, as year-month-day.', 422];
+    case 'future':
+      return ['transfer_invalid', 'The transfer cannot be dated in the future.', 422];
+    case 'before_release':
+      return [
+        'transfer_invalid',
+        'The transfer cannot be dated before the payout was released. Check the date on the bank statement.',
+        422,
+      ];
+  }
+}
+
+/**
+ * Whether a payout is sized from what facilities have paid, or from what they
+ * have been billed.
+ *
+ * On unless the setting says exactly `off`, for the reason the second-approver
+ * rule is: a typo must not remove a control on moving money. Off is for a
+ * platform that pays practitioners from its own funds and recovers it from
+ * facilities later, which is a commercial decision somebody takes on purpose
+ * (BIL-03). Read each time, so a test can change it.
+ */
+export function collectionIsRequired(): boolean {
+  return collectionRequired(process.env.PAYOUT_REQUIRES_COLLECTION);
+}
 
 /**
  * Whether the person who prepared a payout is barred from releasing it.
@@ -74,6 +123,8 @@ export interface PayoutView {
   releasedBy: string | null;
   releasedAt: Date | null;
   settledAt: Date | null;
+  /** The date a transfer made by hand left the bank. Null for a gateway payout. */
+  paidOn: Date | null;
   createdAt: Date;
 }
 
@@ -89,6 +140,7 @@ function toView(row: PayoutView): PayoutView {
     releasedBy: row.releasedBy,
     releasedAt: row.releasedAt,
     settledAt: row.settledAt,
+    paidOn: row.paidOn,
     createdAt: row.createdAt,
   };
 }
@@ -114,6 +166,50 @@ export async function amountOwed(
   // `0` under Object.is — which is the comparison a caller reaching for
   // strict equality will get. Normalised here rather than at every call site.
   return balance === 0 ? 0 : -balance;
+}
+
+/**
+ * How much of what a practitioner is owed can be paid out of money that has
+ * arrived (BIL-03).
+ *
+ * A practitioner is credited when work is invoiced, which is when the facility is
+ * billed, not when it pays. Paying them from that credit pays out cash the
+ * platform does not have. What has been collected is what was credited on invoices
+ * a facility has paid; what has gone out already is every payout that settled.
+ * Both come from the ledger, so neither can drift from the entries it came from.
+ */
+async function payableByCollection(
+  db: Pick<Tx, 'invoice' | 'ledgerEntry'>,
+  practitionerId: string,
+  owedKobo: number,
+): Promise<number> {
+  const required = collectionIsRequired();
+  if (!required) return payableKobo({ owedKobo, collectedKobo: 0, paidOutKobo: 0, required });
+
+  const paidInvoices = await db.invoice.findMany({
+    where: { status: 'PAID', lines: { some: { practitionerId } } },
+    select: { id: true },
+  });
+  const credited = await db.ledgerEntry.aggregate({
+    where: {
+      account: 'PRACTITIONER_EARNINGS',
+      subjectId: practitionerId,
+      invoiceId: { in: paidInvoices.map((invoice) => invoice.id) },
+    },
+    _sum: { amountKobo: true },
+  });
+  const paidOut = await db.ledgerEntry.aggregate({
+    where: { account: 'PRACTITIONER_EARNINGS', subjectId: practitionerId, payoutId: { not: null } },
+    _sum: { amountKobo: true },
+  });
+
+  return payableKobo({
+    owedKobo,
+    // Credits are negative on this account and payouts positive.
+    collectedKobo: -(credited._sum.amountKobo ?? 0),
+    paidOutKobo: paidOut._sum.amountKobo ?? 0,
+    required,
+  });
 }
 
 /**
@@ -155,16 +251,29 @@ async function heldFor(
  * What a practitioner is owed and how much of it is held for a dispute, for
  * somebody reading their payouts.
  */
-export async function payoutPosition(
-  practitionerId: string,
-): Promise<{ owedKobo: number; heldKobo: number }> {
+export async function payoutPosition(practitionerId: string): Promise<{
+  owedKobo: number;
+  heldKobo: number;
+  /** What a payout prepared now would be for: collected, not in flight, not held. */
+  payableKobo: number;
+  /** What is owed that the facilities have not yet paid for. */
+  awaitingKobo: number;
+}> {
   const owedKobo = await amountOwed(practitionerId);
   const inFlight = await prisma.payout.aggregate({
     where: { practitionerId, status: { in: ['PREPARED', 'RELEASED'] } },
     _sum: { amountKobo: true },
   });
-  const heldKobo = await heldFor(prisma, practitionerId, owedKobo - (inFlight._sum.amountKobo ?? 0));
-  return { owedKobo, heldKobo };
+  const inFlightKobo = inFlight._sum.amountKobo ?? 0;
+  const unpaidKobo = owedKobo - inFlightKobo;
+  const heldKobo = await heldFor(prisma, practitionerId, unpaidKobo);
+  const collectedKobo = await payableByCollection(prisma, practitionerId, owedKobo);
+  return {
+    owedKobo,
+    heldKobo,
+    payableKobo: Math.max(0, Math.min(unpaidKobo - heldKobo, collectedKobo - inFlightKobo)),
+    awaitingKobo: Math.max(0, owedKobo - collectedKobo),
+  };
 }
 
 /**
@@ -206,12 +315,17 @@ export async function preparePayout(input: {
       where: { practitionerId: input.practitionerId, status: { in: ['PREPARED', 'RELEASED'] } },
       _sum: { amountKobo: true },
     });
-    const unpaid = owed - (inFlight._sum.amountKobo ?? 0);
+    const inFlightKobo = inFlight._sum.amountKobo ?? 0;
+    const unpaid = owed - inFlightKobo;
     if (unpaid <= 0) throw PayoutErrors.nothingOwed();
 
-    // What a dispute holds is not paid. Whatever is left is.
+    // Only what facilities have paid for can go out, however much is owed.
+    const collected = (await payableByCollection(tx, input.practitionerId, owed)) - inFlightKobo;
+    if (collected <= 0) throw PayoutErrors.nothingCollected();
+
+    // What a dispute holds is not paid. Whatever is left is, up to what has arrived.
     const held = await heldFor(tx, input.practitionerId, unpaid);
-    const amountKobo = unpaid - held;
+    const amountKobo = Math.min(unpaid - held, collected);
     if (amountKobo <= 0) throw PayoutErrors.held();
 
     const payout = await tx.payout.create({
@@ -269,6 +383,11 @@ export async function releasePayout(input: {
     });
     const unpaid = owed - (alreadyOut._sum.amountKobo ?? 0);
     if (existing.amountKobo > unpaid) throw PayoutErrors.exceedsBalance();
+
+    // The rule may have been switched on since this was prepared, and an invoice
+    // is never un-paid but a void or a reversal can still change what was collected.
+    const collected = (await payableByCollection(tx, existing.practitionerId, owed)) - (alreadyOut._sum.amountKobo ?? 0);
+    if (existing.amountKobo > collected) throw PayoutErrors.nothingCollected();
 
     // A case may have been raised since this was prepared.
     const held = await heldFor(tx, existing.practitionerId, unpaid);
@@ -366,6 +485,195 @@ export async function releasePayout(input: {
       });
     }
 
+    return toView(payout);
+  });
+}
+
+/**
+ * The refusal for somebody who lost a race: what the payout is now, read inside the
+ * lock, so they are told what the winner did rather than what they expected.
+ */
+async function lostRace(tx: Tx, payoutId: string, to: string): Promise<HttpError> {
+  const current = await tx.payout.findUnique({ where: { id: payoutId }, select: { status: true } });
+  return current ? PayoutErrors.wrongStatus(current.status, to) : PayoutErrors.notFound();
+}
+
+/**
+ * Records the bank transfer for a payout finance made by hand, which completes it
+ * (BIL-05).
+ *
+ * With no gateway, releasing is the decision to pay and moves nothing. Finance make
+ * the transfer from the bank and say here which one it was, and that is the moment
+ * the ledger is written: a ledger that recorded the release would disagree with the
+ * bank until somebody got round to the transfer, and for as long as they did not.
+ *
+ * The reference and date are checked and kept on the payout; the audit row carries
+ * the date and not the reference, which on a transfer often names a person.
+ */
+export async function settlePayout(input: {
+  payoutId: string;
+  actorId: string;
+  /** The bank's own reference for the transfer. */
+  bankReference: string;
+  /** The date the money left the bank, `YYYY-MM-DD`. */
+  paidOn: string;
+  now?: Date;
+}): Promise<PayoutView> {
+  const existing = await prisma.payout.findUnique({ where: { id: input.payoutId } });
+  if (!existing) throw PayoutErrors.notFound();
+  if (existing.status !== 'RELEASED') throw PayoutErrors.wrongStatus(existing.status, 'SETTLED');
+  if (!paidByHand()) throw PayoutErrors.notByHand();
+
+  const now = input.now ?? new Date();
+  const problem = transferProblem(
+    { reference: input.bankReference, paidOn: input.paidOn },
+    { releasedOn: existing.releasedAt ? lagosDate(existing.releasedAt) : null },
+    now,
+  );
+  if (problem) throw PayoutErrors.transfer(problem);
+
+  const reference = input.bankReference.trim();
+
+  return prisma.$transaction(async (tx: Tx) => {
+    await lockPayouts(tx, existing.practitionerId);
+
+    // Compare-and-set, so two people recording the same transfer at once write one
+    // set of entries and the second is told it is already done.
+    const claimed = await tx.payout.updateMany({
+      where: { id: existing.id, status: 'RELEASED' },
+      data: {
+        status: 'SETTLED',
+        providerReference: reference,
+        settledAt: now,
+        paidOn: new Date(`${input.paidOn}T00:00:00.000Z`),
+      },
+    });
+    if (claimed.count !== 1) throw await lostRace(tx, existing.id, 'SETTLED');
+
+    const transactionId = randomUUID();
+    await tx.ledgerEntry.createMany({
+      data: entriesForPayout({
+        practitionerId: existing.practitionerId,
+        amountKobo: existing.amountKobo,
+      }).map((entry) => ({
+        transactionId,
+        account: entry.account,
+        amountKobo: entry.amountKobo,
+        subjectId: entry.subjectId,
+        memo: entry.memo,
+        payoutId: existing.id,
+      })),
+    });
+
+    const payout = await tx.payout.findUniqueOrThrow({ where: { id: existing.id } });
+
+    await recordAudit(tx, {
+      action: 'payout.settled',
+      entityType: 'billing.payouts',
+      entityId: payout.id,
+      actorId: input.actorId,
+      scopeType: 'SELF',
+      scopeId: existing.practitionerId,
+      after: { status: payout.status, paidOn: input.paidOn, referenceRecorded: true },
+    });
+
+    await publishEvent(tx, {
+      eventType: EVENTS.PayoutSettled,
+      aggregateType: 'billing.payouts',
+      aggregateId: payout.id,
+      payload: {
+        payoutId: payout.id,
+        userId: existing.practitionerId,
+        amountKobo: existing.amountKobo,
+        reference,
+      },
+    });
+
+    return toView(payout);
+  });
+}
+
+/**
+ * Records that a released payout did not reach the practitioner, so it stops being
+ * money in flight and can be prepared again. Nothing was written to the ledger when
+ * it was released, so nothing is written now.
+ */
+export async function failPayout(input: {
+  payoutId: string;
+  actorId: string;
+  reason: string;
+}): Promise<PayoutView> {
+  const reason = input.reason.trim();
+  if (reason.length === 0) throw PayoutErrors.reasonRequired();
+
+  const existing = await prisma.payout.findUnique({ where: { id: input.payoutId } });
+  if (!existing) throw PayoutErrors.notFound();
+  if (existing.status !== 'RELEASED') throw PayoutErrors.wrongStatus(existing.status, 'FAILED');
+  if (!paidByHand()) throw PayoutErrors.notByHand();
+
+  return prisma.$transaction(async (tx: Tx) => {
+    await lockPayouts(tx, existing.practitionerId);
+
+    const claimed = await tx.payout.updateMany({
+      where: { id: existing.id, status: 'RELEASED' },
+      data: { status: 'FAILED', failureReason: reason },
+    });
+    if (claimed.count !== 1) throw await lostRace(tx, existing.id, 'FAILED');
+
+    const payout = await tx.payout.findUniqueOrThrow({ where: { id: existing.id } });
+    await recordAudit(tx, {
+      action: 'payout.failed',
+      entityType: 'billing.payouts',
+      entityId: payout.id,
+      actorId: input.actorId,
+      scopeType: 'SELF',
+      scopeId: existing.practitionerId,
+      reason,
+      before: { status: existing.status },
+      after: { status: 'FAILED' },
+    });
+    return toView(payout);
+  });
+}
+
+/**
+ * Withdraws a prepared payout before anybody has released it, which frees what it
+ * was holding. A released payout is not cancelled: finance may already have made
+ * the transfer, so it is recorded as settled or as failed, whichever is true.
+ */
+export async function cancelPayout(input: {
+  payoutId: string;
+  actorId: string;
+  reason: string;
+}): Promise<PayoutView> {
+  const reason = input.reason.trim();
+  if (reason.length === 0) throw PayoutErrors.reasonRequired();
+
+  const existing = await prisma.payout.findUnique({ where: { id: input.payoutId } });
+  if (!existing) throw PayoutErrors.notFound();
+  if (existing.status !== 'PREPARED') throw PayoutErrors.wrongStatus(existing.status, 'CANCELLED');
+
+  return prisma.$transaction(async (tx: Tx) => {
+    await lockPayouts(tx, existing.practitionerId);
+
+    const claimed = await tx.payout.updateMany({
+      where: { id: existing.id, status: 'PREPARED' },
+      data: { status: 'CANCELLED' },
+    });
+    if (claimed.count !== 1) throw await lostRace(tx, existing.id, 'CANCELLED');
+
+    const payout = await tx.payout.findUniqueOrThrow({ where: { id: existing.id } });
+    await recordAudit(tx, {
+      action: 'payout.cancelled',
+      entityType: 'billing.payouts',
+      entityId: payout.id,
+      actorId: input.actorId,
+      scopeType: 'SELF',
+      scopeId: existing.practitionerId,
+      reason,
+      before: { status: existing.status },
+      after: { status: 'CANCELLED' },
+    });
     return toView(payout);
   });
 }

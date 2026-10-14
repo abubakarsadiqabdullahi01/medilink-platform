@@ -2019,6 +2019,9 @@ model Payout {
   releasedBy String?   @map("released_by") @db.Uuid
   releasedAt DateTime? @map("released_at")
   settledAt  DateTime? @map("settled_at")
+  /// The date the bank transfer was made, as finance recorded it, when a person
+  /// paid it by hand (BIL-05). Null for a payout a gateway settled.
+  paidOn DateTime? @map("paid_on") @db.Date
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -2035,6 +2038,8 @@ enum PayoutStatus {
   RELEASED
   SETTLED
   FAILED
+  /// Withdrawn by finance before anybody released it.
+  CANCELLED
 
   @@schema("billing")
 }

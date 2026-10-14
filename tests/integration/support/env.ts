@@ -37,3 +37,9 @@ process.env.LOG_LEVEL = process.env.TEST_LOG_LEVEL ?? 'error';
 // of the suite prepares and releases as one person because it is about something
 // else, so the control is off for the run; the cases that are about it unset it.
 process.env.PAYOUT_SECOND_APPROVER = 'off';
+
+// A payout is sized from what facilities have paid, not what they have been billed
+// (BIL-03). Most of the suite approves, invoices and pays out in one breath because
+// it is about something else, and does not stop to pay each invoice first, so the
+// rule is off for the run; the cases that are about it unset it.
+process.env.PAYOUT_REQUIRES_COLLECTION = 'off';

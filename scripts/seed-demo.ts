@@ -751,6 +751,39 @@ async function loadReference(): Promise<Reference> {
   };
 }
 
+/**
+ * Pay floors for the categories `prisma/seed.ts` publishes none for.
+ *
+ * The platform seed states floors for doctors and nurses only: what the other
+ * professions must be paid is the regulators' to say, and a shift for a category
+ * with no floor is refused rather than let through (RAT-01). The demo books every
+ * category, so it publishes a floor for each of the rest to let those shifts be
+ * created. These are demo figures, set below every rate the demo uses, and are not
+ * what any profession is owed. A floor somebody has already published is left alone,
+ * so running the demo does not overwrite what was set on the Pay floors screen.
+ */
+async function ensureDemoRateFloors(ref: Reference): Promise<void> {
+  const effectiveFrom = new Date('2026-01-01T00:00:00.000Z');
+  const demo = { day: 100_000, night: 130_000 } as const;
+
+  for (const key of ref.categories.keys()) {
+    for (const shiftType of ['day', 'night'] as const) {
+      const existing = await prisma.rateFloor.count({ where: { categoryKey: key, shiftType } });
+      if (existing > 0) continue;
+      await prisma.rateFloor.create({
+        data: {
+          categoryKey: key,
+          specialtyKey: '*',
+          shiftType,
+          minHourlyKobo: demo[shiftType],
+          effectiveFrom,
+          owner: 'demo-seed',
+        },
+      });
+    }
+  }
+}
+
 function lgaId(ref: Reference, state: string, lga: string): string {
   const id = ref.lgas.get(`${state}:${lga}`);
   if (!id) throw new Error(`No LGA called ${lga} in ${state}.`);
@@ -1715,6 +1748,7 @@ async function main(): Promise<void> {
   await syncRoles(prisma);
   await clear();
   const ref = await loadReference();
+  await ensureDemoRateFloors(ref);
 
   // ------------------------------------------------------------ platform
   log('Creating platform staff…');
@@ -2761,29 +2795,6 @@ async function main(): Promise<void> {
   });
   log(`  ${DATA_REQUESTS.length} requests: 2 completed, 1 refused, 2 open (one erasure with real blockers)`);
 
-  // A revised privacy notice two weeks ago. Most practitioners have accepted
-  // it; Amina has not, so her privacy page has something to do.
-  const privacy2026 = await publishAgreement({
-    kind: 'PRIVACY_NOTICE',
-    identifier: `${AGREEMENT_PREFIX}privacy-notice-2026`,
-    title: 'Privacy notice, 2026',
-    body: PRIVACY_NOTICE_2026_BODY,
-    effectiveFrom: watDay(-14, 0),
-    actorId: compliance.id,
-  });
-  let acceptedNew = 0;
-  for (const person of practitioners) {
-    if (person === amina || person.spec.stage === 'no_profile' || person.spec.problem === 'suspended') continue;
-    if (chance(0.2)) continue;
-    await acceptAgreement({ userId: person.id, versionId: privacy2026.id });
-    acceptedNew += 1;
-  }
-  await prisma.agreementAcceptance.updateMany({
-    where: { versionId: privacy2026.id },
-    data: { acceptedAt: watDay(-between(1, 12), 10) },
-  });
-  log(`  privacy notice revised; ${acceptedNew} practitioners have accepted the new version`);
-
   // ---------------------------------------------------------- the future
   log('Publishing live and upcoming work…');
 
@@ -3008,6 +3019,32 @@ async function main(): Promise<void> {
     }
   }
   log('  a shift in progress, one starting within the hour, upcoming rota, offers out, acceptances to confirm, open and draft shifts');
+
+  // Revised last, not before the work above. Publishing a revised notice means everyone
+  // who has not accepted it is asked to before they can accept an offer, and the work above
+  // takes people through offers; Amina in particular is deliberately left not having accepted.
+  // A revised privacy notice two weeks ago. Most practitioners have accepted
+  // it; Amina has not, so her privacy page has something to do.
+  const privacy2026 = await publishAgreement({
+    kind: 'PRIVACY_NOTICE',
+    identifier: `${AGREEMENT_PREFIX}privacy-notice-2026`,
+    title: 'Privacy notice, 2026',
+    body: PRIVACY_NOTICE_2026_BODY,
+    effectiveFrom: watDay(-14, 0),
+    actorId: compliance.id,
+  });
+  let acceptedNew = 0;
+  for (const person of practitioners) {
+    if (person === amina || person.spec.stage === 'no_profile' || person.spec.problem === 'suspended') continue;
+    if (chance(0.2)) continue;
+    await acceptAgreement({ userId: person.id, versionId: privacy2026.id });
+    acceptedNew += 1;
+  }
+  await prisma.agreementAcceptance.updateMany({
+    where: { versionId: privacy2026.id },
+    data: { acceptedAt: watDay(-between(1, 12), 10) },
+  });
+  log(`  privacy notice revised; ${acceptedNew} practitioners have accepted the new version`);
 
   // ------------------------------------------------------------ summary
   const counts = {

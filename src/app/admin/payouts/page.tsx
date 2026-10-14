@@ -3,17 +3,28 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ArrowLeft, HandCoins, Search, Send, TriangleAlert } from 'lucide-react';
+import { ArrowLeft, Banknote, HandCoins, Search, Send, TriangleAlert } from 'lucide-react';
 import { api, errorMessage } from '@/lib/ui/api';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { AmountFigure } from '@/components/app/amount-figure';
 import { StatusBadge } from '@/components/app/status-badge';
 import { Detail, DetailGrid, EmptyState, PageHeader, QueueSkeleton } from '@/components/app/page-shell';
 import { useStepUp } from '@/components/app/step-up';
-import { formatNaira, formatWhen } from '@/components/app/format';
+import { formatDate, formatNaira, formatWhen } from '@/components/app/format';
+import { lagosDate } from '@/lib/lagos-date';
 
 interface PractitionerHit {
   userId: string;
@@ -30,6 +41,8 @@ interface Payout {
   failureReason: string | null;
   releasedAt: string | null;
   settledAt: string | null;
+  /** The date a transfer made by hand left the bank. */
+  paidOn: string | null;
   createdAt: string;
   /** Whether the person looking prepared it, which decides whether they may release it. */
   preparedByYou: boolean;
@@ -55,6 +68,13 @@ export default function PayoutsPage() {
   const [applied, setApplied] = useState('');
   const [selected, setSelected] = useState<PractitionerHit | null>(null);
 
+  // Paying by hand: finance make the transfer at the bank, then say here which one it
+  // was. Either that or a reason it did not happen is what closes a released payout.
+  const [recording, setRecording] = useState<Payout | null>(null);
+  const [transfer, setTransfer] = useState({ reference: '', paidOn: '' });
+  const [withdrawing, setWithdrawing] = useState<{ payout: Payout; kind: 'fail' | 'cancel' } | null>(null);
+  const [reason, setReason] = useState('');
+
   const results = useQuery({
     queryKey: ['practitioner-search-for-payouts', applied],
     queryFn: () =>
@@ -71,7 +91,10 @@ export default function PayoutsPage() {
         payouts: Payout[];
         owedKobo: number;
         heldKobo: number;
+        payableKobo: number;
+        awaitingKobo: number;
         secondApproverRequired: boolean;
+        paidByHand: boolean;
       }>(
         `/api/v1/payouts?scopeType=PLATFORM&scopeId=${selected!.userId}`,
       ),
@@ -96,17 +119,69 @@ export default function PayoutsPage() {
     },
   });
 
+  const byHand = payouts.data?.paidByHand === true;
+
   const release = useMutation({
     mutationFn: (payout: Payout) => api.post(`/api/v1/payouts/${payout.id}/release`),
     onSuccess: () => {
-      toast.success('Released to the gateway');
+      if (byHand) {
+        toast.success('Released to finance', {
+          description: 'Make the bank transfer, then record it here to complete the payout.',
+        });
+      } else {
+        toast.success('Released to the gateway');
+      }
       refresh();
     },
     onError: (error, payout) => {
       if (stepUp.handle(error, () => release.mutate(payout))) return;
-      toast.error('The gateway refused it', { description: errorMessage(error) });
+      toast.error(byHand ? 'Could not release it' : 'The gateway refused it', {
+        description: errorMessage(error),
+      });
     },
   });
+
+  const settle = useMutation({
+    mutationFn: (payout: Payout) =>
+      api.post(`/api/v1/payouts/${payout.id}/settle`, {
+        bankReference: transfer.reference.trim(),
+        paidOn: transfer.paidOn,
+      }),
+    onSuccess: () => {
+      toast.success('Recorded as paid', {
+        description: 'The ledger now shows it paid, and the practitioner has been told.',
+      });
+      setRecording(null);
+      refresh();
+    },
+    onError: (error, payout) => {
+      if (stepUp.handle(error, () => settle.mutate(payout))) return;
+      toast.error('Could not record it', { description: errorMessage(error) });
+    },
+  });
+
+  const withdraw = useMutation({
+    mutationFn: ({ payout, kind }: { payout: Payout; kind: 'fail' | 'cancel' }) =>
+      api.post(`/api/v1/payouts/${payout.id}/${kind}`, { reason: reason.trim() }),
+    onSuccess: (_data, { kind }) => {
+      toast.success(kind === 'cancel' ? 'Cancelled' : 'Recorded as not paid', {
+        description: 'What it was holding can be prepared again.',
+      });
+      setWithdrawing(null);
+      setReason('');
+      refresh();
+    },
+    onError: (error, variables) => {
+      if (stepUp.handle(error, () => withdraw.mutate(variables))) return;
+      toast.error('Could not do that', { description: errorMessage(error) });
+    },
+  });
+
+  function startRecording(payout: Payout) {
+    setRecording(payout);
+    // Today in Lagos, which is when somebody is recording a transfer they have just made.
+    setTransfer({ reference: '', paidOn: lagosDate(new Date()) });
+  }
 
   if (!selected) {
     const hits = results.data?.practitioners ?? [];
@@ -118,12 +193,12 @@ export default function PayoutsPage() {
           description="What the ledger says a practitioner is owed, and clearing it. Preparing moves nothing; releasing is the act that does."
         />
 
-        <Alert variant="warning" className="mb-6">
-          <TriangleAlert />
+        <Alert variant="info" className="mb-6">
           <AlertDescription>
-            <strong>No payment provider is configured.</strong> Releasing a payout locally writes
-            the ledger entry and returns a reference beginning <code>stub-</code>, so nobody
-            mistakes it for a bank one. No money moves until the provider decision is taken.
+            A practitioner is paid only from money a facility has actually paid, however much
+            they are owed. Where payouts are made by bank transfer, releasing one hands it to
+            finance; the transfer is made at the bank and recorded here, and recording it is what
+            completes the payout.
           </AlertDescription>
         </Alert>
 
@@ -204,15 +279,143 @@ export default function PayoutsPage() {
 
       <PageHeader title={selected.fullName} description={selected.phone} />
 
+      <div className="mb-6 grid gap-4 sm:grid-cols-3">
+        <AmountFigure
+          label="Owed"
+          amountKobo={payouts.data?.owedKobo ?? 0}
+          hint="Approved and invoiced, not yet paid out."
+          isPending={payouts.isPending}
+          isError={payouts.isError}
+        />
+        <AmountFigure
+          label="Can be paid now"
+          amountKobo={payouts.data?.payableKobo ?? 0}
+          hint="Collected from facilities, and not held or already in flight."
+          isPending={payouts.isPending}
+          isError={payouts.isError}
+          emphasise
+        />
+        <AmountFigure
+          label="Waiting on facilities"
+          amountKobo={payouts.data?.awaitingKobo ?? 0}
+          hint="On invoices that have not been paid yet."
+          isPending={payouts.isPending}
+          isError={payouts.isError}
+        />
+      </div>
+
+      <Dialog open={recording !== null} onOpenChange={(open) => (open ? null : setRecording(null))}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Record the transfer of {recording ? formatNaira(recording.amountKobo) : ''}</DialogTitle>
+            <DialogDescription>
+              Make the transfer from the bank first, then enter what the statement shows. This is
+              what completes the payout, and the practitioner is told once it is recorded.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="transfer-reference">Bank reference for the transfer</Label>
+              <Input
+                id="transfer-reference"
+                value={transfer.reference}
+                maxLength={100}
+                onChange={(event) => setTransfer({ ...transfer, reference: event.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="transfer-date">Date it left the bank</Label>
+              <Input
+                id="transfer-date"
+                type="date"
+                value={transfer.paidOn}
+                onChange={(event) => setTransfer({ ...transfer, paidOn: event.target.value })}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRecording(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="success"
+              disabled={transfer.reference.trim().length < 3 || transfer.paidOn === ''}
+              loading={settle.isPending}
+              onClick={() => recording && settle.mutate(recording)}
+            >
+              <Banknote />
+              Record transfer
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={withdrawing !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setWithdrawing(null);
+            setReason('');
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {withdrawing?.kind === 'cancel' ? 'Cancel this payout' : 'The transfer did not go through'}
+            </DialogTitle>
+            <DialogDescription>
+              {withdrawing?.kind === 'cancel'
+                ? 'Nothing has been released, so nothing has moved. What it was holding can be prepared again.'
+                : 'Use this only if the money did not leave the bank. If it did, record the transfer instead, or the practitioner will be paid twice.'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label htmlFor="payout-reason">
+              {withdrawing?.kind === 'cancel' ? 'Why is it being cancelled?' : 'What happened?'}
+            </Label>
+            <Textarea
+              id="payout-reason"
+              value={reason}
+              maxLength={500}
+              rows={3}
+              onChange={(event) => setReason(event.target.value)}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setWithdrawing(null)}>
+              Back
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={reason.trim().length === 0}
+              loading={withdraw.isPending}
+              onClick={() => withdrawing && withdraw.mutate(withdrawing)}
+            >
+              {withdrawing?.kind === 'cancel' ? 'Cancel payout' : 'Record as not paid'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Card className="mb-6">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm">Prepare a payout</CardTitle>
         </CardHeader>
         <CardContent>
           <p className="mb-3 text-xs text-muted-foreground">
-            For everything currently outstanding, less anything already in flight and anything
-            held for a dispute.
+            For what has been collected, less anything already in flight and anything held for a
+            dispute.
           </p>
+          {payouts.data && payouts.data.awaitingKobo > 0 ? (
+            <Alert variant="info" className="mb-3">
+              <AlertDescription>
+                <strong>{formatNaira(payouts.data.awaitingKobo)}</strong> of the{' '}
+                {formatNaira(payouts.data.owedKobo)} owed is on invoices a facility has not paid
+                yet. It can be paid out once the payment is recorded as received.
+              </AlertDescription>
+            </Alert>
+          ) : null}
           {payouts.data && payouts.data.heldKobo > 0 ? (
             <Alert variant="warning" className="mb-3">
               <TriangleAlert />
@@ -223,9 +426,15 @@ export default function PayoutsPage() {
               </AlertDescription>
             </Alert>
           ) : null}
-          <Button loading={prepare.isPending} onClick={() => prepare.mutate()}>
+          <Button
+            loading={prepare.isPending}
+            disabled={payouts.data !== undefined && payouts.data.payableKobo <= 0}
+            onClick={() => prepare.mutate()}
+          >
             <HandCoins />
-            Prepare
+            {payouts.data && payouts.data.payableKobo > 0
+              ? `Prepare ${formatNaira(payouts.data.payableKobo)}`
+              : 'Prepare'}
           </Button>
         </CardContent>
       </Card>
@@ -253,6 +462,7 @@ export default function PayoutsPage() {
                   <Detail label="Prepared">{formatWhen(payout.createdAt)}</Detail>
                   <Detail label="Released">{formatWhen(payout.releasedAt)}</Detail>
                   <Detail label="Settled">{formatWhen(payout.settledAt)}</Detail>
+                  {payout.paidOn ? <Detail label="Left the bank">{formatDate(payout.paidOn)}</Detail> : null}
                   <Detail label="Reference">
                     <span className="font-mono text-xs">{payout.providerReference ?? '—'}</span>
                   </Detail>
@@ -275,14 +485,19 @@ export default function PayoutsPage() {
 
                 {payout.status === 'PREPARED' ? (
                   <div className="space-y-2">
-                    <Button
-                      disabled={payouts.data.secondApproverRequired && payout.preparedByYou}
-                      loading={release.isPending && release.variables?.id === payout.id}
-                      onClick={() => release.mutate(payout)}
-                    >
-                      <Send />
-                      Release {formatNaira(payout.amountKobo)}
-                    </Button>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        disabled={payouts.data.secondApproverRequired && payout.preparedByYou}
+                        loading={release.isPending && release.variables?.id === payout.id}
+                        onClick={() => release.mutate(payout)}
+                      >
+                        <Send />
+                        Release {formatNaira(payout.amountKobo)}
+                      </Button>
+                      <Button variant="outline" onClick={() => setWithdrawing({ payout, kind: 'cancel' })}>
+                        Cancel it
+                      </Button>
+                    </div>
                     {payouts.data.secondApproverRequired && payout.preparedByYou ? (
                       <p className="text-xs text-muted-foreground">
                         You prepared this one, so a colleague who can manage payouts has to release
@@ -290,6 +505,30 @@ export default function PayoutsPage() {
                       </p>
                     ) : null}
                   </div>
+                ) : null}
+
+                {payout.status === 'RELEASED' ? (
+                  payouts.data.paidByHand ? (
+                    <div className="space-y-2">
+                      <p className="text-xs text-muted-foreground">
+                        Released to finance. Make the transfer of {formatNaira(payout.amountKobo)} at
+                        the bank, then record it here.
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        <Button variant="success" onClick={() => startRecording(payout)}>
+                          <Banknote />
+                          Record the transfer
+                        </Button>
+                        <Button variant="outline" onClick={() => setWithdrawing({ payout, kind: 'fail' })}>
+                          It did not go through
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      Sent to the payment gateway. It completes when the gateway confirms.
+                    </p>
+                  )
                 ) : null}
               </CardContent>
             </Card>

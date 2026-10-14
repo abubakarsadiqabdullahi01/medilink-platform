@@ -41,7 +41,12 @@ const schema = z.object({
   // 'console' is the local stub, the same shape SMS_PROVIDER uses. It
   // refuses to run outside local, because a stub that reports money as paid
   // in staging is worse than no gateway at all.
-  PAYMENT_PROVIDER: z.enum(['console', 'paystack', 'remita', 'none']).default('none'),
+  //
+  // 'manual' is for a pilot with no gateway: releasing a payout hands it to
+  // finance, who make the bank transfer themselves and record its reference
+  // here, which is what completes it. It is allowed everywhere because it
+  // claims nothing it has not been told.
+  PAYMENT_PROVIDER: z.enum(['console', 'manual', 'paystack', 'remita', 'none']).default('none'),
   PAYSTACK_SECRET_KEY: z.string().optional(),
   PAYSTACK_WEBHOOK_SECRET: z.string().optional(),
 

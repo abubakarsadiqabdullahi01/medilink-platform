@@ -24,5 +24,8 @@ export const ROUTES: RouteDefinition[] = [
   { method: 'POST', path: '/api/v1/invoices/:id/pay', permission: 'payout.manage', scopeType: 'PLATFORM' },
   { method: 'POST', path: '/api/v1/payouts', permission: 'payout.manage', scopeType: 'PLATFORM' },
   { method: 'POST', path: '/api/v1/payouts/:id/release', permission: 'payout.manage', scopeType: 'PLATFORM' },
+  { method: 'POST', path: '/api/v1/payouts/:id/settle', permission: 'payout.manage', scopeType: 'PLATFORM' },
+  { method: 'POST', path: '/api/v1/payouts/:id/fail', permission: 'payout.manage', scopeType: 'PLATFORM' },
+  { method: 'POST', path: '/api/v1/payouts/:id/cancel', permission: 'payout.manage', scopeType: 'PLATFORM' },
   { method: 'GET', path: '/api/v1/payouts', permission: 'invoice.read', scopeType: 'SELF' },
 ];

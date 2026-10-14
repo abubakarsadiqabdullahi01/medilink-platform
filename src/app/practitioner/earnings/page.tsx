@@ -18,6 +18,8 @@ interface Payout {
   failureReason: string | null;
   releasedAt: string | null;
   settledAt: string | null;
+  /** The date the transfer left the bank, when it was made by hand. */
+  paidOn: string | null;
   createdAt: string;
 }
 
@@ -34,11 +36,25 @@ interface Payout {
  * does over rows it happens to have loaded, so it cannot disagree with what
  * finance will actually pay.
  */
+function owedHint(position: { heldKobo: number; awaitingKobo: number } | undefined): string {
+  if (!position) return 'Approved, invoiced and not yet paid out.';
+  const parts: string[] = [];
+  // Said plainly, because a figure owed that cannot yet be paid looks like a mistake
+  // unless somebody says why: payment waits for the facility's own payment to arrive.
+  if (position.awaitingKobo > 0) {
+    parts.push(`${formatNaira(position.awaitingKobo)} is waiting for the hospital to pay its invoice.`);
+  }
+  if (position.heldKobo > 0) {
+    parts.push(`${formatNaira(position.heldKobo)} is held while a dispute is decided.`);
+  }
+  return parts.length > 0 ? parts.join(' ') : 'Approved, invoiced and not yet paid out.';
+}
+
 export default function EarningsPage() {
   const earnings = useQuery({
     queryKey: ['my-earnings'],
     queryFn: () =>
-      api.get<{ payouts: Payout[]; owedKobo: number; heldKobo: number }>(
+      api.get<{ payouts: Payout[]; owedKobo: number; heldKobo: number; awaitingKobo: number }>(
         '/api/v1/payouts?scopeType=SELF',
       ),
   });
@@ -61,11 +77,7 @@ export default function EarningsPage() {
         <AmountFigure
           label="Owed to you"
           amountKobo={earnings.data?.owedKobo ?? 0}
-          hint={
-            (earnings.data?.heldKobo ?? 0) > 0
-              ? `${formatNaira(earnings.data!.heldKobo)} of this is held while a dispute is decided.`
-              : 'Approved, invoiced and not yet paid out.'
-          }
+          hint={owedHint(earnings.data)}
           isPending={earnings.isPending}
           isError={earnings.isError}
           emphasise
@@ -122,9 +134,9 @@ export default function EarningsPage() {
                   <p className="tabular font-medium">{formatNaira(row.amountKobo)}</p>
                   <p className="mt-0.5 text-xs text-muted-foreground">
                     {row.settledAt
-                      ? `Received ${formatDate(row.settledAt)}`
+                      ? `${row.paidOn ? 'Paid' : 'Received'} ${formatDate(row.paidOn ?? row.settledAt)}`
                       : row.releasedAt
-                        ? `Sent ${formatDate(row.releasedAt)}`
+                        ? `Approved for payment ${formatDate(row.releasedAt)}`
                         : `Prepared ${formatDate(row.createdAt)}`}
                     {row.providerReference ? ` · ref ${row.providerReference}` : ''}
                   </p>
