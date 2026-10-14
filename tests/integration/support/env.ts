@@ -33,6 +33,13 @@ process.env.MDCN_VERIFICATION_PROVIDER = process.env.TEST_MDCN_VERIFICATION_PROV
 // turns it back on when a test needs to be watched.
 process.env.LOG_LEVEL = process.env.TEST_LOG_LEVEL ?? 'error';
 
+// The billing tests pay practitioners through the stub gateway, which says it moved
+// money it did not. The default is `none`, which refuses every payout, so a suite
+// that took whatever the environment held passed on a laptop whose .env says
+// `console` and failed in CI, which has no .env. Assigned, not defaulted, for the
+// same reason as the providers above; the manual-provider cases mock it themselves.
+process.env.PAYMENT_PROVIDER = 'console';
+
 // Releasing a payout needs somebody other than the person who prepared it. Most
 // of the suite prepares and releases as one person because it is about something
 // else, so the control is off for the run; the cases that are about it unset it.
