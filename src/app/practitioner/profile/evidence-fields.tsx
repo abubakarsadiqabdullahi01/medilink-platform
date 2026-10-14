@@ -163,7 +163,7 @@ export function EvidenceFields({
             aria-invalid={Boolean(problem)}
           />
           {problem ? (
-            <p className="text-xs text-destructive">{problem}</p>
+            <p className="text-xs text-destructive-text">{problem}</p>
           ) : rule.referenceHint ? (
             <p className="text-xs text-muted-foreground">{rule.referenceHint}</p>
           ) : null}

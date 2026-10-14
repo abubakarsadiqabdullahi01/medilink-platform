@@ -78,8 +78,8 @@ describe('audit coverage across the authentication journey', () => {
     startAuditCoverage();
 
     await startRegistration({ phone: PHONE, fullName: 'Amina Yusuf' });
-    await verifyRegistrationPhone({ phone: PHONE, code: lastOtpCode() });
-    const { userId } = await setInitialPassword({ phone: PHONE, password: PASSWORD });
+    const { setupToken } = await verifyRegistrationPhone({ phone: PHONE, code: lastOtpCode() });
+    const { userId } = await setInitialPassword({ phone: PHONE, password: PASSWORD, setupToken: setupToken! });
 
     const session = await login({ phone: PHONE, password: PASSWORD });
     await revokeSession({ sessionId: session.sessionId, actorId: userId, reason: 'Signed out' });
@@ -105,8 +105,8 @@ describe('audit coverage across the authentication journey', () => {
 
   it('records the journey in the audit trail in the order it happened', async () => {
     await startRegistration({ phone: PHONE, fullName: 'Amina Yusuf' });
-    await verifyRegistrationPhone({ phone: PHONE, code: lastOtpCode() });
-    await setInitialPassword({ phone: PHONE, password: PASSWORD });
+    const { setupToken } = await verifyRegistrationPhone({ phone: PHONE, code: lastOtpCode() });
+    await setInitialPassword({ phone: PHONE, password: PASSWORD, setupToken: setupToken! });
     await login({ phone: PHONE, password: PASSWORD });
 
     const rows = await prisma.auditLog.findMany({

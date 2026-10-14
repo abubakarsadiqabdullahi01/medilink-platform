@@ -146,3 +146,80 @@ export async function listRateCards(facilityId: string): Promise<RateCardView[]>
   });
   return rows.map(toView);
 }
+
+/**
+ * The allowances a booking is priced on, fixed when it is made.
+ *
+ * Copied onto the assignment, because the card itself can be replaced: priced
+ * from "whichever card is active when the invoice is raised", a facility could
+ * book a night shift under one card, supersede it with a cheaper one, and have
+ * the practitioner paid the lower figure for work agreed at the higher.
+ */
+export interface RateTerms extends RateCardLike {
+  /** The card these came from; null when the facility had none and the terms are par. */
+  rateCardId: string | null;
+  fixedAt: string;
+}
+
+/**
+ * The card in force on `shiftStartsAt`: it began on or before that moment and
+ * had not been superseded by it. A card made now applies to a shift next month,
+ * the card it replaced does not, and a card dated for next month does not apply
+ * to a shift next week. Not "the active card": that is a statement about today.
+ *
+ * A facility with no card in force on that date is at par on every band, which is
+ * exactly how it behaved before this module existed.
+ */
+export async function rateTermsFor(
+  facilityId: string,
+  shiftStartsAt: Date,
+  now: Date = new Date(),
+): Promise<RateTerms> {
+  const row = await prisma.rateCard.findFirst({
+    where: {
+      facilityId,
+      status: { not: 'DRAFT' },
+      effectiveFrom: { lte: shiftStartsAt },
+      OR: [{ effectiveUntil: null }, { effectiveUntil: { gt: shiftStartsAt } }],
+    },
+    orderBy: { effectiveFrom: 'desc' },
+  });
+
+  return {
+    rateCardId: row?.id ?? null,
+    nightMultiplierBp: row?.nightMultiplierBp ?? DEFAULT_RATE_CARD.nightMultiplierBp,
+    holidayMultiplierBp: row?.holidayMultiplierBp ?? DEFAULT_RATE_CARD.holidayMultiplierBp,
+    overtimeMultiplierBp: row?.overtimeMultiplierBp ?? DEFAULT_RATE_CARD.overtimeMultiplierBp,
+    onCallMultiplierBp: row?.onCallMultiplierBp ?? DEFAULT_RATE_CARD.onCallMultiplierBp,
+    fixedAt: now.toISOString(),
+  };
+}
+
+/** Reads terms back off a booking, or null if it has none (made before they were kept) or they are malformed. */
+export function readRateTerms(value: unknown): RateTerms | null {
+  if (!value || typeof value !== 'object') return null;
+  const terms = value as Record<string, unknown>;
+  const bands = ['nightMultiplierBp', 'holidayMultiplierBp', 'overtimeMultiplierBp', 'onCallMultiplierBp'] as const;
+  if (!bands.every((band) => Number.isInteger(terms[band]))) return null;
+
+  return {
+    rateCardId: typeof terms.rateCardId === 'string' ? terms.rateCardId : null,
+    nightMultiplierBp: terms.nightMultiplierBp as number,
+    holidayMultiplierBp: terms.holidayMultiplierBp as number,
+    overtimeMultiplierBp: terms.overtimeMultiplierBp as number,
+    onCallMultiplierBp: terms.onCallMultiplierBp as number,
+    fixedAt: typeof terms.fixedAt === 'string' ? terms.fixedAt : '',
+  };
+}
+
+/**
+ * The terms a booking is priced on: the ones kept on it, or, for a booking made
+ * before terms were kept, the card in force on the shift's date.
+ */
+export async function termsOfBooking(booking: {
+  facilityId: string;
+  startsAt: Date;
+  rateTerms: unknown;
+}): Promise<RateTerms> {
+  return readRateTerms(booking.rateTerms) ?? rateTermsFor(booking.facilityId, booking.startsAt);
+}

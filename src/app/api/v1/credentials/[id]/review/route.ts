@@ -43,6 +43,7 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
           reviewerId: session.userId,
           decision: input.decision,
           reviewNotes: input.reviewNotes,
+          printedExpiryDate: input.printedExpiryDate,
         });
       },
     },

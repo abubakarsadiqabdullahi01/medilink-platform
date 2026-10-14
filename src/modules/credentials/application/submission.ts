@@ -7,7 +7,8 @@ import { publishEvent } from '@/lib/outbox';
 import { EVENTS } from '@/lib/events';
 import { createDownloadUrl, createUploadUrl, headObject } from '@/lib/storage/tigris';
 import {
-  computeExpiresAt,
+  expiryFor,
+  printedExpiryProblem,
   holdsNin,
   maskReference,
   requiredEvidenceFor,
@@ -39,7 +40,14 @@ export interface CredentialSubmissionView {
   reviewedBy: string | null;
   reviewedAt: Date | null;
   reviewNotes: string | null;
+  /** The instant it stops counting. */
   expiresAt: Date | null;
+  /**
+   * The date printed on the document, as the reviewer read it, as `YYYY-MM-DD`.
+   * Null when none was read and `expiresAt` is only an estimate from the type's
+   * review interval; a screen says which it is showing.
+   */
+  documentExpiresOn: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -69,6 +77,8 @@ export interface CredentialQueueRow extends CredentialSubmissionView {
    * screen needs to know which it is looking at.
    */
   verificationMethod: string;
+  /** Whether it has an expiry date at all, so a screen knows whether to ask for one. */
+  credentialTypeExpires: boolean;
 }
 
 /**
@@ -92,6 +102,7 @@ function toView(submission: {
   reviewedAt: Date | null;
   reviewNotes: string | null;
   expiresAt: Date | null;
+  documentExpiresOn: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }): CredentialSubmissionView {
@@ -106,6 +117,7 @@ function toView(submission: {
     reviewedAt: submission.reviewedAt,
     reviewNotes: submission.reviewNotes,
     expiresAt: submission.expiresAt,
+    documentExpiresOn: submission.documentExpiresOn?.toISOString().slice(0, 10) ?? null,
     createdAt: submission.createdAt,
     updatedAt: submission.updatedAt,
   };
@@ -292,7 +304,7 @@ export async function listSubmissions(query: ListSubmissionsQuery): Promise<Subm
           practitionerProfile: { select: { photoObjectKey: true } },
         },
       },
-      credentialType: { select: { name: true, verificationMethod: true } },
+      credentialType: { select: { name: true, verificationMethod: true, expires: true } },
     },
   });
 
@@ -315,6 +327,7 @@ export async function listSubmissions(query: ListSubmissionsQuery): Promise<Subm
     practitionerPhotoUrl: signed.get(row.userId) ?? null,
     credentialTypeName: row.credentialType.name,
     verificationMethod: row.credentialType.verificationMethod,
+    credentialTypeExpires: row.credentialType.expires,
   }));
 
   const hasMore = rows.length > query.limit;
@@ -332,6 +345,11 @@ export interface ReviewCredentialParams {
   reviewerId: string;
   decision: ReviewDecision;
   reviewNotes?: string;
+  /**
+   * The expiry date printed on the document, `YYYY-MM-DD`, read by the reviewer.
+   * Only on approval, and only for a credential that expires.
+   */
+  printedExpiryDate?: string;
 }
 
 const DECISION_STATUS: Record<ReviewDecision, CredentialSubmissionStatusValue> = {
@@ -360,7 +378,19 @@ export async function reviewCredential(
   const now = new Date();
   const approved = input.decision === 'approve';
   const nextStatus = DECISION_STATUS[input.decision];
-  const expiresAt = approved ? computeExpiresAt(existing.credentialType, now) : null;
+
+  // The date printed on the document governs; the type's review interval is only
+  // the fallback when nobody read one (CRE-04). Refused before anything is written.
+  if (input.printedExpiryDate !== undefined && !approved) {
+    throw CredentialErrors.printedExpiryInvalid('only_when_approving');
+  }
+  const problem = approved
+    ? printedExpiryProblem(existing.credentialType, input.printedExpiryDate, now)
+    : null;
+  if (problem) throw CredentialErrors.printedExpiryInvalid(problem);
+  const { expiresAt, documentExpiresOn } = approved
+    ? expiryFor(existing.credentialType, now, input.printedExpiryDate)
+    : { expiresAt: null, documentExpiresOn: null };
 
   // A NIN is not kept whole once anybody has decided anything about it. It was
   // masked only on the confirmed path, so a rejected, queried or mismatched
@@ -380,6 +410,7 @@ export async function reviewCredential(
         reviewedAt: now,
         reviewNotes: input.reviewNotes,
         expiresAt,
+        documentExpiresOn: documentExpiresOn ? new Date(`${documentExpiresOn}T00:00:00.000Z`) : null,
         ...(maskedReference ? { referenceNumber: maskedReference } : {}),
       },
     });
@@ -418,7 +449,8 @@ export async function reviewCredential(
 
     // Every decision is an event, so the practitioner is told what an officer
     // decided about their document (CRE-07). The audit row above is the record;
-    // the event is what reaches a person.
+    // the event is what reaches a person. The notes stay on the audit row and in
+    // the app; the event carries no free text.
     await publishEvent(tx, {
       eventType: {
         approve: EVENTS.CredentialVerified,
@@ -431,6 +463,9 @@ export async function reviewCredential(
         submissionId: updated.id,
         userId: updated.userId,
         credentialTypeId: updated.credentialTypeId,
+        // A submission can be queried more than once; this is what makes the
+        // second query a new thing to be told about, not a repeat of the first.
+        decidedAt: now.toISOString(),
       },
     });
 
@@ -536,6 +571,8 @@ export interface SubmissionForVerification {
   documentObjectKey: string | null;
   credentialTypeName: string;
   verificationMethod: string;
+  /** Whether this kind of credential has an expiry date at all. */
+  credentialTypeExpires: boolean;
 }
 
 export async function getSubmissionForVerification(
@@ -543,7 +580,7 @@ export async function getSubmissionForVerification(
 ): Promise<SubmissionForVerification> {
   const row = await prisma.credentialSubmission.findUnique({
     where: { id: submissionId },
-    include: { credentialType: { select: { name: true, verificationMethod: true } } },
+    include: { credentialType: { select: { name: true, verificationMethod: true, expires: true } } },
   });
   if (!row || row.deletedAt) throw CredentialErrors.submissionNotFound();
   return {
@@ -554,6 +591,7 @@ export async function getSubmissionForVerification(
     documentObjectKey: row.documentObjectKey,
     credentialTypeName: row.credentialType.name,
     verificationMethod: row.credentialType.verificationMethod,
+    credentialTypeExpires: row.credentialType.expires,
   };
 }
 

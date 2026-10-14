@@ -298,7 +298,7 @@ describe('opening a case', () => {
     ).rejects.toMatchObject({ code: 'assignment_not_found', status: 404 });
   });
 
-  it('refuses a facility that has nothing to do with the shift', async () => {
+  it('tells a facility that has nothing to do with the shift that there is no such shift, not why it was refused', async () => {
     const world = await buildWorld();
     const other = await buildWorld();
     await approved(world);
@@ -388,6 +388,75 @@ describe('opening a case', () => {
       where: { assignmentId: world.assignmentId },
     });
     expect(row.preDisputeStatus).toBe('REJECTED');
+  });
+});
+
+describe('telling people what happens to a case', () => {
+  /**
+   * The admin screen says marking a case under review "tells the other side
+   * somebody is looking" and that both sides read the outcome. Neither was
+   * true: only DisputeOpened was published, and nothing consumed it.
+   */
+  const eventsFor = (disputeId: string) =>
+    prisma.outboxEvent.findMany({ where: { aggregateId: disputeId }, orderBy: { createdAt: 'asc' } });
+
+  it('publishes DisputeUnderReview when an officer picks it up', async () => {
+    const world = await buildWorld();
+    await approved(world);
+    const dispute = await raiseDispute({
+      assignmentId: world.assignmentId,
+      actorId: world.practitionerId,
+      category: 'HOURS',
+      reason: COMPLAINT,
+    });
+
+    await beginReview({ disputeId: dispute.id, actorId: world.officerId });
+
+    const event = (await eventsFor(dispute.id)).find((e) => e.eventType === EVENTS.DisputeUnderReview);
+    expect(event?.payload).toMatchObject({
+      disputeId: dispute.id,
+      assignmentId: world.assignmentId,
+      userId: world.practitionerId,
+      facilityId: world.facilityId,
+    });
+  });
+
+  it('publishes DisputeResolved with the outcome, and not the officer\'s notes', async () => {
+    const world = await buildWorld();
+    await approved(world);
+    const dispute = await raiseDispute({
+      assignmentId: world.assignmentId,
+      actorId: world.practitionerId,
+      category: 'HOURS',
+      reason: COMPLAINT,
+    });
+
+    await resolveDispute({
+      disputeId: dispute.id,
+      actorId: world.officerId,
+      outcome: 'UPHELD',
+      notes: 'The ward log shows the practitioner stayed until the night staff arrived.',
+    });
+
+    const event = (await eventsFor(dispute.id)).find((e) => e.eventType === EVENTS.DisputeResolved);
+    expect(event?.payload).toMatchObject({ disputeId: dispute.id, outcome: 'UPHELD' });
+    expect(JSON.stringify(event?.payload)).not.toContain('night staff');
+  });
+
+  it('publishes DisputeWithdrawn, saying which side withdrew it', async () => {
+    const world = await buildWorld();
+    await approved(world);
+    const dispute = await raiseDispute({
+      assignmentId: world.assignmentId,
+      actorId: world.practitionerId,
+      category: 'HOURS',
+      reason: COMPLAINT,
+    });
+
+    await withdrawDispute({ disputeId: dispute.id, actorId: world.practitionerId });
+
+    const event = (await eventsFor(dispute.id)).find((e) => e.eventType === EVENTS.DisputeWithdrawn);
+    expect(event?.payload).toMatchObject({ disputeId: dispute.id, raisedParty: 'PRACTITIONER' });
   });
 });
 

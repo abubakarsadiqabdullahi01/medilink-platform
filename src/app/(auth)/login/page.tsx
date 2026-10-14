@@ -5,13 +5,14 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMutation } from '@tanstack/react-query';
 import { ShieldCheck, TriangleAlert } from 'lucide-react';
-import { api, errorMessage } from '@/lib/ui/api';
+import { api, ApiError, errorMessage } from '@/lib/ui/api';
 import { consoleFor, type SessionState } from '@/lib/ui/session';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { TextSizeControl } from '@/components/app/text-size-control';
 
 /**
  * Sign in. The session is a cookie the API sets, so there is nothing to store
@@ -34,10 +35,11 @@ export default function LoginPage() {
   });
 
   return (
-    <main className="grid min-h-dvh lg:grid-cols-2">
+    <main className="relative grid min-h-dvh lg:grid-cols-2">
+      <TextSizeControl className="absolute right-3 top-3 z-10" />
       <div className="flex items-center justify-center px-6 py-12">
         <div className="w-full max-w-sm">
-          <p className="text-[0.7rem] font-semibold uppercase tracking-widest text-muted-foreground">
+          <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
             Medilink
           </p>
           <h1 className="mt-1 text-2xl font-semibold tracking-tight">Sign in</h1>
@@ -57,7 +59,17 @@ export default function LoginPage() {
                 {signIn.isError ? (
                   <Alert variant="destructive">
                     <TriangleAlert />
-                    <AlertDescription>{errorMessage(signIn.error)}</AlertDescription>
+                    <AlertDescription>
+                      {errorMessage(signIn.error)}
+                      {signIn.error instanceof ApiError && signIn.error.failure.code === 'account_locked' ? (
+                        <>
+                          {' '}
+                          <Link href="/forgot-password" className="font-medium underline underline-offset-4">
+                            Reset your password
+                          </Link>
+                        </>
+                      ) : null}
+                    </AlertDescription>
                   </Alert>
                 ) : null}
 
@@ -74,7 +86,15 @@ export default function LoginPage() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <Label htmlFor="password">Password</Label>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="password">Password</Label>
+                    <Link
+                      href="/forgot-password"
+                      className="text-xs font-medium text-primary underline-offset-4 hover:underline"
+                    >
+                      Forgot your password?
+                    </Link>
+                  </div>
                   <Input
                     id="password"
                     type="password"
@@ -107,6 +127,21 @@ export default function LoginPage() {
           </p>
 
           <p className="mt-2 text-sm text-muted-foreground">
+            Stuck?{' '}
+            <Link href="/contact" className="font-medium text-primary underline-offset-4 hover:underline">
+              Contact a person
+            </Link>
+            {' · '}
+            <Link href="/terms" className="font-medium text-primary underline-offset-4 hover:underline">
+              Terms
+            </Link>
+            {' · '}
+            <Link href="/privacy" className="font-medium text-primary underline-offset-4 hover:underline">
+              Privacy notice
+            </Link>
+          </p>
+
+          <p className="mt-2 text-sm text-muted-foreground">
             Represent a hospital or clinic?{' '}
             <Link
               href="/register?as=facility"
@@ -116,11 +151,6 @@ export default function LoginPage() {
             </Link>
           </p>
 
-          <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
-            Locally, <code className="rounded bg-muted px-1 py-0.5">seed-demo.ts</code> creates
-            every demo account and prints the login sheet. See{' '}
-            <code className="rounded bg-muted px-1 py-0.5">docs/interfaces.md</code>.
-          </p>
         </div>
       </div>
 

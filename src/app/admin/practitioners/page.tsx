@@ -98,6 +98,8 @@ interface Registration {
   registrationStatus: string;
   expiresAt: string | null;
   usable: boolean;
+  cadreLevel: { id: string; name: string; rank: number } | null;
+  registrationCategory: { id: string; name: string; supervisionRequired: boolean } | null;
 }
 
 interface Verification {
@@ -147,6 +149,97 @@ function Avatar({ entry, size = 'sm' }: { entry: Entry; size?: 'sm' | 'lg' }) {
         />
       )}
     </span>
+  );
+}
+
+/**
+ * The level and registration category on a registration, as the officer sets them.
+ *
+ * Only a profession that compliance has defined levels for shows a level picker; until
+ * then there is nothing to choose and the row says so. Saved together, so what is on the
+ * screen is what is recorded.
+ */
+function StandingEditor({
+  registration,
+  professionId,
+  levels,
+  categories,
+  value,
+  onChange,
+  onSave,
+  saving,
+}: {
+  registration: Registration;
+  professionId: string | null;
+  levels: { id: string; name: string; rank: number; categoryId: string }[];
+  categories: { id: string; name: string; supervisionRequired: boolean }[];
+  value: { level: string; category: string };
+  onChange: (next: { level: string; category: string }) => void;
+  onSave: () => void;
+  saving: boolean;
+}) {
+  const own = levels.filter((level) => level.categoryId === professionId);
+  const level = value.level || registration.cadreLevel?.id || '__none__';
+  const category = value.category || registration.registrationCategory?.id || '__none__';
+  const unchanged =
+    level === (registration.cadreLevel?.id ?? '__none__') &&
+    category === (registration.registrationCategory?.id ?? '__none__');
+
+  if (own.length === 0 && categories.length === 0) {
+    return (
+      <p className="mt-2 text-xs text-muted-foreground">
+        No levels or registration categories are defined yet, so there is nothing to record here.
+      </p>
+    );
+  }
+
+  return (
+    <div className="mt-3 grid gap-3 border-t pt-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+      {own.length > 0 ? (
+        <div className="space-y-1.5">
+          <Label>Level</Label>
+          <Select value={level} onValueChange={(next) => onChange({ level: next, category })}>
+            <SelectTrigger aria-label="Level">
+              <SelectValue placeholder="Not recorded" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">Not recorded</SelectItem>
+              {own.map((row) => (
+                <SelectItem key={row.id} value={row.id}>
+                  {row.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground">No levels are defined for their profession yet.</p>
+      )}
+      {categories.length > 0 ? (
+        <div className="space-y-1.5">
+          <Label>Registration category</Label>
+          <Select value={category} onValueChange={(next) => onChange({ level, category: next })}>
+            <SelectTrigger aria-label="Registration category">
+              <SelectValue placeholder="Not recorded" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">Not recorded</SelectItem>
+              {categories.map((row) => (
+                <SelectItem key={row.id} value={row.id}>
+                  {row.name}
+                  {row.supervisionRequired ? ' (supervised)' : ''}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      ) : (
+        <span />
+      )}
+      <Button size="sm" variant="outline" disabled={unchanged} loading={saving} onClick={onSave}>
+        Save
+      </Button>
+    </div>
   );
 }
 
@@ -291,6 +384,25 @@ function Practitioners() {
       toast.success('Registration recorded');
       setFolioNumber('');
       setExpiresAt('');
+      refresh();
+    },
+    onError: (error) => toast.error('Could not record it', { description: errorMessage(error) }),
+  });
+
+  // Where they stand on the register: their level within the profession and their
+  // registration category, read off it by the officer (PRA-01, PRA-02).
+  const [standing, setStanding] = useState<{ level: string; category: string }>({ level: '', category: '' });
+  const NONE = '__none__';
+
+  const recordStanding = useMutation({
+    mutationFn: () =>
+      api.post('/api/v1/practitioners/verification/standing', {
+        userId,
+        cadreLevelId: standing.level && standing.level !== NONE ? standing.level : null,
+        registrationCategoryId: standing.category && standing.category !== NONE ? standing.category : null,
+      }),
+    onSuccess: () => {
+      toast.success('Level and category recorded');
       refresh();
     },
     onError: (error) => toast.error('Could not record it', { description: errorMessage(error) }),
@@ -471,6 +583,16 @@ function Practitioners() {
                                     ? ` · expires ${formatWhen(registration.expiresAt)}`
                                     : ''}
                                 </p>
+                                <StandingEditor
+                                  registration={registration}
+                                  professionId={selected?.professionalCategoryId ?? null}
+                                  levels={reference.data?.cadreLevels ?? []}
+                                  categories={reference.data?.registrationCategories ?? []}
+                                  value={standing}
+                                  onChange={setStanding}
+                                  onSave={() => recordStanding.mutate()}
+                                  saving={recordStanding.isPending}
+                                />
                               </li>
                             ))}
                           </ul>
@@ -784,17 +906,17 @@ function Practitioners() {
                       needs something recorded. */}
                   <div className="hidden shrink-0 items-center gap-2 sm:flex">
                     {row.submittedForReviewAt ? (
-                      <span className="rounded-full bg-info/10 px-2 py-0.5 text-[0.7rem] font-medium text-info">
+                      <span className="rounded-full bg-info/10 px-2 py-0.5 text-xs font-medium text-info">
                         Submitted {formatAgo(row.submittedForReviewAt)}
                       </span>
                     ) : (
-                      <span className="rounded-full bg-muted px-2 py-0.5 text-[0.7rem] font-medium text-muted-foreground">
+                      <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
                         Not submitted
                       </span>
                     )}
                     <span
                       className={cn(
-                        'rounded-full px-2 py-0.5 text-[0.7rem] font-medium',
+                        'rounded-full px-2 py-0.5 text-xs font-medium',
                         row.identityRecorded
                           ? 'bg-success/10 text-success'
                           : 'bg-warning/10 text-warning',
@@ -804,7 +926,7 @@ function Practitioners() {
                     </span>
                     <span
                       className={cn(
-                        'rounded-full px-2 py-0.5 text-[0.7rem] font-medium',
+                        'rounded-full px-2 py-0.5 text-xs font-medium',
                         row.registrationRecorded
                           ? 'bg-success/10 text-success'
                           : 'bg-warning/10 text-warning',

@@ -16,12 +16,16 @@ export interface Submission {
   status: string;
   referenceNumber: string | null;
   expiresAt: string | null;
+  /** The date printed on the document, as read by the reviewer. */
+  documentExpiresOn: string | null;
   createdAt: string;
   reviewNotes: string | null;
   credentialTypeName: string;
   documentObjectKey: string | null;
   /** How it is checked; see the server's credentials domain. */
   verificationMethod: string;
+  /** Whether it has an expiry date to read off the document. */
+  credentialTypeExpires: boolean;
 }
 
 /**

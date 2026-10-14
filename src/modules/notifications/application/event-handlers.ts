@@ -1,7 +1,8 @@
 import { prisma } from '@/lib/db';
 import { logger } from '@/lib/logger';
 import { watWindow } from '@/lib/wat';
-import { alreadyNotified } from './handlers';
+import { usersHoldingPlatformPermission } from '@/modules/auth/application/grants';
+import { alreadyNotified, ngn } from './handlers';
 import { notify, requireDelivered, type NotifyOutcome } from './notify';
 
 /**
@@ -21,22 +22,27 @@ import { notify, requireDelivered, type NotifyOutcome } from './notify';
  * if one did not go (see notify.ts), so the outbox retries it.
  */
 
-const NAIRA = new Intl.NumberFormat('en-NG', { maximumFractionDigits: 0 });
-const ngn = (kobo: number) => `NGN ${NAIRA.format(Math.round(kobo / 100))}`;
-
 interface Tell {
   userId: string;
   kind: string;
   body: string;
   relatedType: string;
   relatedId: string;
+  /**
+   * Only a message sent since then counts as already told. An offer that is
+   * reopened, or a document queried a second time, is the same row and is a new
+   * thing to be told about; a repeat delivery of the same event is not.
+   */
+  since?: Date;
 }
+
+const instant = (value: unknown) => (value ? new Date(String(value)) : undefined);
 
 /** Sends each message not already delivered, tries all of them, then fails the event if any failed. */
 async function tellAll(messages: Tell[]): Promise<void> {
   const outcomes: NotifyOutcome[] = [];
   for (const message of messages) {
-    if (await alreadyNotified(message.userId, message.kind, message.relatedId)) continue;
+    if (await alreadyNotified(message.userId, message.kind, message.relatedId, message.since)) continue;
     outcomes.push(await notify(message));
   }
   requireDelivered(outcomes);
@@ -98,6 +104,7 @@ export async function notifyShiftInvited(payload: Record<string, unknown>): Prom
       body: `New shift offer from ${facts.facility.name}: ${facts.when}, ${facts.rate} per hour. Open Medilink to accept or decline.`,
       relatedType: 'matching.invitations',
       relatedId: invitationId,
+      since: instant(payload.offeredAt),
     },
   ]);
 }
@@ -121,6 +128,7 @@ export async function notifyShiftAccepted(payload: Record<string, unknown>): Pro
       body: `A practitioner has accepted your shift on ${facts.when}. Open Medilink to confirm them.`,
       relatedType: 'matching.invitations',
       relatedId: invitationId,
+      since: instant(payload.acceptedAt),
     },
   ]);
 }
@@ -143,6 +151,7 @@ function credentialDecision(kind: string, line: (type: string) => string) {
         body: line(type),
         relatedType: 'credentials.credential_submissions',
         relatedId: submissionId,
+        since: instant(payload.decidedAt),
       },
     ]);
   };
@@ -255,8 +264,12 @@ export async function notifyTimesheetApproved(payload: Record<string, unknown>):
 }
 
 /**
- * `dispute.opened`: the other side is told there is a case. Nothing about its
- * category or what was claimed: that is for the screen, behind the sign-in.
+ * `dispute.opened`: the other side is told there is a case, and the people who
+ * adjudicate are told there is one to pick up. Nothing about its category or what
+ * was claimed: that is for the screen, behind the sign-in.
+ *
+ * The other side is the facility's representative when a practitioner raised it,
+ * and the practitioner when the facility did (DSP-04).
  */
 export async function notifyDisputeOpened(payload: Record<string, unknown>): Promise<void> {
   const disputeId = text(payload.disputeId);
@@ -275,15 +288,35 @@ export async function notifyDisputeOpened(payload: Record<string, unknown>): Pro
   const facts = await assignmentFacts(assignmentId);
   if (!facts) return;
 
-  await tellAll([
+  // Tell the other side. Telling the party who just opened the case gives
+  // them a redundant text and leaves the respondent unaware of it.
+  const otherSide =
+    raisedParty === 'FACILITY' ? practitionerId : facts.facility.representativeUserId;
+
+  const messages: Tell[] = [
     {
-      // Tell the other side. Telling the party who just opened the case gives
-      // them a redundant text and leaves the respondent unaware of it.
-      userId: raisedParty === 'FACILITY' ? practitionerId : facts.facility.representativeUserId,
+      userId: otherSide,
       kind: 'dispute.opened',
       body: `A dispute was opened about the shift on ${facts.when}. Open Medilink to see it.`,
       relatedType: 'disputes.disputes',
       relatedId: disputeId,
     },
-  ]);
+  ];
+
+  // Somebody has to pick a new case up. Not a failure if nobody holds the
+  // permission — the queue is still there — so it is a warning, unlike a death.
+  const adjudicators = await usersHoldingPlatformPermission('dispute.manage');
+  if (adjudicators.length === 0) logger.warn('a dispute was opened and no one holds dispute.manage', { disputeId });
+  for (const adjudicator of adjudicators) {
+    if (adjudicator.id === otherSide) continue;
+    messages.push({
+      userId: adjudicator.id,
+      kind: 'dispute.opened',
+      body: `A dispute was opened about the shift on ${facts.when} and is waiting for review in Medilink.`,
+      relatedType: 'disputes.disputes',
+      relatedId: disputeId,
+    });
+  }
+
+  await tellAll(messages);
 }

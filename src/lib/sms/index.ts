@@ -3,6 +3,8 @@ import { dirname } from 'node:path';
 import { env } from '../env';
 import { logger } from '../logger';
 import { maskPhone } from '../phone';
+import { africasTalkingAdapter } from './africastalking';
+import { termiiAdapter } from './termii';
 
 /**
  * Outbound SMS. Stage 4.2 needs one-time codes delivered; Stage 4.7 replaces
@@ -68,17 +70,23 @@ async function appendToOutbox(path: string, message: SmsMessage): Promise<void> 
 
 export class SmsNotConfiguredError extends Error {
   readonly code = 'sms_not_configured';
-  constructor(provider: string) {
-    super(`The ${provider} SMS adapter is not implemented yet (Stage 4.7).`);
+  constructor(provider: string, missing: string) {
+    super(`The ${provider} SMS gateway cannot send: ${missing} is not set.`);
     this.name = 'SmsNotConfiguredError';
   }
 }
 
-function unimplemented(name: string): SmsAdapter {
+/**
+ * An adapter that says what is missing every time it is used, rather than throwing when
+ * it is built: `smsAdapter()` is called on paths that only need to know which provider is
+ * configured, and a process that starts and then cannot send is told why at the first send
+ * (and, outside local, at boot: see env-rules.ts).
+ */
+function missingConfiguration(name: string, missing: string): SmsAdapter {
   return {
     name,
     async send() {
-      throw new SmsNotConfiguredError(name);
+      throw new SmsNotConfiguredError(name, missing);
     },
   };
 }
@@ -103,9 +111,17 @@ export function smsAdapter(): SmsAdapter {
       }
       return consoleSmsAdapter;
     case 'termii':
-      return unimplemented('termii');
+      if (!env.SMS_API_KEY) return missingConfiguration('termii', 'SMS_API_KEY');
+      if (!env.SMS_SENDER_ID) return missingConfiguration('termii', 'SMS_SENDER_ID');
+      return termiiAdapter({ apiKey: env.SMS_API_KEY, senderId: env.SMS_SENDER_ID });
     case 'africastalking':
-      return unimplemented('africastalking');
+      if (!env.SMS_API_KEY) return missingConfiguration('africastalking', 'SMS_API_KEY');
+      if (!env.SMS_USERNAME) return missingConfiguration('africastalking', 'SMS_USERNAME');
+      return africasTalkingAdapter({
+        apiKey: env.SMS_API_KEY,
+        username: env.SMS_USERNAME,
+        senderId: env.SMS_SENDER_ID,
+      });
   }
 }
 

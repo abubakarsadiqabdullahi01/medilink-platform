@@ -14,6 +14,7 @@ export async function POST(request: Request) {
     const { accountStatus } = await setInitialPassword({
       phone: input.phone,
       password: input.password,
+      setupToken: input.setupToken,
       accountType: input.accountType,
       consentToSharing: input.consentToSharing,
       ipAddress: context.ipAddress,

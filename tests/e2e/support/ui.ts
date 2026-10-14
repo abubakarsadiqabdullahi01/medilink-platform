@@ -1,4 +1,5 @@
 import { expect, type Locator, type Page } from '@playwright/test';
+import { world } from './world';
 
 /**
  * The card on the page that mentions `text`.
@@ -49,6 +50,16 @@ export async function expectToast(page: Page, title: string | RegExp): Promise<v
   await expect(page.locator('[data-sonner-toast]').filter({ hasText: title }).first()).toBeVisible({
     timeout: 60_000,
   });
+}
+
+/**
+ * Answers the "Confirm it is you" dialog a money act opens, with the password the world
+ * signs people in with. The act that opened it then carries on by itself.
+ */
+export async function confirmItIsYou(page: Page): Promise<void> {
+  const dialog = page.getByRole('dialog', { name: 'Confirm it is you' });
+  await dialog.getByLabel('Password').fill(world().password);
+  await dialog.getByRole('button', { name: 'Confirm' }).click();
 }
 
 /**

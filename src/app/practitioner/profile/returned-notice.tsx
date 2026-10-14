@@ -32,7 +32,7 @@ export function ReturnedNotice({
     <Card className={cn('border-destructive/40 bg-destructive/5', className)}>
       <CardContent className="space-y-3 pt-6">
         <div className="flex items-start gap-3">
-          <OctagonAlert className="mt-0.5 size-5 shrink-0 text-destructive" aria-hidden="true" />
+          <OctagonAlert className="mt-0.5 size-5 shrink-0 text-destructive-text" aria-hidden="true" />
           <div className="min-w-0">
             <p className="font-medium">
               {rejected.length === 1 ? 'A document was refused' : `${rejected.length} documents were refused`}

@@ -100,7 +100,17 @@ export async function ensureRole(key: string, permissions: Permission[] = []) {
  * `createCredentialType` before this was fixed.
  */
 export async function createProfessionalCategory(
-  input: { key?: string; name?: string; regulator?: string } = {},
+  input: {
+    key?: string;
+    name?: string;
+    regulator?: string;
+    /**
+     * A profession with no pay floor cannot have a shift published (RAT-01), so a
+     * category made for a test gets a floor of one kobo an hour for day and night
+     * unless the test is about the floor being missing.
+     */
+    floors?: boolean;
+  } = {},
 ) {
   sequence += 1;
   const key = input.key ?? `test_category_${sequence}`;
@@ -109,7 +119,25 @@ export async function createProfessionalCategory(
     regulator: input.regulator ?? 'TEST',
     owner: 'test-fixture',
   };
-  return prisma.professionalCategory.upsert({ where: { key }, update: data, create: { key, ...data } });
+  const category = await prisma.professionalCategory.upsert({
+    where: { key },
+    update: data,
+    create: { key, ...data },
+  });
+  if (input.floors !== false) {
+    await prisma.rateFloor.createMany({
+      data: ['day', 'night'].map((shiftType) => ({
+        categoryKey: key,
+        specialtyKey: '*',
+        shiftType,
+        minHourlyKobo: 1,
+        effectiveFrom: new Date('2000-01-01T00:00:00.000Z'),
+        owner: 'test-fixture',
+      })),
+      skipDuplicates: true,
+    });
+  }
+  return category;
 }
 
 export async function createSpecialty(

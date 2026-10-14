@@ -1,12 +1,18 @@
 import { prisma, type Tx } from '@/lib/db';
 import { recordAudit } from '@/lib/audit';
+import { env } from '@/lib/env';
 import { publishEvent } from '@/lib/outbox';
 import { EVENTS } from '@/lib/events';
 import { hashPassword, passwordProblems } from '@/lib/password';
 import { maskPhone, normalizeNigerianPhone } from '@/lib/phone';
-import { consumeOtp, issueOtp, verifyOtp } from './otp-service';
+import { assertCanSendCode, consumeOtp, issueOtp, verifyOtp } from './otp-service';
 import { AuthErrors } from '../domain/errors';
-import { grantConsentsInTx } from '@/modules/audit-compliance/application/consent';
+import { issueSetupToken, verifySetupToken } from '../domain/setup-token';
+import {
+  grantConsentsInTx,
+  privacyNoticeInForce,
+  recordAcceptanceInTx,
+} from '@/modules/audit-compliance/application/consent';
 import { CONSENT_AT_REGISTRATION } from '@/modules/audit-compliance/domain/consent';
 
 /**
@@ -20,7 +26,10 @@ export interface StartRegistrationInput {
   phone: string;
   fullName: string;
   email?: string;
+  /** That the privacy notice in force has been read and accepted. */
+  acceptedTerms?: boolean;
   ipAddress?: string;
+  userAgent?: string;
   now?: Date;
 }
 
@@ -41,9 +50,18 @@ export async function startRegistration(
   input: StartRegistrationInput,
 ): Promise<StartRegistrationResult> {
   const now = input.now ?? new Date();
+  // Before anything is written: registering makes a user row, and a refused
+  // request should leave nothing behind however many arrive.
+  await assertCanSendCode({ ipAddress: input.ipAddress, now });
   const phone = normalizeNigerianPhone(input.phone);
   const fullName = input.fullName.trim().replace(/\s+/g, ' ');
   const email = input.email?.trim().toLowerCase() || undefined;
+
+  // Asked before anything about the number is looked at, and of everybody, so the
+  // answer cannot tell somebody which numbers are already registered. Once a
+  // privacy notice is in force nobody gets an account without having accepted it.
+  const notice = await privacyNoticeInForce();
+  if (notice && !input.acceptedTerms) throw AuthErrors.termsNotAccepted();
 
   const existing = await prisma.user.findUnique({
     where: { phone },
@@ -80,9 +98,22 @@ export async function startRegistration(
       actorType: 'system',
       scopeType: 'SELF',
       scopeId: created.id,
-      after: { phone: maskPhone(phone), fullName, email },
+      // Not the name or the address: an audit row is kept for good and a person's
+      // right to erasure cannot reach it.
+      after: { phone: maskPhone(phone), hasEmail: Boolean(email) },
       ipAddress: input.ipAddress,
     });
+
+    // What they accepted, and from where: the evidence an "I never agreed to
+    // that" is settled with.
+    if (notice) {
+      await recordAcceptanceInTx(tx, {
+        userId: created.id,
+        version: notice,
+        ipAddress: input.ipAddress,
+        userAgent: input.userAgent,
+      });
+    }
 
     return created;
   });
@@ -107,7 +138,7 @@ export async function verifyRegistrationPhone(input: {
   code: string;
   ipAddress?: string;
   now?: Date;
-}): Promise<{ userId: string; passwordSet: boolean }> {
+}): Promise<{ userId: string; passwordSet: boolean; setupToken: string | null }> {
   const now = input.now ?? new Date();
   const phone = normalizeNigerianPhone(input.phone);
 
@@ -142,7 +173,12 @@ export async function verifyRegistrationPhone(input: {
     });
   });
 
-  return { userId: user.id, passwordSet: user.passwordHash !== null };
+  // Handed back so the next step can prove it follows this one. An account
+  // that already has a password has no next step, so there is nothing to bind.
+  const setupToken =
+    user.passwordHash === null ? issueSetupToken(user.id, now, env.SESSION_SECRET) : null;
+
+  return { userId: user.id, passwordSet: user.passwordHash !== null, setupToken };
 }
 
 /**
@@ -153,6 +189,8 @@ export async function verifyRegistrationPhone(input: {
 export async function setInitialPassword(input: {
   phone: string;
   password: string;
+  /** From verifying the phone. Without it, knowing a verified number would be enough. */
+  setupToken: string;
   /** Defaults to practitioner; see setPasswordSchema for what staff means. */
   accountType?: 'practitioner' | 'staff';
   /** The practitioner ticked the box agreeing to be shown to facilities. */
@@ -161,6 +199,7 @@ export async function setInitialPassword(input: {
   userAgent?: string;
   now?: Date;
 }): Promise<{ userId: string; accountStatus: 'UNDER_REVIEW' | 'ACTIVE' }> {
+  const now = input.now ?? new Date();
   const phone = normalizeNigerianPhone(input.phone);
 
   const user = await prisma.user.findUnique({
@@ -181,6 +220,13 @@ export async function setInitialPassword(input: {
   if (user.passwordHash) throw AuthErrors.passwordAlreadySet();
   if (user.status === 'SUSPENDED' || user.status === 'DEACTIVATED') {
     throw AuthErrors.accountNotUsable();
+  }
+  // Whoever verified the code is who sets the password. Without this, a number
+  // that verified and never set one — an abandoned sign-up stays that way for
+  // ever — could be claimed by anybody who knew it, who would also choose what
+  // the account was.
+  if (!verifySetupToken(input.setupToken, user.id, now, env.SESSION_SECRET)) {
+    throw AuthErrors.setupTokenInvalid();
   }
 
   const problems = passwordProblems(input.password, {

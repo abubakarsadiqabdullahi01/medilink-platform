@@ -13,6 +13,8 @@ export async function POST(request: Request) {
     return {
       status: 'phone_verified',
       nextStep: result.passwordSet ? 'login' : 'set_password',
+      // Required by set-password. Null when there is no password step to take.
+      setupToken: result.setupToken,
     };
   });
 }

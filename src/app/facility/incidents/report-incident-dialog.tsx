@@ -26,8 +26,10 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { containsPatientIdentifier } from '@/modules/clinical-incidents/domain/incident';
 import { humanise } from '@/components/app/status-badge';
 import { formatWhen } from '@/components/app/format';
+import { lagosLocalToInstant } from '@/lib/lagos-date';
 
 const SEVERITIES = [
   ['NEAR_MISS', 'Near miss — caught before it reached the patient'],
@@ -103,7 +105,7 @@ export function ReportIncidentDialog({ facilityId }: { facilityId: string }) {
     mutationFn: () =>
       api.post('/api/v1/incidents', {
         facilityId,
-        occurredAt: new Date(occurredAt).toISOString(),
+        occurredAt: lagosLocalToInstant(occurredAt).toISOString(),
         severity,
         category,
         summary: summary.trim(),
@@ -218,6 +220,16 @@ export function ReportIncidentDialog({ facilityId }: { facilityId: string }) {
               value={summary}
               onChange={(event) => setSummary(event.target.value)}
             />
+            <p className="text-xs text-muted-foreground">
+              Do not write who the patient was: no name, phone number, hospital or ID number. Say
+              what happened and what was done about it; compliance can ask the ward for the rest.
+            </p>
+            {containsPatientIdentifier(summary) ? (
+              <p role="alert" className="text-xs text-destructive-text">
+                This looks like it has a phone number, ID or hospital number, or an email address,
+                in it. Take it out and the report can be filed.
+              </p>
+            ) : null}
             {summary.length > 0 && summary.trim().length < MIN_SUMMARY ? (
               <p className="text-xs text-muted-foreground">
                 {MIN_SUMMARY - summary.trim().length} more characters needed.
@@ -239,7 +251,11 @@ export function ReportIncidentDialog({ facilityId }: { facilityId: string }) {
             Cancel
           </Button>
           <Button
-            disabled={!occurredAt || summary.trim().length < MIN_SUMMARY}
+            disabled={
+              !occurredAt ||
+              summary.trim().length < MIN_SUMMARY ||
+              containsPatientIdentifier(summary)
+            }
             loading={report.isPending}
             onClick={() => report.mutate()}
           >

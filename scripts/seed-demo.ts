@@ -39,6 +39,7 @@
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { prisma } from '../src/lib/db';
 import { env } from '../src/lib/env';
+import { lagosDate } from '../src/lib/lagos-date';
 import { s3 } from '../src/lib/storage/tigris';
 import { ROLE_PERMISSIONS } from '../src/lib/authz/permissions';
 
@@ -100,7 +101,7 @@ import {
   reviewTimesheet,
   submitTimesheet,
 } from '../src/modules/timesheets/application/timesheet';
-import { createRateCard } from '../src/modules/rates-contracts/application/rate-card';
+import { createRateCard, rateTermsFor } from '../src/modules/rates-contracts/application/rate-card';
 import {
   generateInvoice,
   issueInvoice,
@@ -111,6 +112,15 @@ import {
   preparePayout,
   releasePayout,
 } from '../src/modules/billing-settlement/application/payout';
+import {
+  reviewPayoutAccount,
+  submitPayoutAccount,
+} from '../src/modules/billing-settlement/application/payout-account';
+import {
+  createCadreLevel,
+  createRegistrationCategory,
+} from '../src/modules/config/hierarchy-config';
+import { recordPractitionerStanding } from '../src/modules/practitioners/application/verification';
 import {
   beginIncidentReview,
   closeIncident,
@@ -748,6 +758,39 @@ async function loadReference(): Promise<Reference> {
     states: new Map(states.map((row) => [row.code, row.id])),
     lgas: new Map(lgas.map((row) => [`${row.state.code}:${row.name}`, row.id])),
   };
+}
+
+/**
+ * Pay floors for the categories `prisma/seed.ts` publishes none for.
+ *
+ * The platform seed states floors for doctors and nurses only: what the other
+ * professions must be paid is the regulators' to say, and a shift for a category
+ * with no floor is refused rather than let through (RAT-01). The demo books every
+ * category, so it publishes a floor for each of the rest to let those shifts be
+ * created. These are demo figures, set below every rate the demo uses, and are not
+ * what any profession is owed. A floor somebody has already published is left alone,
+ * so running the demo does not overwrite what was set on the Pay floors screen.
+ */
+async function ensureDemoRateFloors(ref: Reference): Promise<void> {
+  const effectiveFrom = new Date('2026-01-01T00:00:00.000Z');
+  const demo = { day: 100_000, night: 130_000 } as const;
+
+  for (const key of ref.categories.keys()) {
+    for (const shiftType of ['day', 'night'] as const) {
+      const existing = await prisma.rateFloor.count({ where: { categoryKey: key, shiftType } });
+      if (existing > 0) continue;
+      await prisma.rateFloor.create({
+        data: {
+          categoryKey: key,
+          specialtyKey: '*',
+          shiftType,
+          minHourlyKobo: demo[shiftType],
+          effectiveFrom,
+          owner: 'demo-seed',
+        },
+      });
+    }
+  }
 }
 
 function lgaId(ref: Reference, state: string, lga: string): string {
@@ -1654,6 +1697,9 @@ interface LiveShiftInput {
   ref: Reference;
   publish?: boolean;
   match?: boolean;
+  /** The level the shift is for, once its profession has levels (REQ-01). */
+  cadreLevelId?: string;
+  supervisionAvailable?: boolean;
 }
 
 /** A real future shift, published the way a scheduler would, nothing moved. */
@@ -1663,6 +1709,8 @@ async function openShift(input: LiveShiftInput) {
     facilityId: input.facility.id,
     professionalCategoryId: input.ref.categories.get(input.need.category)!.id,
     specialtyId: input.need.specialty ? input.ref.specialties.get(input.need.specialty) : undefined,
+    cadreLevelId: input.cadreLevelId,
+    supervisionAvailable: input.supervisionAvailable,
     shiftType: input.need.shift,
     startsAt: input.start,
     endsAt: addHours(input.start, hours),
@@ -1714,6 +1762,7 @@ async function main(): Promise<void> {
   await syncRoles(prisma);
   await clear();
   const ref = await loadReference();
+  await ensureDemoRateFloors(ref);
 
   // ------------------------------------------------------------ platform
   log('Creating platform staff…');
@@ -2233,6 +2282,61 @@ async function main(): Promise<void> {
   );
 
   // -------------------------------------------------------------- money
+  // Every shift here was booked today and then moved back in time, so the terms
+  // fixed at booking are today's. A real booking is priced on what applied when
+  // it was made, so the history is given the terms its own date would have had:
+  // otherwise June's invoices would carry July's premiums and the superseded
+  // card above would never be seen to have priced anything.
+  {
+    const history = await prisma.assignment.findMany({
+      where: { facilityId: { in: facilities.map((f) => f.id) } },
+      select: { id: true, facilityId: true, startsAt: true },
+    });
+    for (const row of history) {
+      await prisma.assignment.update({
+        where: { id: row.id },
+        data: { rateTerms: { ...(await rateTermsFor(row.facilityId, row.startsAt)) } },
+      });
+    }
+  }
+
+  // Where everybody is paid. A payout goes only to an account a finance officer has
+  // verified, and has been the practitioner's for a day (BIL-06), so the simulated
+  // practitioners each have one, given long ago and verified. These are demo numbers
+  // and belong to nobody. Two have given a replacement that is still being checked, one
+  // of them in somebody else's name, so the queue and its warnings have something in them.
+  log('Giving practitioners somewhere to be paid…');
+  {
+    const bankNames = ['Guaranty Trust Bank', 'Access Bank', 'First Bank of Nigeria', 'Zenith Bank', 'United Bank for Africa'];
+    const longAgo = addDays(new Date(), -120);
+    let index = 0;
+    for (const person of practitioners) {
+      if ((person.spec.stage ?? 'complete') !== 'complete') continue;
+      index += 1;
+      const number = `0${String(200_000_000 + index * 7_919).padStart(9, '0')}`;
+      const held = person.fullName.split(' ').reverse().join(' ').toUpperCase();
+      const account = await submitPayoutAccount({
+        userId: person.id,
+        bankName: bankNames[index % bankNames.length]!,
+        accountName: held,
+        accountNumber: number,
+      });
+      await reviewPayoutAccount({ accountId: account.id, actorId: finance.id, decision: 'verify' });
+      await prisma.payoutAccount.update({ where: { id: account.id }, data: { createdAt: longAgo, reviewedAt: addDays(longAgo, 1) } });
+    }
+    const replacements = practitioners.filter((person) => (person.spec.stage ?? 'complete') === 'complete').slice(3, 5);
+    for (const [position, person] of replacements.entries()) {
+      await submitPayoutAccount({
+        userId: person.id,
+        bankName: 'Access Bank',
+        // The second is in a relative's name, which is what the check is for.
+        accountName: position === 0 ? person.fullName.split(' ').reverse().join(' ').toUpperCase() : 'ADEYEMI FUNMILAYO',
+        accountNumber: `0${String(900_000_000 + position * 4_013).padStart(9, '0')}`,
+      });
+    }
+    log(`  ${index} accounts verified; ${replacements.length} replacements waiting for a check`);
+  }
+
   log('Invoicing, paying and settling month by month…');
 
   const firstMonth = new Date(watDay(-HISTORY_DAYS).getTime() + WAT);
@@ -2291,7 +2395,14 @@ async function main(): Promise<void> {
       if (unpaid) continue;
       const paidAt = addDays(issuedAt, between(9, 24));
       const payMark = new Date(Date.now() - 1000);
-      await recordPayment({ invoiceId: invoice.id, actorId: finance.id });
+      await recordPayment({
+        invoiceId: invoice.id,
+        actorId: finance.id,
+        reference: `DEMO-TRF-${invoice.number}`,
+        amountKobo: invoice.grossKobo,
+        paidOn: lagosDate(paidAt),
+        payerName: facility.name,
+      });
       await prisma.invoice.update({ where: { id: invoice.id }, data: { paidAt } });
       await prisma.ledgerEntry.updateMany({
         where: { invoiceId: invoice.id, createdAt: { gte: payMark } },
@@ -2319,7 +2430,9 @@ async function main(): Promise<void> {
       await prisma.payout.update({ where: { id: payout.id }, data: { createdAt: runAt } });
       if (lastRun && chance(0.4)) continue;
       const releaseMark = new Date(Date.now() - 1000);
-      await releasePayout({ payoutId: payout.id, actorId: finance.id });
+      // Somebody other than the person who prepared it: a payout cannot be released by
+      // its own preparer (UXO-03), and the demo should show the rule as it works.
+      await releasePayout({ payoutId: payout.id, actorId: superAdmin.id });
       const releasedAt = notAfterNow(addDays(runAt, 1));
       await prisma.payout.update({ where: { id: payout.id }, data: { releasedAt } });
       await prisma.ledgerEntry.updateMany({
@@ -2733,29 +2846,6 @@ async function main(): Promise<void> {
   });
   log(`  ${DATA_REQUESTS.length} requests: 2 completed, 1 refused, 2 open (one erasure with real blockers)`);
 
-  // A revised privacy notice two weeks ago. Most practitioners have accepted
-  // it; Amina has not, so her privacy page has something to do.
-  const privacy2026 = await publishAgreement({
-    kind: 'PRIVACY_NOTICE',
-    identifier: `${AGREEMENT_PREFIX}privacy-notice-2026`,
-    title: 'Privacy notice, 2026',
-    body: PRIVACY_NOTICE_2026_BODY,
-    effectiveFrom: watDay(-14, 0),
-    actorId: compliance.id,
-  });
-  let acceptedNew = 0;
-  for (const person of practitioners) {
-    if (person === amina || person.spec.stage === 'no_profile' || person.spec.problem === 'suspended') continue;
-    if (chance(0.2)) continue;
-    await acceptAgreement({ userId: person.id, versionId: privacy2026.id });
-    acceptedNew += 1;
-  }
-  await prisma.agreementAcceptance.updateMany({
-    where: { versionId: privacy2026.id },
-    data: { acceptedAt: watDay(-between(1, 12), 10) },
-  });
-  log(`  privacy notice revised; ${acceptedNew} practitioners have accepted the new version`);
-
   // ---------------------------------------------------------- the future
   log('Publishing live and upcoming work…');
 
@@ -2980,6 +3070,74 @@ async function main(): Promise<void> {
     }
   }
   log('  a shift in progress, one starting within the hour, upcoming rota, offers out, acceptances to confirm, open and draft shifts');
+
+  // Levels for doctors, defined last. Once a profession has levels every new request for it
+  // has to name one, and the history above was written before there were any, which is what a
+  // platform that starts using levels part-way through looks like. The names and ranks are
+  // illustrations: what a profession's levels are is the regulators' to say, and none ships.
+  log('Defining demo levels for doctors, and recording where the demo doctors stand…');
+  {
+    const doctorId = ref.categories.get('doctor')!.id;
+    const levels = [];
+    for (const [name, rank] of [['House officer', 10], ['Medical officer', 20], ['Registrar', 30], ['Consultant', 40]] as const) {
+      levels.push(await createCadreLevel({ professionalCategoryId: doctorId, name, rank, actorId: superAdmin.id }));
+    }
+    const full = await createRegistrationCategory({ name: 'Full registration', supervisionRequired: false, actorId: superAdmin.id });
+    const provisional = await createRegistrationCategory({ name: 'Provisional registration', supervisionRequired: true, actorId: superAdmin.id });
+
+    let recorded = 0;
+    const doctors = practitioners.filter((person) => person.spec.category === 'doctor' && (person.spec.stage ?? 'complete') === 'complete');
+    for (const [position, person] of doctors.entries()) {
+      const level = levels[position % levels.length]!;
+      try {
+        await recordPractitionerStanding({
+          userId: person.id,
+          cadreLevelId: level.id,
+          // A house officer is on a provisional register until fully registered.
+          registrationCategoryId: level.name === 'House officer' ? provisional.id : full.id,
+          actorId: compliance.id,
+        });
+        recorded += 1;
+      } catch {
+        // No registration recorded for them (a stuck onboarding persona): nothing to rest a level on.
+      }
+    }
+
+    // One shift that asks for a level, so the match shows it being applied.
+    const registrar = levels.find((level) => level.name === 'Registrar')!;
+    await openShift({
+      facility: flagship, need: paeds, start: watDay(nextDay(3, WEEKDAYS), 8), ref,
+      cadreLevelId: registrar.id, supervisionAvailable: false,
+      notes: 'Paediatric registrar for the ward round and the clinic. Registrars only.',
+    });
+    log(`  4 levels and 2 registration categories; ${recorded} doctors recorded; a registrar shift published`);
+  }
+
+  // Revised last, not before the work above. Publishing a revised notice means everyone
+  // who has not accepted it is asked to before they can accept an offer, and the work above
+  // takes people through offers; Amina in particular is deliberately left not having accepted.
+  // A revised privacy notice two weeks ago. Most practitioners have accepted
+  // it; Amina has not, so her privacy page has something to do.
+  const privacy2026 = await publishAgreement({
+    kind: 'PRIVACY_NOTICE',
+    identifier: `${AGREEMENT_PREFIX}privacy-notice-2026`,
+    title: 'Privacy notice, 2026',
+    body: PRIVACY_NOTICE_2026_BODY,
+    effectiveFrom: watDay(-14, 0),
+    actorId: compliance.id,
+  });
+  let acceptedNew = 0;
+  for (const person of practitioners) {
+    if (person === amina || person.spec.stage === 'no_profile' || person.spec.problem === 'suspended') continue;
+    if (chance(0.2)) continue;
+    await acceptAgreement({ userId: person.id, versionId: privacy2026.id });
+    acceptedNew += 1;
+  }
+  await prisma.agreementAcceptance.updateMany({
+    where: { versionId: privacy2026.id },
+    data: { acceptedAt: watDay(-between(1, 12), 10) },
+  });
+  log(`  privacy notice revised; ${acceptedNew} practitioners have accepted the new version`);
 
   // ------------------------------------------------------------ summary
   const counts = {

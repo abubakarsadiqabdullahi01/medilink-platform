@@ -61,10 +61,92 @@ export function canPublish(facility: PublishCandidate, now: Date = new Date()): 
 }
 
 /**
- * Uppercased and stripped of internal whitespace before storage, so the
- * unique constraint means what it says: `rc 123456` and `RC123456` are the
- * same registration and the second one must be refused.
+ * Uppercased and stripped of whitespace and the punctuation people put inside
+ * a registration number before storage, so the unique constraint means what it
+ * says: `rc 123456`, `RC-123456`, `RC/123456` and `RC123456` are the same
+ * registration and the second one must be refused.
+ *
+ * Leading zeros are left alone. `BN0099887` is a real number, and stripping a
+ * zero would be a guess about what the register means.
  */
 export function normaliseCacNumber(raw: string): string {
-  return raw.replace(/\s+/g, '').toUpperCase();
+  return raw.replace(/[\s\-/.]+/g, '').toUpperCase();
+}
+
+/**
+ * What a facility is registered under (FAC-05, UXF-02).
+ *
+ * A CAC number was mandatory, and government hospitals and primary health centres
+ * - most of the facilities in Gombe - have none: they could not register
+ * truthfully. Another kind of reference is no weaker a claim; it is checked by
+ * the same person against the same licence document, with the same evidence
+ * recorded before approval.
+ */
+export const REGISTRATION_KINDS = ['CAC', 'GOVERNMENT', 'OTHER'] as const;
+export type RegistrationKind = (typeof REGISTRATION_KINDS)[number];
+
+export const REGISTRATION_REFERENCE_MAX_LENGTH = 60;
+
+/**
+ * A CAC number has a shape and one spelling. A government reference is whatever
+ * the ministry or the state hospitals board issued - a code, a letter reference -
+ * and its punctuation is part of it, so only its case and spacing are settled.
+ */
+export function normaliseRegistrationReference(kind: RegistrationKind, raw: string): string {
+  return kind === 'CAC' ? normaliseCacNumber(raw) : raw.trim().replace(/\s+/g, ' ').toUpperCase();
+}
+
+/** Why a (normalised) reference cannot be accepted, or null. */
+export function registrationReferenceProblem(kind: RegistrationKind, normalised: string): string | null {
+  if (kind === 'CAC') {
+    return /^[A-Z0-9]{4,20}$/.test(normalised)
+      ? null
+      : 'Enter a CAC registration number, for example RC123456.';
+  }
+  if (normalised.length < 3) return 'Enter the registration or reference number you were given.';
+  if (normalised.length > REGISTRATION_REFERENCE_MAX_LENGTH) {
+    return `That reference is too long; the limit is ${REGISTRATION_REFERENCE_MAX_LENGTH} characters.`;
+  }
+  return null;
+}
+
+/** What an officer confirms they did, before a facility can be approved. */
+export interface ApprovalChecks {
+  /** The licence document was opened and is legible. */
+  licenceDocumentSeen: boolean;
+  /** The name and address on it are this facility's. */
+  licenceMatchesFacility: boolean;
+  /** The registration reference was checked with whoever issued it. */
+  registrationChecked: boolean;
+  /** How: who was asked, or what was looked at. */
+  checkedWith: string;
+}
+
+export type ApprovalBlocker =
+  | 'no_licence_document'
+  | 'no_licence_number'
+  | 'checks_incomplete'
+  | 'checked_with_missing';
+
+/** "Verify" was a live button whether or not a licence was on file, and recorded a free-text note. */
+export const CHECKED_WITH_MIN_LENGTH = 10;
+
+/**
+ * Everything standing between a facility and approval, all at once so an officer
+ * fixes the list rather than discovering it a refusal at a time (UXO-02).
+ */
+export function approvalBlockers(
+  facility: { licenceObjectKey: string | null; licenceNumber: string | null },
+  checks: ApprovalChecks | undefined,
+): ApprovalBlocker[] {
+  const blockers: ApprovalBlocker[] = [];
+  if (!facility.licenceObjectKey) blockers.push('no_licence_document');
+  if (!facility.licenceNumber?.trim()) blockers.push('no_licence_number');
+
+  if (!checks || !checks.licenceDocumentSeen || !checks.licenceMatchesFacility || !checks.registrationChecked) {
+    blockers.push('checks_incomplete');
+  } else if (checks.checkedWith.trim().length < CHECKED_WITH_MIN_LENGTH) {
+    blockers.push('checked_with_missing');
+  }
+  return blockers;
 }

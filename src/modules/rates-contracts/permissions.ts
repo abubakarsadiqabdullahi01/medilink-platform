@@ -9,4 +9,4 @@ import type { Permission } from '@/lib/authz/permissions';
  * because a practitioner offered a shift is entitled to know what the night
  * rate is before accepting.
  */
-export const MODULE_PERMISSIONS: Permission[] = ['facility.write', 'facility.read'];
+export const MODULE_PERMISSIONS: Permission[] = ['facility.write', 'facility.read', 'config.manage'];

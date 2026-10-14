@@ -3,7 +3,16 @@ import { activateEligiblePractitioners } from '../modules/practitioners/applicat
 import { expireRegistrations } from '../modules/practitioners/application/expiry';
 import { expireCredentials } from '../modules/credentials/application/expiry';
 import { expireStartedRequests } from '../modules/service-requests/application/expiry';
+import { purgeExpiredData } from '../modules/audit-compliance/application/retention';
 import { sweepUnhonouredAssignments } from '../modules/cancellations-sanctions/application/fault';
+import {
+  alertShiftsNotCheckedIn,
+  sendShiftReminders,
+} from '../modules/notifications/application/shift-alerts';
+import {
+  remindUnapprovedTimesheets,
+  warnExpiringCredentials,
+} from '../modules/notifications/application/sweeps';
 import type { JobHandler } from './scheduler';
 
 /**
@@ -25,6 +34,8 @@ export interface JobDefinition {
   intervalSeconds: number;
 }
 
+export const MINUTES_5 = 5 * 60;
+export const MINUTES_15 = 15 * 60;
 export const HOURLY = 60 * 60;
 export const DAILY = 24 * HOURLY;
 
@@ -65,9 +76,54 @@ export const JOB_DEFINITIONS: JobDefinition[] = [
       'Flag CONFIRMED assignments whose shift has ended with no sign of attendance, awaiting a fault decision. Hourly, and it decides nothing: an absence has a dozen innocent explanations and the platform cannot tell them apart from a database row.',
     intervalSeconds: HOURLY,
   },
+  {
+    key: 'shift.reminder_sweep',
+    description:
+      'Remind each practitioner a few hours before a confirmed shift. Every fifteen minutes; nobody is told twice, and anybody who could not be reached is tried again on the next run.',
+    intervalSeconds: MINUTES_15,
+  },
+  {
+    key: 'shift.start_watch',
+    description:
+      'Tell the practitioner and the facility when nobody has checked in thirty minutes after a shift started, while it can still be saved. Every five minutes so thirty minutes means about thirty minutes. Decides nothing: the sweep after the shift, and a person, own the question of an absence.',
+    intervalSeconds: MINUTES_5,
+  },
+  {
+    key: 'credential.expiry_warning_sweep',
+    description:
+      'Warn a practitioner a month before a verified credential expires, and again in the last week, so a licence does not lapse unnoticed and take their shifts with it. Daily; one message per stage, and anybody who could not be reached is tried again.',
+    intervalSeconds: DAILY,
+  },
+  {
+    key: 'timesheet.approval_reminder_sweep',
+    description:
+      'Remind a facility about hours waiting for approval after a day and again after three, and tell the practitioner at three days that they are being chased. Hourly. Decides nothing: whether hours are approved, and any deadline after which they are approved for the facility, are not this job\'s to settle.',
+    intervalSeconds: HOURLY,
+  },
+  {
+    key: 'retention.purge_sweep',
+    description:
+      'Delete what the data inventory says is not worth keeping: one-time codes, sessions that have ended, the sign-in log, queue entries already delivered and uploads nobody finished, each on its own period. Daily. Touches nothing else: the rest is kept, or removed by an erasure request. Writes one audit row with counts on a run that deleted anything.',
+    intervalSeconds: DAILY,
+  },
 ];
 
 export const jobs: Record<string, JobHandler> = {
+  'retention.purge_sweep': async () => {
+    await purgeExpiredData();
+  },
+  'credential.expiry_warning_sweep': async () => {
+    await warnExpiringCredentials();
+  },
+  'timesheet.approval_reminder_sweep': async () => {
+    await remindUnapprovedTimesheets();
+  },
+  'shift.reminder_sweep': async () => {
+    await sendShiftReminders();
+  },
+  'shift.start_watch': async () => {
+    await alertShiftsNotCheckedIn();
+  },
   'service_request.expiry_sweep': async () => {
     await expireStartedRequests();
   },

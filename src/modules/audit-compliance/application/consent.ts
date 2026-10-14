@@ -37,6 +37,12 @@ export const ConsentErrors = {
     ),
   notYours: () =>
     new HttpError('agreement_not_found', 'That agreement version does not exist.', 404),
+  required: (titles: string[]) =>
+    new HttpError(
+      'agreement_required',
+      `Read and accept ${titles.join(' and ')} first. They are under "Your data" in your profile, or on your dashboard for a hospital.`,
+      409,
+    ),
 };
 
 export interface ConsentView {
@@ -115,7 +121,8 @@ export async function recordConsent(input: {
       actorId: input.actorId,
       scopeType: 'SELF',
       scopeId: input.userId,
-      reason: input.note,
+      // The note is kept on the consent record, where erasure can reach it.
+      reason: input.note?.trim() ? 'A note was recorded with this.' : undefined,
       after: { purpose: input.purpose, granted: input.granted, lawfulBasis: basis },
     });
   });
@@ -157,7 +164,8 @@ export async function grantConsentsInTx(
       actorId: input.actorId,
       scopeType: 'SELF',
       scopeId: input.userId,
-      reason: input.note,
+      // The note is kept on the consent record, where erasure can reach it.
+      reason: input.note?.trim() ? 'A note was recorded with this.' : undefined,
       after: { purpose, granted: true, lawfulBasis: basis },
     });
   }
@@ -255,6 +263,128 @@ export async function currentAgreements(
   return current;
 }
 
+export interface PublicAgreement {
+  kind: string;
+  identifier: string;
+  title: string;
+  body: string;
+  effectiveFrom: Date;
+}
+
+/**
+ * What is in force, one document of each kind, for anybody to read without
+ * signing in (UXW-04). The terms and the privacy notice were shown only inside a
+ * console, so a person was asked for their data by a form that linked to neither.
+ */
+export async function currentPublicAgreements(): Promise<PublicAgreement[]> {
+  const versions = await prisma.agreementVersion.findMany({
+    where: { retiredAt: null, effectiveFrom: { lte: new Date() } },
+    orderBy: { effectiveFrom: 'desc' },
+  });
+  const seen = new Set<string>();
+  const current: PublicAgreement[] = [];
+  for (const version of versions) {
+    if (seen.has(version.kind)) continue;
+    seen.add(version.kind);
+    current.push({
+      kind: version.kind,
+      identifier: version.identifier,
+      title: version.title,
+      body: version.body,
+      effectiveFrom: version.effectiveFrom,
+    });
+  }
+  return current;
+}
+
+/**
+ * Refuses until this person has accepted every agreement in force that binds
+ * them (UXP-04, AUD-03).
+ *
+ * The agreements used to be an optional line in a profile tab: nothing asked a
+ * practitioner to accept the engagement terms before accepting a shift, and a new
+ * version was never asked for again. A version replaces the one before it, so
+ * somebody who accepted v1 is outstanding on v2. With nothing published there is
+ * nothing to ask for, and the gate is open; what the agreements say is counsel's.
+ */
+export async function assertAgreementsAccepted(
+  userId: string,
+  audience: AgreementAudience,
+): Promise<void> {
+  const outstanding = (await currentAgreements(userId, audience)).filter((row) => !row.acceptedAt);
+  if (outstanding.length > 0) throw ConsentErrors.required(outstanding.map((row) => row.title));
+}
+
+/**
+ * The hospital's terms, which bind the hospital and not whoever happens to be
+ * signed in: accepted once by anybody who works for it, and then in force for
+ * everyone who acts for it. (An acceptance records the person; a hospital that
+ * wants its own record of who accepted for it has that in the person.)
+ */
+export async function assertFacilityTermsAccepted(facilityId: string): Promise<void> {
+  const version = await prisma.agreementVersion.findFirst({
+    where: { kind: 'FACILITY_TERMS', retiredAt: null, effectiveFrom: { lte: new Date() } },
+    orderBy: { effectiveFrom: 'desc' },
+    select: { id: true, title: true },
+  });
+  if (!version) return;
+
+  const accepted = await prisma.agreementAcceptance.findFirst({
+    where: {
+      versionId: version.id,
+      user: {
+        roles: { some: { revokedAt: null, scopeType: 'FACILITY', scopeId: facilityId } },
+      },
+    },
+    select: { id: true },
+  });
+  if (!accepted) throw ConsentErrors.required([version.title]);
+}
+
+/**
+ * Writes one acceptance and its audit row, inside the caller's transaction, so
+ * agreeing to something and the thing agreed to for cannot come apart.
+ */
+export async function recordAcceptanceInTx(
+  tx: Tx,
+  input: {
+    userId: string;
+    version: { id: string; identifier: string; kind: string };
+    ipAddress?: string;
+    userAgent?: string;
+  },
+): Promise<void> {
+  const created = await tx.agreementAcceptance.create({
+    data: {
+      userId: input.userId,
+      versionId: input.version.id,
+      ipAddress: input.ipAddress,
+      userAgent: input.userAgent,
+    },
+  });
+
+  await recordAudit(tx, {
+    action: 'agreement.accepted',
+    entityType: 'consent.agreement_acceptances',
+    entityId: created.id,
+    actorId: input.userId,
+    scopeType: 'SELF',
+    scopeId: input.userId,
+    // The identifier, not the title: a title can be edited and a version
+    // identifier is the thing that pins down what was agreed.
+    after: { identifier: input.version.identifier, kind: input.version.kind },
+  });
+}
+
+/** The privacy notice in force, if there is one. It binds everybody, so it is what sign-up asks for. */
+export async function privacyNoticeInForce() {
+  return prisma.agreementVersion.findFirst({
+    where: { kind: 'PRIVACY_NOTICE', retiredAt: null, effectiveFrom: { lte: new Date() } },
+    orderBy: { effectiveFrom: 'desc' },
+    select: { id: true, identifier: true, kind: true },
+  });
+}
+
 export async function acceptAgreement(input: {
   userId: string;
   versionId: string;
@@ -270,25 +400,11 @@ export async function acceptAgreement(input: {
   if (existing) throw ConsentErrors.alreadyAccepted();
 
   await prisma.$transaction(async (tx: Tx) => {
-    const created = await tx.agreementAcceptance.create({
-      data: {
-        userId: input.userId,
-        versionId: input.versionId,
-        ipAddress: input.ipAddress,
-        userAgent: input.userAgent,
-      },
-    });
-
-    await recordAudit(tx, {
-      action: 'agreement.accepted',
-      entityType: 'consent.agreement_acceptances',
-      entityId: created.id,
-      actorId: input.userId,
-      scopeType: 'SELF',
-      scopeId: input.userId,
-      // The identifier, not the title: a title can be edited and a version
-      // identifier is the thing that pins down what was agreed.
-      after: { identifier: version.identifier, kind: version.kind },
+    await recordAcceptanceInTx(tx, {
+      userId: input.userId,
+      version,
+      ipAddress: input.ipAddress,
+      userAgent: input.userAgent,
     });
   });
 

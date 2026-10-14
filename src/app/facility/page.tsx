@@ -87,7 +87,7 @@ function Tile({
           {isPending ? (
             <Skeleton className="mt-2 h-9 w-12" />
           ) : isError ? (
-            <p className="mt-2 text-sm text-destructive">Could not load</p>
+            <p className="mt-2 text-sm text-destructive-text">Could not load</p>
           ) : (
             <p
               className={
@@ -161,7 +161,7 @@ export default function FacilityDashboard() {
           <AlertDescription className="space-y-1">
             {facility.data?.status === 'PENDING' ? (
               <p>
-                <strong>Waiting for verification.</strong> Medilink checks the CAC registration
+                <strong>Waiting for verification.</strong> Medilink checks the registration
                 and licence before this facility can publish shifts. You can set up rates and
                 staff in the meantime.
               </p>
@@ -172,7 +172,13 @@ export default function FacilityDashboard() {
                   shifts.
                 </p>
                 {facility.data.reviewNotes ? <p>What compliance said: {facility.data.reviewNotes}</p> : null}
-                <p>Reply to Medilink with the corrected documents to be reviewed again.</p>
+                <p>
+                  Correct what was wrong on the{' '}
+                  <Link href="/facility/profile" className="font-medium underline underline-offset-4">
+                    facility profile
+                  </Link>{' '}
+                  and send it back for review.
+                </p>
               </>
             ) : (
               <p>

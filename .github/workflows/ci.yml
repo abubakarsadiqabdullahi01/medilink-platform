@@ -27,8 +27,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -56,8 +54,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -91,8 +87,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -106,6 +100,26 @@ jobs:
       - name: audit coverage and outbox recovery
         run: pnpm test:integration
 
+  image:
+    name: Production image builds and carries what it runs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Nothing built the image before, which is how it shipped without the
+      # worker's source: `pnpm worker` could not start from it.
+      - name: build the runner image
+        run: docker build --target runner -t medilink:ci .
+      - name: the web process, the worker and the migrations are all in it
+        run: |
+          for f in src/worker/index.ts src/lib/db.ts next.config.mjs tsconfig.json \
+                   prisma/schema.prisma scripts/docker-entrypoint.sh \
+                   node_modules/.bin/next node_modules/.bin/tsx node_modules/.bin/prisma; do
+            docker run --rm --entrypoint test medilink:ci -e "$f" || { echo "missing from the image: $f"; exit 1; }
+          done
+          docker run --rm --entrypoint test medilink:ci -d prisma/migrations
+      - name: it runs as an unprivileged user
+        run: test "$(docker run --rm --entrypoint id medilink:ci -u)" != "0"
+
   security:
     name: Dependency and secret scanning
     runs-on: ubuntu-latest
@@ -114,8 +128,6 @@ jobs:
         with:
           fetch-depth: 0
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -137,6 +149,13 @@ jobs:
       # codes off the console SMS adapter — which only runs in local.
       APP_ENV: local
       SMS_CONSOLE_OUTBOX: .e2e/sms-outbox.jsonl
+      # The money journey pays a nurse through the stub gateway, as a laptop's .env does
+      # (the default is `none`, which refuses every payout). It is about the invoice and
+      # the payout, not about two finance officers or a verified bank account, so those two
+      # controls are off for it and covered by their own integration tests.
+      PAYMENT_PROVIDER: console
+      PAYOUT_SECOND_APPROVER: 'off'
+      PAYOUT_REQUIRES_ACCOUNT: 'off'
     services:
       postgres:
         image: postgres:16
@@ -151,20 +170,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # MinIO stands in for Tigris, as it does in docker-compose. Started by
-      # hand because a service container cannot be given `server /data`.
+      # `migrate deploy` does not generate the client, and the seed imports it. The
+      # migrations job gets one for free from `migrate reset`; this job has no reset.
+      - run: pnpm prisma generate
+      # MinIO stands in for Tigris, as it does in docker-compose. MinIO no longer
+      # publishes its images (minio/minio on Docker Hub and quay.io/minio/minio both
+      # refuse a pull), so this is Bitnami's frozen archive of the last community
+      # build: the same server, started with its own entrypoint rather than
+      # `server /data`, which is why the arguments differ from MinIO's own image.
       - name: object storage
         run: |
-          docker run -d --name minio -p 9000:9000             -e MINIO_ROOT_USER=medilink -e MINIO_ROOT_PASSWORD=medilink-secret             minio/minio server /data
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=medilink -e MINIO_ROOT_PASSWORD=medilink-secret \
+            bitnamilegacy/minio:2025.7.23-debian-12-r5
           for i in $(seq 1 30); do curl -sf http://localhost:9000/minio/health/live && break; sleep 2; done
-          docker run --rm --network host --entrypoint sh minio/mc -c             "mc alias set local http://localhost:9000 medilink medilink-secret && mc mb --ignore-existing local/medilink-documents"
+          docker run --rm --network host --entrypoint sh bitnamilegacy/minio-client:2025.7.21-debian-12-r3 -c \
+            "mc alias set local http://localhost:9000 medilink medilink-secret && mc mb --ignore-existing local/medilink-documents" \
+            || { docker logs minio; exit 1; }
       - run: pnpm prisma migrate deploy && pnpm db:seed
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm build

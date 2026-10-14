@@ -163,7 +163,8 @@ answered somebody on neither side with a 409 listing what was wrong with the
 shift. That confirmed the shift existed and what state its attendance was in.
 Both now answer "not found", as the evidence routes already did.
 
-Known and *not* fixed by it (the harness records the current behaviour, which is
-a refusal, and the control for these uses the practitioner): a hospital's owner
-cannot reach the dispute evidence routes at all, because they are guarded on the
-caller's own scope (DSP-04).
+Known and *not* fixed by it: before DSP-04 a hospital's owner could not reach the
+dispute evidence routes at all, because they are guarded on the caller's own
+scope. A hospital's people are now a party to a case; the harness still uses the
+practitioner as the control for those routes, and the attacks are refusals for
+everybody else.

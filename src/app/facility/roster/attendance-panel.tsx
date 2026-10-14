@@ -20,6 +20,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { StatusBadge } from '@/components/app/status-badge';
 import { formatWhen } from '@/components/app/format';
+import { lagosLocalToInstant } from '@/lib/lagos-date';
 
 export interface Attendance {
   id: string;
@@ -86,8 +87,8 @@ export function AttendancePanel({
     mutationFn: () =>
       api.post(`/api/v1/assignments/${assignmentId}/attendance/manual`, {
         facilityId,
-        checkedInAt: new Date(checkedInAt).toISOString(),
-        checkedOutAt: new Date(checkedOutAt).toISOString(),
+        checkedInAt: lagosLocalToInstant(checkedInAt).toISOString(),
+        checkedOutAt: lagosLocalToInstant(checkedOutAt).toISOString(),
         breakMinutes: Number(breakMinutes || '0'),
         reason: reason.trim(),
       }),

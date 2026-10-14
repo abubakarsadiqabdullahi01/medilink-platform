@@ -31,6 +31,14 @@ export interface ReferenceData {
     requiredForCategoryIds: string[];
   }[];
   facilityTypes: { id: string; name: string }[];
+  /**
+   * The levels within each profession that can be chosen now, lowest first (CFG-04).
+   * Empty for a profession compliance has not defined any for, which is how a form
+   * knows not to ask.
+   */
+  cadreLevels: { id: string; key: string; name: string; rank: number; categoryId: string }[];
+  /** How a practitioner can stand on the register, and whether it needs supervision. */
+  registrationCategories: { id: string; key: string; name: string; supervisionRequired: boolean }[];
   /** `zone` is one of the six geopolitical zones — shown under the state
    *  name in the picker, and searchable, so "south east" narrows the list. */
   states: { id: string; name: string; zone: string }[];
@@ -45,8 +53,17 @@ export interface ReferenceData {
 }
 
 export async function getReferenceData(): Promise<ReferenceData> {
-  const [professionalCategories, specialties, rawCredentialTypes, requirements, facilityTypes, states, lgas] =
-    await Promise.all([
+  const [
+    professionalCategories,
+    specialties,
+    rawCredentialTypes,
+    requirements,
+    facilityTypes,
+    states,
+    lgas,
+    cadreLevels,
+    registrationCategories,
+  ] = await Promise.all([
       prisma.professionalCategory.findMany({
         select: { id: true, name: true, regulator: true },
         orderBy: { name: 'asc' },
@@ -75,6 +92,16 @@ export async function getReferenceData(): Promise<ReferenceData> {
         select: { id: true, name: true, stateId: true },
         orderBy: { name: 'asc' },
       }),
+      prisma.cadreLevel.findMany({
+        where: { isActive: true },
+        select: { id: true, key: true, name: true, rank: true, professionalCategoryId: true },
+        orderBy: [{ professionalCategoryId: 'asc' }, { rank: 'asc' }],
+      }),
+      prisma.registrationCategory.findMany({
+        where: { isActive: true },
+        select: { id: true, key: true, name: true, supervisionRequired: true },
+        orderBy: { name: 'asc' },
+      }),
     ]);
 
   // Said here so a practitioner can be told which documents are theirs to
@@ -91,6 +118,8 @@ export async function getReferenceData(): Promise<ReferenceData> {
     specialties,
     credentialTypes,
     facilityTypes,
+    cadreLevels: cadreLevels.map(({ professionalCategoryId, ...level }) => ({ ...level, categoryId: professionalCategoryId })),
+    registrationCategories,
     states,
     lgas,
     verification: {

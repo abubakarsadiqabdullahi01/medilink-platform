@@ -80,6 +80,30 @@ describe('hard filters', () => {
     expect(exclusionsFor(request, candidate({ specialtyId: SPECIALTY }))).toEqual([]);
   });
 
+  it('treats a requested level as a requirement: a house officer is not a registrar', () => {
+    const request: RequestInput = { professionalCategoryId: CATEGORY, specialtyId: null, cadreLevelId: 'level-registrar' };
+
+    expect(exclusionsFor(request, candidate({ cadreLevelId: 'level-house-officer' }))).toContain('level_mismatch');
+    // Nobody has recorded where they stand, so there is nothing to say they are a registrar.
+    expect(exclusionsFor(request, candidate({ cadreLevelId: null }))).toContain('level_mismatch');
+    expect(exclusionsFor(request, candidate({ cadreLevelId: 'level-registrar' }))).toEqual([]);
+  });
+
+  it('asks nothing of the level when the request names none', () => {
+    expect(exclusionsFor(REQUEST, candidate({ cadreLevelId: 'level-registrar' }))).toEqual([]);
+    expect(exclusionsFor(REQUEST, candidate({ cadreLevelId: null }))).toEqual([]);
+  });
+
+  it('keeps somebody who needs supervision off a shift that does not offer it', () => {
+    const unsupervised: RequestInput = { professionalCategoryId: CATEGORY, specialtyId: null };
+    const supervised: RequestInput = { ...unsupervised, supervisionAvailable: true };
+
+    expect(exclusionsFor(unsupervised, candidate({ supervised: true }))).toContain('supervision_required');
+    expect(exclusionsFor(supervised, candidate({ supervised: true }))).toEqual([]);
+    // A shift that offers supervision is still open to somebody who does not need it.
+    expect(exclusionsFor(supervised, candidate({ supervised: false }))).toEqual([]);
+  });
+
   it('accepts any specialty when the request names none', () => {
     expect(exclusionsFor(REQUEST, candidate({ specialtyId: SPECIALTY }))).toEqual([]);
   });

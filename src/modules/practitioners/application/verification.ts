@@ -181,9 +181,18 @@ export interface ProfessionalRegistrationView {
   recordedBy: string | null;
   /** Derived: whether this registration currently permits practice. */
   usable: boolean;
+  /** Where they stand, as the officer read it from the register (PRA-01). */
+  cadreLevel: { id: string; name: string; rank: number } | null;
+  registrationCategory: { id: string; name: string; supervisionRequired: boolean } | null;
   createdAt: Date;
   updatedAt: Date;
 }
+
+/** What a registration read for a view carries along, so a level is never a bare id. */
+const STANDING_INCLUDE = {
+  cadreLevel: { select: { id: true, name: true, rank: true } },
+  registrationCategory: { select: { id: true, name: true, supervisionRequired: true } },
+} as const;
 
 interface RegistrationRow {
   id: string;
@@ -197,6 +206,8 @@ interface RegistrationRow {
   expiresAt: Date | null;
   source: 'MANUAL' | 'REGULATOR_API';
   recordedBy: string | null;
+  cadreLevel?: { id: string; name: string; rank: number } | null;
+  registrationCategory?: { id: string; name: string; supervisionRequired: boolean } | null;
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
@@ -216,6 +227,8 @@ function toRegistrationView(row: RegistrationRow, now = new Date()): Professiona
     source: row.source,
     recordedBy: row.recordedBy,
     usable: isRegistrationUsable(row, now),
+    cadreLevel: row.cadreLevel ?? null,
+    registrationCategory: row.registrationCategory ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -229,7 +242,47 @@ export interface RecordRegistrationParams {
   practiceType?: string;
   location?: string;
   expiresAt?: Date;
+  /**
+   * Where they stand on the register. Left out, whatever is recorded is kept (a
+   * registration looked at again a year later does not forget the level); `null`
+   * clears it.
+   */
+  cadreLevelId?: string | null;
+  registrationCategoryId?: string | null;
   actorId: string;
+}
+
+/**
+ * Whether a level and a category can be recorded for somebody: the level must be one
+ * of their own profession's and in use, the category in use. Checked before anything
+ * is written, so a refusal leaves nothing half-recorded.
+ */
+async function assertStanding(
+  db: Pick<typeof prisma, 'cadreLevel' | 'registrationCategory' | 'practitionerProfile'>,
+  userId: string,
+  cadreLevelId: string | null | undefined,
+  registrationCategoryId: string | null | undefined,
+): Promise<void> {
+  if (cadreLevelId) {
+    const profile = await db.practitionerProfile.findUnique({
+      where: { userId },
+      select: { professionalCategoryId: true },
+    });
+    const level = await db.cadreLevel.findUnique({
+      where: { id: cadreLevelId },
+      select: { isActive: true, professionalCategoryId: true },
+    });
+    if (!profile || !level || !level.isActive || level.professionalCategoryId !== profile.professionalCategoryId) {
+      throw PractitionerErrors.levelWrongProfession();
+    }
+  }
+  if (registrationCategoryId) {
+    const category = await db.registrationCategory.findUnique({
+      where: { id: registrationCategoryId },
+      select: { isActive: true },
+    });
+    if (!category || !category.isActive) throw PractitionerErrors.registrationCategoryInvalid();
+  }
 }
 
 export async function recordProfessionalRegistration(
@@ -243,6 +296,8 @@ export async function recordProfessionalRegistration(
 
   const folioNumber = normaliseFolioNumber(input.folioNumber);
   const now = new Date();
+
+  await assertStanding(prisma, input.userId, input.cadreLevelId, input.registrationCategoryId);
 
   let registrationStatus: RegistrationStatusValue;
   let practiceType = input.practiceType ?? null;
@@ -272,6 +327,7 @@ export async function recordProfessionalRegistration(
     return await prisma.$transaction(async (tx) => {
       const existing = await tx.professionalRegistration.findUnique({
         where: { userId_regulator: { userId: input.userId, regulator: input.regulator } },
+        include: STANDING_INCLUDE,
       });
 
       const data = {
@@ -284,12 +340,23 @@ export async function recordProfessionalRegistration(
         source,
         recordedBy: input.actorId,
         deletedAt: null,
+        // Only what was said: leaving these out keeps what is recorded, which is what
+        // looking at a registration again should do.
+        ...(input.cadreLevelId !== undefined ? { cadreLevelId: input.cadreLevelId } : {}),
+        ...(input.registrationCategoryId !== undefined
+          ? { registrationCategoryId: input.registrationCategoryId }
+          : {}),
       };
 
       const saved = existing
-        ? await tx.professionalRegistration.update({ where: { id: existing.id }, data })
+        ? await tx.professionalRegistration.update({
+            where: { id: existing.id },
+            data,
+            include: STANDING_INCLUDE,
+          })
         : await tx.professionalRegistration.create({
             data: { userId: input.userId, regulator: input.regulator, ...data },
+            include: STANDING_INCLUDE,
           });
 
       await recordAudit(tx, {
@@ -321,8 +388,64 @@ export async function listProfessionalRegistrations(
   const rows = await prisma.professionalRegistration.findMany({
     where: { userId, deletedAt: null },
     orderBy: { createdAt: 'asc' },
+    include: STANDING_INCLUDE,
   });
   return rows.map((row) => toRegistrationView(row));
+}
+
+/**
+ * Records where somebody stands on the register: their level within the profession
+ * and their registration category (PRA-01, PRA-02).
+ *
+ * It rests on a registration somebody has checked, so one has to exist: a level with no
+ * licence behind it is a claim, and claims are what the register is there to replace.
+ * Both are replaced by what is given here, and `null` clears one; the before and after
+ * are on the audit trail.
+ */
+export async function recordPractitionerStanding(input: {
+  userId: string;
+  cadreLevelId: string | null;
+  registrationCategoryId: string | null;
+  actorId: string;
+}): Promise<ProfessionalRegistrationView> {
+  const user = await prisma.user.findUnique({
+    where: { id: input.userId },
+    select: { id: true, deletedAt: true },
+  });
+  if (!user || user.deletedAt) throw PractitionerErrors.practitionerNotFound();
+
+  await assertStanding(prisma, input.userId, input.cadreLevelId, input.registrationCategoryId);
+
+  return prisma.$transaction(async (tx) => {
+    const existing = await tx.professionalRegistration.findFirst({
+      where: { userId: input.userId, deletedAt: null },
+      orderBy: { createdAt: 'asc' },
+      include: STANDING_INCLUDE,
+    });
+    if (!existing) throw PractitionerErrors.registrationRequired();
+
+    const saved = await tx.professionalRegistration.update({
+      where: { id: existing.id },
+      data: {
+        cadreLevelId: input.cadreLevelId,
+        registrationCategoryId: input.registrationCategoryId,
+      },
+      include: STANDING_INCLUDE,
+    });
+
+    await recordAudit(tx, {
+      action: 'practitioner.standing_recorded',
+      entityType: 'practitioners.professional_registrations',
+      entityId: saved.id,
+      actorId: input.actorId,
+      scopeType: 'SELF',
+      scopeId: input.userId,
+      before: { cadreLevelId: existing.cadreLevelId, registrationCategoryId: existing.registrationCategoryId },
+      after: { cadreLevelId: saved.cadreLevelId, registrationCategoryId: saved.registrationCategoryId },
+    });
+
+    return toRegistrationView(saved);
+  });
 }
 
 export interface VerificationSummary {

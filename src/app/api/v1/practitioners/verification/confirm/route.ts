@@ -34,6 +34,8 @@ export async function POST(request: Request) {
             submissionId: input.submissionId,
             registrationStatus: input.registrationStatus,
             expiresAt: input.expiresAt,
+            cadreLevelId: input.cadreLevelId,
+            registrationCategoryId: input.registrationCategoryId,
             actorId: session.userId,
           }),
   });

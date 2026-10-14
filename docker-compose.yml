@@ -24,31 +24,38 @@ services:
 
   # MinIO stands in locally for Tigris. Both are S3-compatible, so the
   # application code and the signed-URL flow are identical in both places.
+  #
+  # MinIO no longer publishes its images: minio/minio on Docker Hub and
+  # quay.io/minio/minio both refuse a pull. This is Bitnami's frozen archive of the
+  # last community build, so it is the same server but started by Bitnami's
+  # entrypoint (no `server /data`), and its data lives in /bitnami/minio/data. It
+  # will not be updated; a stand-in for local work and CI, not something to deploy.
   storage:
-    image: minio/minio:latest
-    command: server /data --console-address ":9001"
+    image: bitnamilegacy/minio:2025.7.23-debian-12-r5
     environment:
       MINIO_ROOT_USER: medilink
       MINIO_ROOT_PASSWORD: medilink-secret
+      MINIO_CONSOLE_PORT_NUMBER: "9001"
     ports:
       - "9000:9000"
       - "9001:9001"
     volumes:
-      - storage-data:/data
+      - storage-data:/bitnami/minio/data
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      # The port is open: enough to start the bucket step, which retries on its own.
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/9000'"]
       interval: 5s
       timeout: 5s
       retries: 20
 
   storage-init:
-    image: minio/mc:latest
+    image: bitnamilegacy/minio-client:2025.7.21-debian-12-r3
     depends_on:
       storage:
         condition: service_healthy
     entrypoint: >
       /bin/sh -c "
-      mc alias set local http://storage:9000 medilink medilink-secret &&
+      until mc alias set local http://storage:9000 medilink medilink-secret; do sleep 2; done &&
       mc mb --ignore-existing local/medilink-documents &&
       mc anonymous set none local/medilink-documents &&
       echo 'bucket ready: medilink-documents (private, signed URLs only)'
@@ -119,6 +126,12 @@ services:
       STORAGE_PUBLIC_ENDPOINT: http://localhost:9000
       SMTP_URL: smtp://mail:1025
       SMS_CONSOLE_OUTBOX: .e2e/sms-outbox.jsonl
+      # The money journey is about the invoice and the payout, not about two finance
+      # officers or a verified bank account: those two controls are off for it, and
+      # have their own integration tests. (The stub gateway is `PAYMENT_PROVIDER=console`
+      # in .env.)
+      PAYOUT_SECOND_APPROVER: "off"
+      PAYOUT_REQUIRES_ACCOUNT: "off"
     env_file:
       - .env
     ports:

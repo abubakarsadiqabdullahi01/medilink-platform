@@ -3,7 +3,14 @@ import { prisma } from '@/lib/db';
 import { hashPassword, verifyPassword } from '@/lib/password';
 import { normalizeNigerianPhone, PhoneFormatError } from '@/lib/phone';
 import { logger } from '@/lib/logger';
-import { lockoutState, LOGIN_FAILURE_WINDOW_SECONDS } from '../domain/lockout';
+import {
+  ADDRESS_THROTTLED_REASON,
+  LOCKED_OUT_REASON,
+  LOGIN_ADDRESS_WINDOW_SECONDS,
+  LOGIN_FAILURE_WINDOW_SECONDS,
+  LOGIN_MAX_FAILURES_PER_ADDRESS_PER_HOUR,
+  lockoutState,
+} from '../domain/lockout';
 import { AuthErrors } from '../domain/errors';
 import { issueSession, type IssuedSession } from './session-service';
 
@@ -31,17 +38,21 @@ export async function login(input: {
     throw error;
   }
 
+  // Before anything about the number is looked at, so a throttled address learns
+  // nothing about which numbers exist.
+  await assertAddressNotThrottled({ phone, ipAddress: input.ipAddress, now });
+
   const attempts = await prisma.loginAttempt.findMany({
     where: {
       identifier: phone,
       createdAt: { gt: new Date(now.getTime() - LOGIN_FAILURE_WINDOW_SECONDS * 1000) },
     },
-    select: { succeeded: true, createdAt: true },
+    select: { succeeded: true, createdAt: true, reason: true },
   });
 
   const lock = lockoutState(attempts, now);
   if (lock.locked) {
-    await recordAttempt({ phone, succeeded: false, reason: 'locked_out', ipAddress: input.ipAddress });
+    await recordAttempt({ phone, succeeded: false, reason: 'locked_out', ipAddress: input.ipAddress, at: now });
     throw AuthErrors.accountLocked(lock.retryAfterSeconds);
   }
 
@@ -69,21 +80,22 @@ export async function login(input: {
       succeeded: false,
       reason: !user ? 'unknown_identifier' : !user.passwordHash ? 'no_password_set' : 'bad_password',
       ipAddress: input.ipAddress,
+      at: now,
     });
     throw AuthErrors.invalidCredentials();
   }
 
   if (!user.phoneVerifiedAt) {
-    await recordAttempt({ phone, userId: user.id, succeeded: false, reason: 'phone_unverified', ipAddress: input.ipAddress });
+    await recordAttempt({ phone, userId: user.id, succeeded: false, reason: 'phone_unverified', ipAddress: input.ipAddress, at: now });
     throw AuthErrors.phoneNotVerified();
   }
 
   if (user.status === 'SUSPENDED' || user.status === 'DEACTIVATED') {
-    await recordAttempt({ phone, userId: user.id, succeeded: false, reason: `status_${user.status.toLowerCase()}`, ipAddress: input.ipAddress });
+    await recordAttempt({ phone, userId: user.id, succeeded: false, reason: `status_${user.status.toLowerCase()}`, ipAddress: input.ipAddress, at: now });
     throw AuthErrors.accountNotUsable();
   }
 
-  await recordAttempt({ phone, userId: user.id, succeeded: true, ipAddress: input.ipAddress });
+  await recordAttempt({ phone, userId: user.id, succeeded: true, ipAddress: input.ipAddress, at: now });
 
   logger.info('login succeeded', { userId: user.id });
 
@@ -93,6 +105,51 @@ export async function login(input: {
     userAgent: input.userAgent,
     now,
   });
+}
+
+/**
+ * Refuses an address that has failed too many sign-ins this hour, across every
+ * number it tried. A refusal is written down, as evidence, and is not counted: see
+ * `ADDRESS_THROTTLED_REASON`.
+ */
+async function assertAddressNotThrottled(input: {
+  phone: string;
+  ipAddress?: string;
+  now: Date;
+}): Promise<void> {
+  if (!input.ipAddress) return;
+
+  const since = new Date(input.now.getTime() - LOGIN_ADDRESS_WINDOW_SECONDS * 1000);
+  const where = {
+    ipAddress: input.ipAddress,
+    succeeded: false,
+    createdAt: { gt: since },
+    // A refusal is not a failure to be counted, or the throttle would extend itself.
+    NOT: [{ reason: LOCKED_OUT_REASON }, { reason: ADDRESS_THROTTLED_REASON }],
+  };
+
+  const failures = await prisma.loginAttempt.count({ where });
+  if (failures < LOGIN_MAX_FAILURES_PER_ADDRESS_PER_HOUR) return;
+
+  // The hour moves: it is open again when enough of the oldest have left it.
+  const decisive = await prisma.loginAttempt.findFirst({
+    where,
+    orderBy: { createdAt: 'desc' },
+    skip: LOGIN_MAX_FAILURES_PER_ADDRESS_PER_HOUR - 1,
+    select: { createdAt: true },
+  });
+  const opensAt = (decisive?.createdAt ?? input.now).getTime() + LOGIN_ADDRESS_WINDOW_SECONDS * 1000;
+  const retryAfterSeconds = Math.max(1, Math.ceil((opensAt - input.now.getTime()) / 1000));
+
+  await recordAttempt({
+    phone: input.phone,
+    succeeded: false,
+    reason: ADDRESS_THROTTLED_REASON,
+    ipAddress: input.ipAddress,
+    at: input.now,
+  });
+  logger.warn('sign-ins from one address throttled', { failures });
+  throw AuthErrors.tooManyAttempts(retryAfterSeconds);
 }
 
 /**
@@ -114,9 +171,12 @@ async function recordAttempt(input: {
   succeeded: boolean;
   reason?: string;
   ipAddress?: string;
+  /** The clock the throttle is judging by, so the two cannot disagree about when this happened. */
+  at: Date;
 }): Promise<void> {
   await prisma.loginAttempt.create({
     data: {
+      createdAt: input.at,
       identifier: input.phone,
       userId: input.userId,
       succeeded: input.succeeded,

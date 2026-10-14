@@ -17,6 +17,11 @@ import {
   UsersRound,
   FileSignature,
   Gauge,
+  CalendarDays,
+  Layers,
+  Scale,
+  Activity,
+  ShieldAlert,
 } from 'lucide-react';
 import { SessionProvider, type SessionState } from '@/lib/ui/session';
 import { ConsoleShell, type NavSection } from '@/components/app/console-shell';
@@ -44,6 +49,13 @@ const SECTIONS: NavSection[] = [
         prefetch: '/api/v1/practitioners?scopeType=PLATFORM&limit=20',
         label: 'Practitioners',
         icon: UserRoundCheck,
+        permission: 'credential.review',
+      },
+      {
+        href: '/admin/sanctions',
+        prefetch: '/api/v1/sanctions',
+        label: 'Sanctions list',
+        icon: ShieldAlert,
         permission: 'credential.review',
       },
       {
@@ -117,10 +129,29 @@ const SECTIONS: NavSection[] = [
     items: [
       { href: '/admin/staff', label: 'Staff', icon: UsersRound, permission: 'role.grant' },
       { href: '/admin/performance', label: 'Performance', icon: Gauge, permission: 'audit.read' },
+      { href: '/admin/system', label: 'System health', icon: Activity, permission: 'audit.read' },
       {
         href: '/admin/agreements',
         label: 'Terms and notices',
         icon: FileSignature,
+        permission: 'config.manage',
+      },
+      {
+        href: '/admin/holidays',
+        label: 'Public holidays',
+        icon: CalendarDays,
+        permission: 'config.manage',
+      },
+      {
+        href: '/admin/rate-floors',
+        label: 'Pay floors',
+        icon: Scale,
+        permission: 'config.manage',
+      },
+      {
+        href: '/admin/levels',
+        label: 'Levels',
+        icon: Layers,
         permission: 'config.manage',
       },
     ],

@@ -54,4 +54,20 @@ export const MUTABLE_CONFIG_TABLES = [
   // an unrelated practitioner ineligible in the next — which is exactly how
   // this was found.
   'config.credential_requirements',
+  // Holidays are written by the maintenance route and read by every timesheet,
+  // so a date left behind by one case would turn an unrelated shift in the next
+  // into a holiday.
+  'config.public_holidays',
+  // Pay floors are set by the tests, and a profession with no floor cannot have a
+  // shift published (RAT-01), so createProfessionalCategory gives each category its
+  // own. Its sequence-derived key repeats between files and runs, so a floor left
+  // by one would govern an unrelated category in the next: a 500,000 kobo day
+  // floor written by one case turned a later file's 5,000-naira shift into a
+  // refusal.
+  'config.rate_floors',
+  // Levels hang off a profession by id, and the test professions are upserted by a key
+  // that repeats between files, so a level left by one would sit under an unrelated
+  // profession in the next and make it demand a level of every request.
+  'config.cadre_levels',
+  'config.registration_categories',
 ] as const;

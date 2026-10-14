@@ -1,6 +1,8 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
+import { useQuery } from '@tanstack/react-query';
 import { Inbox, TriangleAlert } from 'lucide-react';
 import { api } from '@/lib/ui/api';
 import { useQueue, useQueueAction } from '@/lib/ui/queue';
@@ -38,6 +40,13 @@ interface Invitation {
   urgency: string;
   startsAt: string;
   endsAt: string;
+  /** What a dispute turns on: shown before the practitioner says yes, and kept when they do. */
+  cancellationTerms: string;
+  notes: string | null;
+  addressLine: string;
+  headcount: number;
+  levelName: string | null;
+  supervisionAvailable: boolean;
 }
 
 /** Answered offers shown before "show all". */
@@ -67,6 +76,15 @@ export default function OffersPage() {
     '/api/v1/invitations',
     (body) => (body as { invitations?: Invitation[] }).invitations ?? [],
   );
+
+  // What has to be accepted before an offer can be: the server refuses an
+  // acceptance without it, so say so up front rather than after the press.
+  const agreements = useQuery({
+    queryKey: ['agreements'],
+    queryFn: () =>
+      api.get<{ agreements: { id: string; title: string; acceptedAt: string | null }[] }>('/api/v1/agreements'),
+  });
+  const outstanding = (agreements.data?.agreements ?? []).filter((row) => !row.acceptedAt);
 
   const [reasons, setReasons] = useState<Record<string, string>>({});
   const [showAllAnswered, setShowAllAnswered] = useState(false);
@@ -103,6 +121,19 @@ export default function OffersPage() {
         title="Offers"
         description="Accepting is not the same as being confirmed — the facility confirms, and only then is the shift yours. Nothing is committed until they do."
       />
+
+      {outstanding.length > 0 ? (
+        <Alert variant="warning" className="mb-6">
+          <TriangleAlert />
+          <AlertDescription>
+            <strong>You need to accept {outstanding.map((row) => row.title).join(' and ')}</strong>{' '}
+            before you can accept an offer. You can still decline.{' '}
+            <Link href="/practitioner/profile?tab=privacy" className="font-medium underline">
+              Read and accept
+            </Link>
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
       {queue.isPending ? (
         <QueueSkeleton />
@@ -150,7 +181,40 @@ export default function OffersPage() {
                     <Detail label="Ends">{formatWhen(row.endsAt)}</Detail>
                     <Detail label="Rate">{formatNaira(row.hourlyRateKobo)}/hour</Detail>
                     <Detail label="Answer by">{formatWhen(row.expiresAt)}</Detail>
+                    <Detail label="Places">
+                      {row.headcount === 1 ? '1 practitioner' : `${row.headcount} practitioners`}
+                    </Detail>
+                    {row.levelName ? <Detail label="Level">{row.levelName}</Detail> : null}
+                    {row.supervisionAvailable ? <Detail label="Supervision">Someone will supervise</Detail> : null}
                   </DetailGrid>
+
+                  {/* The two things an agreement turns on, read before the
+                      button rather than found afterwards. Accepting keeps a
+                      copy of exactly what is on this card. */}
+                  <div className="space-y-3 rounded-md border bg-muted/30 p-3 text-sm">
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Where
+                      </p>
+                      <p className="mt-0.5">
+                        {row.facilityName}, {row.addressLine}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Cancellation terms
+                      </p>
+                      <p className="mt-0.5">{row.cancellationTerms}</p>
+                    </div>
+                    {row.notes ? (
+                      <div>
+                        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                          From the facility — ward, who to report to, what to bring
+                        </p>
+                        <p className="mt-0.5 whitespace-pre-line">{row.notes}</p>
+                      </div>
+                    ) : null}
+                  </div>
 
                   {lapsed ? (
                     <Alert variant="warning">
@@ -179,6 +243,11 @@ export default function OffersPage() {
                           }
                         />
                       </div>
+
+                      <p className="text-xs text-muted-foreground">
+                        By accepting you agree to the cancellation terms above, and a record is kept
+                        of what you were shown.
+                      </p>
 
                       <div className="flex flex-wrap gap-2">
                         <Button

@@ -10,6 +10,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
+import { registrationOption } from '@/lib/ui/registration';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
@@ -35,7 +36,9 @@ import { actionLabel, formatAgo, formatDate, formatWhen } from '@/components/app
 export interface Facility {
   id: string;
   name: string;
+  registrationKind?: string;
   cacNumber: string;
+  verificationChecks?: { licenceDocumentSeen: boolean; licenceMatchesFacility: boolean; registrationChecked: boolean; checkedWith: string } | null;
   facilityTypeId: string;
   stateId: string;
   lgaId: string | null;
@@ -65,6 +68,11 @@ export function FacilityDetail({ facility, onBack }: { facility: Facility; onBac
   const queryClient = useQueryClient();
   const reference = useReference();
   const [note, setNote] = useState('');
+  // What the officer confirms before approving (UXO-02).
+  const [seen, setSeen] = useState(false);
+  const [matches, setMatches] = useState(false);
+  const [registrationChecked, setRegistrationChecked] = useState(false);
+  const [checkedWith, setCheckedWith] = useState('');
 
   const fresh = useQuery({
     queryKey: ['facility-detail', facility.id],
@@ -97,10 +105,24 @@ export function FacilityDetail({ facility, onBack }: { facility: Facility; onBac
       api.post(`/api/v1/facilities/${facility.id}/verify`, {
         decision,
         reviewNotes: note.trim() || undefined,
+        ...(decision === 'approve'
+          ? {
+              checks: {
+                licenceDocumentSeen: seen,
+                licenceMatchesFacility: matches,
+                registrationChecked,
+                checkedWith: checkedWith.trim(),
+              },
+            }
+          : {}),
       }),
     onSuccess: (_result, decision) => {
       toast.success(decision === 'approve' ? 'Facility verified' : 'Facility rejected');
       setNote('');
+      setSeen(false);
+      setMatches(false);
+      setRegistrationChecked(false);
+      setCheckedWith('');
       void queryClient.invalidateQueries({ queryKey: ['facility-detail', facility.id] });
       void queryClient.invalidateQueries({ queryKey: ['facility-history', facility.id] });
       void queryClient.invalidateQueries({ queryKey: ['facility-directory'] });
@@ -121,7 +143,7 @@ export function FacilityDetail({ facility, onBack }: { facility: Facility; onBac
     <>
       <PageHeader
         title={row.name}
-        description={`${row.cacNumber} · onboarded ${formatAgo(row.createdAt)}`}
+        description={`${registrationOption(row.registrationKind).referenceLabel} ${row.cacNumber} · onboarded ${formatAgo(row.createdAt)}`}
         action={
           <Button variant="outline" onClick={onBack}>
             <ArrowLeft />
@@ -168,7 +190,8 @@ export function FacilityDetail({ facility, onBack }: { facility: Facility; onBac
               </CardHeader>
               <CardContent className="space-y-4">
                 <DetailGrid>
-                  <Detail label="CAC number">{row.cacNumber}</Detail>
+                  <Detail label="Registered as">{registrationOption(row.registrationKind).label}</Detail>
+                  <Detail label={registrationOption(row.registrationKind).referenceLabel}>{row.cacNumber}</Detail>
                   <Detail label="Type">{typeName ?? '—'}</Detail>
                   <Detail label="State">{stateName ?? '—'}</Detail>
                   <Detail label="Local government">{lgaName ?? '—'}</Detail>
@@ -207,8 +230,8 @@ export function FacilityDetail({ facility, onBack }: { facility: Facility; onBac
                   />
                 ) : (
                   <p className="text-xs leading-relaxed text-muted-foreground">
-                    No licence document was uploaded. Verifying without one means the check happened
-                    somewhere this record cannot show.
+                    No licence document was uploaded, and a facility cannot be verified without one:
+                    a check that happened somewhere this record cannot show is not a check.
                   </p>
                 )}
 
@@ -240,12 +263,57 @@ export function FacilityDetail({ facility, onBack }: { facility: Facility; onBac
               </Card>
             ) : null}
 
+            {row.verificationChecks ? (
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm">What was checked before it was verified</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-1 text-sm">
+                  <p>· The licence document was opened and read</p>
+                  <p>· It matches this facility</p>
+                  <p>· The registration was checked with whoever issued it</p>
+                  <p className="pt-2 text-muted-foreground">How: {row.verificationChecks.checkedWith}</p>
+                </CardContent>
+              </Card>
+            ) : null}
+
             {pending ? (
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-sm">Decide</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  <fieldset className="space-y-3 rounded-md border p-3">
+                    <legend className="px-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Before you verify
+                    </legend>
+                    {[
+                      ['I opened the licence document and it is legible', seen, setSeen],
+                      ['The name and address on it are this facility\'s', matches, setMatches],
+                      ['I checked the registration reference with whoever issued it', registrationChecked, setRegistrationChecked],
+                    ].map(([label, value, set]) => (
+                      <label key={label as string} className="flex items-start gap-3 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={value as boolean}
+                          onChange={(event) => (set as (next: boolean) => void)(event.target.checked)}
+                          className="mt-1 size-5 shrink-0 rounded border-input accent-primary"
+                        />
+                        <span>{label as string}</span>
+                      </label>
+                    ))}
+                    <div className="space-y-1.5">
+                      <Label htmlFor="facility-checked-with">How did you check it?</Label>
+                      <Textarea
+                        id="facility-checked-with"
+                        rows={2}
+                        placeholder="Who you asked, or what you looked at."
+                        value={checkedWith}
+                        onChange={(event) => setCheckedWith(event.target.value)}
+                      />
+                    </div>
+                  </fieldset>
+
                   <div className="space-y-2">
                     <Label htmlFor="facility-note">
                       Reason{' '}
@@ -265,6 +333,15 @@ export function FacilityDetail({ facility, onBack }: { facility: Facility; onBac
                   <div className="flex flex-wrap gap-2">
                     <Button
                       variant="success"
+                      disabled={
+                        !row.licenceObjectKey ||
+                        !row.licenceNumber ||
+                        !seen ||
+                        !matches ||
+                        !registrationChecked ||
+                        checkedWith.trim().length < 10 ||
+                        decide.isPending
+                      }
                       loading={decide.isPending && decide.variables === 'approve'}
                       onClick={() => decide.mutate('approve')}
                     >

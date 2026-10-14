@@ -37,6 +37,25 @@ export const ServiceRequestErrors = {
       422,
     ),
 
+  /**
+   * The profession has levels (REQ-01) and the request names none. A house officer
+   * and a consultant are not the same offer, and a request that does not say which
+   * is the retrofit this exists to prevent.
+   */
+  levelRequired: (professionName: string) =>
+    new ServiceRequestError(
+      'level_required',
+      `${professionName} has levels, so say which level this shift is for.`,
+      422,
+    ),
+
+  invalidLevel: () =>
+    new ServiceRequestError(
+      'invalid_level',
+      'That is not a level in use for the selected profession.',
+      422,
+    ),
+
   endBeforeStart: () =>
     new ServiceRequestError('end_before_start', 'The shift must end after it starts.', 422),
 
@@ -56,6 +75,18 @@ export const ServiceRequestErrors = {
     new ServiceRequestError(
       'below_rate_floor',
       `The rate is below the minimum for this profession and shift type, which is ${naira(minHourlyKobo)} an hour.`,
+      422,
+    ),
+
+  /**
+   * The other half of the floor rule (RAT-01). Nothing is wrong with the rate: the
+   * platform has no minimum for this profession and shift type, and will not
+   * publish one it cannot hold to a minimum.
+   */
+  noRateFloor: (professionName: string, shiftType: 'DAY' | 'NIGHT') =>
+    new ServiceRequestError(
+      'no_rate_floor',
+      `Medilink has not set a minimum hourly rate for ${professionName} ${shiftType.toLowerCase()} shifts yet, so a shift for them cannot be published. This is on Medilink's side, not yours: contact support and it will be set.`,
       422,
     ),
 

@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Prisma } from '@prisma/client';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/modules/practitioners/application/bookable', () => import('./support/always-bookable'));
 
@@ -21,14 +22,20 @@ import {
   respondToInvitation,
 } from '@/modules/matching/application/assignment';
 import { recordManualAttendance } from '@/modules/attendance/application/attendance';
-import { reviewTimesheet, submitTimesheet } from '@/modules/timesheets/application/timesheet';
+import {
+  reviewTimesheet,
+  submitTimesheet,
+  timesheetsForAssignments,
+} from '@/modules/timesheets/application/timesheet';
 import { createRateCard } from '@/modules/rates-contracts/application/rate-card';
+import { raiseDispute, withdrawDispute } from '@/modules/disputes/application/dispute';
 import {
   accountBalance,
   generateInvoice,
   issueInvoice,
   listInvoices,
   recordPayment,
+  voidInvoice,
 } from '@/modules/billing-settlement/application/invoice';
 import {
   amountOwed,
@@ -36,6 +43,10 @@ import {
   releasePayout,
 } from '@/modules/billing-settlement/application/payout';
 import { GET as getPayoutsRoute } from '@/app/api/v1/payouts/route';
+import { POST as issueInvoiceRoute } from '@/app/api/v1/invoices/[id]/issue/route';
+import { POST as voidInvoiceRoute } from '@/app/api/v1/invoices/[id]/void/route';
+import { financeSummary } from '@/modules/billing-settlement/application/finance-summary';
+import { POST as releasePayoutRoute } from '@/app/api/v1/payouts/[id]/release/route';
 import { issueSession } from '@/modules/auth/application/session-service';
 import { clearCookies } from './support/cookie-jar';
 import {
@@ -87,6 +98,16 @@ interface World {
 /** A shift worked and approved — the state billing starts from. */
 async function buildWorld(
   worked: { from: Date; to: Date } = { from: WORKED_FROM, to: WORKED_TO },
+  /**
+   * The facility's allowances *when the shift is booked*. Premiums are fixed at
+   * booking, so a card has to exist before the booking to apply to it.
+   */
+  card?: { name?: string; nightMultiplierBp?: number; holidayMultiplierBp?: number },
+  /**
+   * For a practitioner who works for more than one facility: the same person, on
+   * a shift that does not overlap the first.
+   */
+  again?: { practitionerId: string; shiftOffsetDays: number },
 ): Promise<World> {
   await ensureRole('facility_owner', ROLE_PERMISSIONS.facility_owner ?? []);
 
@@ -136,12 +157,22 @@ async function buildWorld(
     scopeType: 'PLATFORM',
   });
 
+  if (card) {
+    await createRateCard({
+      facilityId: facility.id,
+      actorId: reviewer.id,
+      name: card.name ?? 'Allowances at booking',
+      nightMultiplierBp: card.nightMultiplierBp,
+      holidayMultiplierBp: card.holidayMultiplierBp,
+    });
+  }
+
   const request = await createServiceRequest({
     facilityId: facility.id,
     professionalCategoryId: category.id,
     shiftType: 'DAY',
-    startsAt: SHIFT_START,
-    endsAt: SHIFT_END,
+    startsAt: new Date(SHIFT_START.getTime() + (again?.shiftOffsetDays ?? 0) * 24 * 60 * 60 * 1000),
+    endsAt: new Date(SHIFT_END.getTime() + (again?.shiftOffsetDays ?? 0) * 24 * 60 * 60 * 1000),
     headcount: 1,
     hourlyRateKobo: HOURLY_RATE_KOBO,
     urgency: 'ROUTINE',
@@ -154,7 +185,9 @@ async function buildWorld(
     actorId: scheduler.id,
   });
 
-  const practitioner = await createUser({ fullName: 'Aisha Bello' });
+  const practitioner = again
+    ? { id: again.practitionerId }
+    : await createUser({ fullName: 'Aisha Bello' });
   const [invitation] = await invitePractitioners({
     requestId: request.id,
     facilityId: facility.id,
@@ -204,6 +237,22 @@ const period = (world: World) => ({
   periodStart: PERIOD_START,
   periodEnd: PERIOD_END,
   actorId: world.financeId,
+});
+
+/** What a payment record has to say, for an invoice paid in full today. */
+const lagosToday = () => new Date(Date.now() + 3600_000).toISOString().slice(0, 10);
+const paidInFull = (
+  invoice: { id: string; grossKobo: number },
+  world: World,
+  overrides: Record<string, unknown> = {},
+) => ({
+  invoiceId: invoice.id,
+  actorId: world.financeId,
+  reference: 'FBN/TRF/0042',
+  amountKobo: invoice.grossKobo,
+  paidOn: lagosToday(),
+  payerName: 'Kano Teaching Hospital',
+  ...overrides,
 });
 
 beforeEach(() => {
@@ -340,17 +389,13 @@ describe('a rate card changes the figures', () => {
     // as a real shift rather than by editing the timesheet's figures after the
     // fact — the bands are computed once, at the timesheet, and billing reads
     // them back.
-    const world = await buildWorld({
-      from: new Date('2026-09-09T19:00:00.000Z'),
-      to: new Date('2026-09-10T03:00:00.000Z'),
-    });
-
-    await createRateCard({
-      facilityId: world.facilityId,
-      actorId: world.reviewerId,
-      name: 'Night premium',
-      nightMultiplierBp: 15_000,
-    });
+    const world = await buildWorld(
+      {
+        from: new Date('2026-09-09T19:00:00.000Z'),
+        to: new Date('2026-09-10T03:00:00.000Z'),
+      },
+      { name: 'Night premium', nightMultiplierBp: 15_000 },
+    );
 
     const invoice = await generateInvoice(period(world));
     // Eight night hours at 1.5x ₦5,000.
@@ -359,12 +404,7 @@ describe('a rate card changes the figures', () => {
   });
 
   it('leaves the figures alone at par', async () => {
-    const world = await buildWorld();
-    await createRateCard({
-      facilityId: world.facilityId,
-      actorId: world.reviewerId,
-      name: 'No allowances',
-    });
+    const world = await buildWorld(undefined, { name: 'No allowances' });
 
     const invoice = await generateInvoice(period(world));
     expect(invoice.grossKobo).toBe(4_000_000);
@@ -412,6 +452,168 @@ describe('a rate card changes the figures', () => {
   });
 });
 
+describe('premiums are fixed when the shift is booked', () => {
+  /**
+   * One card, chosen when the invoice was raised, priced every shift on it. A
+   * facility could book a night shift under a 1.5x card and supersede it with a
+   * 1.0x one before the invoice, and the practitioner would be paid the lower
+   * figure for work they had agreed at the higher.
+   */
+  const NIGHT = {
+    from: new Date('2026-09-09T19:00:00.000Z'),
+    to: new Date('2026-09-10T03:00:00.000Z'),
+  };
+
+  it('is priced on the card that applied when it was booked, not the one that applies when it is invoiced', async () => {
+    const world = await buildWorld(NIGHT, { name: 'At booking', nightMultiplierBp: 15_000 });
+
+    // The facility replaces its card afterwards, down to par.
+    await createRateCard({
+      facilityId: world.facilityId,
+      actorId: world.reviewerId,
+      name: 'Cut after booking',
+      nightMultiplierBp: 10_000,
+    });
+
+    const invoice = await generateInvoice(period(world));
+    // Eight night hours at 1.5x ₦5,000, as agreed.
+    expect(invoice.grossKobo).toBe(6_000_000);
+    expect(invoice.lines[0]!.premiumKobo).toBe(2_000_000);
+  });
+
+  it('is not raised by a card created after it was booked either', async () => {
+    const world = await buildWorld(NIGHT, { name: 'At booking', nightMultiplierBp: 10_000 });
+
+    await createRateCard({
+      facilityId: world.facilityId,
+      actorId: world.reviewerId,
+      name: 'Raised after booking',
+      nightMultiplierBp: 20_000,
+    });
+
+    const invoice = await generateInvoice(period(world));
+    expect(invoice.grossKobo).toBe(4_000_000);
+    expect(invoice.lines[0]!.premiumKobo).toBe(0);
+  });
+
+  it('keeps the terms on the booking, with the card they came from', async () => {
+    const world = await buildWorld(NIGHT, { name: 'At booking', nightMultiplierBp: 15_000 });
+
+    const row = await prisma.assignment.findUniqueOrThrow({ where: { id: world.assignmentId } });
+    expect(row.rateTerms).toMatchObject({
+      nightMultiplierBp: 15_000,
+      holidayMultiplierBp: 10_000,
+    });
+    const card = await prisma.rateCard.findFirstOrThrow({ where: { facilityId: world.facilityId } });
+    expect(row.rateTerms).toHaveProperty('rateCardId', card.id);
+  });
+
+  it('is at par when there was no card at booking, and a later card does not change that', async () => {
+    const world = await buildWorld(NIGHT);
+    await createRateCard({
+      facilityId: world.facilityId,
+      actorId: world.reviewerId,
+      name: 'Created afterwards',
+      nightMultiplierBp: 15_000,
+    });
+
+    const invoice = await generateInvoice(period(world));
+    expect(invoice.grossKobo).toBe(4_000_000);
+    const row = await prisma.assignment.findUniqueOrThrow({ where: { id: world.assignmentId } });
+    expect(row.rateTerms).toMatchObject({ rateCardId: null, nightMultiplierBp: 10_000 });
+  });
+
+  it('uses the card whose dates cover the shift, for a booking made before any terms were kept', async () => {
+    // A booking from before this change has no terms on it. It is priced by the
+    // card in force on the shift's date - not whichever is active today.
+    const world = await buildWorld(NIGHT);
+    await prisma.assignment.update({ where: { id: world.assignmentId }, data: { rateTerms: Prisma.DbNull } });
+    const shift = await prisma.assignment.findUniqueOrThrow({ where: { id: world.assignmentId } });
+
+    const before = new Date(shift.startsAt.getTime() - 30 * 24 * 60 * 60 * 1000);
+    await prisma.rateCard.create({
+      data: {
+        facilityId: world.facilityId,
+        name: 'In force on the day',
+        nightMultiplierBp: 15_000,
+        status: 'SUPERSEDED',
+        effectiveFrom: before,
+        effectiveUntil: new Date(shift.startsAt.getTime() + 24 * 60 * 60 * 1000),
+        createdBy: world.reviewerId,
+      },
+    });
+    await prisma.rateCard.create({
+      data: {
+        facilityId: world.facilityId,
+        name: 'Only from next month',
+        nightMultiplierBp: 30_000,
+        status: 'ACTIVE',
+        effectiveFrom: new Date(shift.startsAt.getTime() + 30 * 24 * 60 * 60 * 1000),
+        createdBy: world.reviewerId,
+      },
+    });
+
+    const invoice = await generateInvoice(period(world));
+    expect(invoice.grossKobo).toBe(6_000_000);
+  });
+});
+
+describe('the approval screen states what will be billed', () => {
+  /**
+   * The facility approved "₦40,000" and was invoiced ₦60,000: the timesheet's
+   * own amount is the hours at the base rate, and the premiums the facility's
+   * own card adds are applied only when the invoice is raised. What a person is
+   * asked to approve has to be what they are then billed.
+   */
+  const NIGHT = {
+    from: new Date('2026-09-09T19:00:00.000Z'),
+    to: new Date('2026-09-10T03:00:00.000Z'),
+  };
+
+  async function sheetOf(assignmentId: string) {
+    const sheets = await timesheetsForAssignments([assignmentId]);
+    return sheets.get(assignmentId)!.timesheet;
+  }
+
+  it('carries the premium-inclusive figure and says how much of it is premium', async () => {
+    const world = await buildWorld(NIGHT, { name: 'At booking', nightMultiplierBp: 15_000 });
+
+    const sheet = await sheetOf(world.assignmentId);
+    // The hours at the base rate are still there; they are not what is billed.
+    expect(sheet.amountKobo).toBe(4_000_000);
+    expect(sheet.premiumKobo).toBe(2_000_000);
+    expect(sheet.billedKobo).toBe(6_000_000);
+  });
+
+  it('is the figure the invoice then bills', async () => {
+    const world = await buildWorld(NIGHT, { name: 'At booking', nightMultiplierBp: 15_000 });
+
+    const sheet = await sheetOf(world.assignmentId);
+    const invoice = await generateInvoice(period(world));
+    expect(sheet.billedKobo).toBe(invoice.grossKobo);
+  });
+
+  it('does not move when the facility changes its card afterwards', async () => {
+    const world = await buildWorld(NIGHT, { name: 'At booking', nightMultiplierBp: 15_000 });
+    await createRateCard({
+      facilityId: world.facilityId,
+      actorId: world.reviewerId,
+      name: 'Cut after booking',
+      nightMultiplierBp: 10_000,
+    });
+
+    expect((await sheetOf(world.assignmentId)).billedKobo).toBe(6_000_000);
+  });
+
+  it('is the base figure when there are no allowances', async () => {
+    const world = await buildWorld(NIGHT);
+
+    const sheet = await sheetOf(world.assignmentId);
+    expect(sheet.premiumKobo).toBe(0);
+    expect(sheet.billedKobo).toBe(sheet.amountKobo);
+  });
+});
+
 describe('the ledger', () => {
   it('balances to zero after every step of the cycle', async () => {
     const world = await buildWorld();
@@ -422,7 +624,7 @@ describe('the ledger', () => {
     expect(await amountOwed(world.practitionerId)).toBe(4_000_000);
 
     await issueInvoice({ invoiceId: invoice.id, actorId: world.financeId });
-    await recordPayment({ invoiceId: invoice.id, actorId: world.financeId });
+    await recordPayment(paidInFull(invoice, world));
 
     expect(await accountBalance('FACILITY_PAYABLE', world.facilityId)).toBe(0);
     expect(await accountBalance('CASH')).toBe(4_000_000);
@@ -445,7 +647,7 @@ describe('the ledger', () => {
     const world = await buildWorld();
     const invoice = await generateInvoice(period(world));
     await issueInvoice({ invoiceId: invoice.id, actorId: world.financeId });
-    await recordPayment({ invoiceId: invoice.id, actorId: world.financeId });
+    await recordPayment(paidInFull(invoice, world));
 
     const rows = await prisma.ledgerEntry.groupBy({
       by: ['transactionId'],
@@ -463,7 +665,7 @@ describe('paying a practitioner', () => {
     const world = await buildWorld();
     const invoice = await generateInvoice(period(world));
     await issueInvoice({ invoiceId: invoice.id, actorId: world.financeId });
-    await recordPayment({ invoiceId: invoice.id, actorId: world.financeId });
+    await recordPayment(paidInFull(invoice, world));
 
     const prepared = await preparePayout({
       practitionerId: world.practitionerId,
@@ -585,6 +787,40 @@ describe('paying a practitioner', () => {
     expect(self.status).toBe(403);
   });
 
+  it('tells staff whether they prepared a payout, and tells the practitioner nothing about who did', async () => {
+    const world = await buildWorld();
+    await grant({
+      userId: world.practitionerId,
+      roleKey: 'practitioner',
+      permissions: ['invoice.read'],
+      scopeType: 'SELF',
+      scopeId: world.practitionerId,
+    });
+    await generateInvoice(period(world));
+    await preparePayout({ practitionerId: world.practitionerId, actorId: world.financeId });
+
+    await issueSession({ userId: world.financeId });
+    const staff = await getPayoutsRoute(
+      new Request(`http://localhost/api/v1/payouts?scopeType=PLATFORM&scopeId=${world.practitionerId}`),
+    );
+    const staffBody = (await staff.json()) as {
+      payouts: Record<string, unknown>[];
+      secondApproverRequired: boolean;
+    };
+    expect(staffBody.payouts[0]).toMatchObject({ preparedByYou: true });
+    expect(staffBody.payouts[0]).not.toHaveProperty('preparedBy');
+    expect(typeof staffBody.secondApproverRequired).toBe('boolean');
+
+    clearCookies();
+    await issueSession({ userId: world.practitionerId });
+    const own = await getPayoutsRoute(new Request('http://localhost/api/v1/payouts?scopeType=SELF'));
+    const ownBody = (await own.json()) as { payouts: Record<string, unknown>[] };
+    expect(ownBody.payouts).toHaveLength(1);
+    expect(JSON.stringify(ownBody)).not.toContain(world.financeId);
+    expect(ownBody.payouts[0]).not.toHaveProperty('preparedBy');
+    expect(ownBody.payouts[0]).not.toHaveProperty('preparedByYou');
+  });
+
   it('tells a practitioner what they are owed as well as what has been paid', async () => {
     const world = await buildWorld();
     await grant({
@@ -606,7 +842,15 @@ describe('paying a practitioner', () => {
     };
 
     // Credited when the work was invoiced, and nothing paid out yet.
-    expect(await read()).toEqual({ payouts: [], owedKobo: 4_000_000 });
+    // The suite runs with the collection rule off (support/env.ts), so all of it is payable.
+    expect(await read()).toEqual({
+      payouts: [],
+      owedKobo: 4_000_000,
+      heldKobo: 0,
+      payableKobo: 4_000_000,
+      awaitingKobo: 0,
+      account: { state: 'not_required', readyAt: null },
+    });
 
     const payout = await preparePayout({
       practitionerId: world.practitionerId,
@@ -620,13 +864,383 @@ describe('paying a practitioner', () => {
   });
 });
 
+describe('money acts need a fresh password', () => {
+  /**
+   * BIL-12. Issuing a bill and sending a payout are what an open finance
+   * session on a stolen laptop is used for. The guard already asked for a fresh
+   * password on two permissions; neither was a money act.
+   */
+  const post = (path: string, id: string, body: object) => ({
+    request: new Request(`http://localhost${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+    params: { params: Promise.resolve({ id }) },
+  });
+
+  it('refuses to issue an invoice on an ordinary session, and leaves it a draft', async () => {
+    const world = await buildWorld();
+    const invoice = await generateInvoice(period(world));
+    await issueSession({ userId: world.financeId });
+
+    const call = post(`/api/v1/invoices/${invoice.id}/issue`, invoice.id, { facilityId: world.facilityId });
+    const response = await issueInvoiceRoute(call.request, call.params);
+
+    expect(response.status).toBe(401);
+    expect(((await response.json()) as { error: { code: string } }).error.code).toBe('step_up_required');
+    expect((await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).status).toBe('DRAFT');
+  });
+
+  it('issues it once the password has been confirmed', async () => {
+    const world = await buildWorld();
+    const invoice = await generateInvoice(period(world));
+    await issueSession({ userId: world.financeId, stepUp: true });
+
+    const call = post(`/api/v1/invoices/${invoice.id}/issue`, invoice.id, { facilityId: world.facilityId });
+    const response = await issueInvoiceRoute(call.request, call.params);
+
+    expect(response.status).toBe(200);
+    expect((await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).status).toBe('ISSUED');
+  });
+
+  it('refuses to release a payout on an ordinary session, and sends nothing', async () => {
+    const world = await buildWorld();
+    await generateInvoice(period(world));
+    const payout = await preparePayout({ practitionerId: world.practitionerId, actorId: world.financeId });
+    await issueSession({ userId: world.financeId });
+
+    const call = post(`/api/v1/payouts/${payout.id}/release`, payout.id, {});
+    const response = await releasePayoutRoute(call.request, call.params);
+
+    expect(response.status).toBe(401);
+    expect((await prisma.payout.findUniqueOrThrow({ where: { id: payout.id } })).status).toBe('PREPARED');
+  });
+});
+
+describe('payouts and disputes', () => {
+  /**
+   * BIL-10. A payout paid a practitioner everything the ledger said they were
+   * owed, including the shift a dispute was open over. A dispute holds what was
+   * credited for that shift and nothing else.
+   */
+  const FOUR_HOURS = {
+    from: new Date('2026-09-10T07:00:00.000Z'),
+    to: new Date('2026-09-10T11:00:00.000Z'),
+  };
+  const EIGHT_HOUR_PAY = 4_000_000;
+  const FOUR_HOUR_PAY = 2_000_000;
+
+  /** Two shifts for one practitioner at two facilities, each invoiced: ₦40,000 then ₦20,000. */
+  async function twoInvoicedShifts() {
+    const first = await buildWorld();
+    await generateInvoice(period(first));
+    const second = await buildWorld(FOUR_HOURS, undefined, {
+      practitionerId: first.practitionerId,
+      shiftOffsetDays: 2,
+    });
+    await generateInvoice(period(second));
+    return { first, second };
+  }
+
+  const dispute = (assignmentId: string, actorId: string) =>
+    raiseDispute({
+      assignmentId,
+      actorId,
+      category: 'PAY',
+      reason: 'The rate on the timesheet is lower than the one on the offer I accepted.',
+    });
+
+  it('pays what is not in dispute and holds the shift that is', async () => {
+    const { first, second } = await twoInvoicedShifts();
+    await dispute(first.assignmentId, first.practitionerId);
+
+    const payout = await preparePayout({ practitionerId: first.practitionerId, actorId: second.financeId });
+
+    expect(payout.amountKobo).toBe(FOUR_HOUR_PAY);
+  });
+
+  it('says what is held, next to what is owed', async () => {
+    const { first, second } = await twoInvoicedShifts();
+    await dispute(first.assignmentId, first.practitionerId);
+    await issueSession({ userId: second.financeId });
+
+    const response = await getPayoutsRoute(
+      new Request(
+        `http://localhost/api/v1/payouts?scopeType=PLATFORM&scopeId=${first.practitionerId}`,
+      ),
+    );
+    const body = (await response.json()) as { owedKobo: number; heldKobo: number };
+    expect(body.owedKobo).toBe(EIGHT_HOUR_PAY + FOUR_HOUR_PAY);
+    expect(body.heldKobo).toBe(EIGHT_HOUR_PAY);
+  });
+
+  it('refuses to prepare a payout when everything owed is in dispute, and creates nothing', async () => {
+    const world = await buildWorld();
+    await generateInvoice(period(world));
+    await dispute(world.assignmentId, world.practitionerId);
+
+    await expect(
+      preparePayout({ practitionerId: world.practitionerId, actorId: world.financeId }),
+    ).rejects.toMatchObject({ code: 'payout_held', status: 409 });
+    expect(await prisma.payout.count()).toBe(0);
+  });
+
+  it('will not release a payout prepared before the dispute was raised', async () => {
+    const world = await buildWorld();
+    await generateInvoice(period(world));
+    const payout = await preparePayout({ practitionerId: world.practitionerId, actorId: world.financeId });
+
+    await dispute(world.assignmentId, world.practitionerId);
+
+    await expect(
+      releasePayout({ payoutId: payout.id, actorId: world.financeId }),
+    ).rejects.toMatchObject({ code: 'payout_held' });
+    expect((await prisma.payout.findUniqueOrThrow({ where: { id: payout.id } })).status).toBe('PREPARED');
+  });
+
+  it('releases what is not in dispute even when something else is', async () => {
+    const { first, second } = await twoInvoicedShifts();
+    await dispute(first.assignmentId, first.practitionerId);
+    const payout = await preparePayout({ practitionerId: first.practitionerId, actorId: second.financeId });
+
+    const released = await releasePayout({ payoutId: payout.id, actorId: second.financeId });
+
+    expect(released.amountKobo).toBe(FOUR_HOUR_PAY);
+    expect(released.status).toMatch(/RELEASED|SETTLED/);
+  });
+
+  it('lets go once the dispute is withdrawn', async () => {
+    const world = await buildWorld();
+    await generateInvoice(period(world));
+    const raised = await dispute(world.assignmentId, world.practitionerId);
+    await withdrawDispute({ disputeId: raised.id, actorId: world.practitionerId });
+
+    const payout = await preparePayout({ practitionerId: world.practitionerId, actorId: world.financeId });
+    expect(payout.amountKobo).toBe(EIGHT_HOUR_PAY);
+  });
+
+  it('does not hold this month\'s earnings for a shift that was paid for last month', async () => {
+    // The first shift is paid out in full; it is then disputed. Money already
+    // sent cannot be held, and the practitioner's later work is not its hostage.
+    const first = await buildWorld();
+    await generateInvoice(period(first));
+    const paid = await preparePayout({ practitionerId: first.practitionerId, actorId: first.financeId });
+    await releasePayout({ payoutId: paid.id, actorId: first.financeId });
+
+    const second = await buildWorld(FOUR_HOURS, undefined, {
+      practitionerId: first.practitionerId,
+      shiftOffsetDays: 2,
+    });
+    await generateInvoice(period(second));
+    await dispute(first.assignmentId, first.practitionerId);
+
+    const payout = await preparePayout({ practitionerId: first.practitionerId, actorId: second.financeId });
+    expect(payout.amountKobo).toBe(FOUR_HOUR_PAY);
+  });
+});
+
+describe('voiding a draft invoice', () => {
+  /**
+   * BIL-08. VOID was in the database and nothing set it: a draft raised from the
+   * wrong figures could not be cancelled, because its lines pinned the shifts and
+   * the ledger had already credited the practitioner. A void reverses the
+   * entries rather than deleting them, and frees the shifts to be invoiced again.
+   */
+  const REASON = 'Raised against the wrong period; the timesheet is being corrected first.';
+
+  it('marks it void, reverses what the ledger credited, and keeps both', async () => {
+    const world = await buildWorld();
+    const invoice = await generateInvoice(period(world));
+    expect(await accountBalance('FACILITY_PAYABLE', world.facilityId)).toBe(4_000_000);
+
+    const voided = await voidInvoice({ invoiceId: invoice.id, actorId: world.financeId, reason: REASON });
+
+    expect(voided.status).toBe('VOID');
+    expect(await accountBalance('FACILITY_PAYABLE', world.facilityId)).toBe(0);
+    expect(await amountOwed(world.practitionerId)).toBe(0);
+    // Reversed, not deleted: the original credit and its reversal are both on the ledger.
+    expect(await prisma.ledgerEntry.count({ where: { invoiceId: invoice.id } })).toBe(4);
+    const all = await prisma.ledgerEntry.aggregate({ _sum: { amountKobo: true } });
+    expect(all._sum.amountKobo).toBe(0);
+  });
+
+  it('records who voided it and why', async () => {
+    const world = await buildWorld();
+    const invoice = await generateInvoice(period(world));
+
+    await voidInvoice({ invoiceId: invoice.id, actorId: world.financeId, reason: REASON });
+
+    const audit = await prisma.auditLog.findFirstOrThrow({ where: { action: 'invoice.voided' } });
+    expect(audit.actorId).toBe(world.financeId);
+    expect(audit.entityId).toBe(invoice.id);
+    expect(audit.reason).toBe(REASON);
+    expect(audit.before).toMatchObject({ status: 'DRAFT' });
+    expect(audit.after).toMatchObject({ status: 'VOID' });
+  });
+
+  it('frees the shifts, so they can be invoiced again, once', async () => {
+    const world = await buildWorld();
+    const first = await generateInvoice(period(world));
+    await voidInvoice({ invoiceId: first.id, actorId: world.financeId, reason: REASON });
+
+    const second = await generateInvoice(period(world));
+
+    expect(second.id).not.toBe(first.id);
+    expect(second.grossKobo).toBe(4_000_000);
+    // Credited once net, however many invoices have carried the shift.
+    expect(await amountOwed(world.practitionerId)).toBe(4_000_000);
+    await expect(generateInvoice(period(world))).rejects.toThrow(/No approved shifts/);
+  });
+
+  it('keeps one live invoice line per shift on the database', async () => {
+    const world = await buildWorld();
+    const invoice = await generateInvoice(period(world));
+    const line = invoice.lines[0]!;
+
+    await expect(
+      prisma.invoiceLine.create({
+        data: {
+          invoiceId: invoice.id,
+          assignmentId: line.assignmentId,
+          practitionerId: line.practitionerId,
+          hourlyRateKobo: line.hourlyRateKobo,
+          ordinaryMinutes: 0,
+          nightMinutes: 0,
+          holidayMinutes: 0,
+          overtimeMinutes: 0,
+          onCallMinutes: 0,
+          baseKobo: 0,
+          premiumKobo: 0,
+          amountKobo: 0,
+        },
+      }),
+    ).rejects.toThrow();
+  });
+
+  it('will not void an invoice that has been issued', async () => {
+    const world = await buildWorld();
+    const invoice = await generateInvoice(period(world));
+    await issueInvoice({ invoiceId: invoice.id, actorId: world.financeId });
+
+    await expect(
+      voidInvoice({ invoiceId: invoice.id, actorId: world.financeId, reason: REASON }),
+    ).rejects.toMatchObject({ code: 'invoice_wrong_status' });
+    expect(await accountBalance('FACILITY_PAYABLE', world.facilityId)).toBe(4_000_000);
+  });
+
+  it('will not void it twice', async () => {
+    const world = await buildWorld();
+    const invoice = await generateInvoice(period(world));
+    await voidInvoice({ invoiceId: invoice.id, actorId: world.financeId, reason: REASON });
+
+    await expect(
+      voidInvoice({ invoiceId: invoice.id, actorId: world.financeId, reason: REASON }),
+    ).rejects.toMatchObject({ code: 'invoice_wrong_status' });
+    expect(await prisma.ledgerEntry.count({ where: { invoiceId: invoice.id } })).toBe(4);
+  });
+
+  it('will not void money that has been paid out or is on its way', async () => {
+    const world = await buildWorld();
+    const invoice = await generateInvoice(period(world));
+    await preparePayout({ practitionerId: world.practitionerId, actorId: world.financeId });
+
+    await expect(
+      voidInvoice({ invoiceId: invoice.id, actorId: world.financeId, reason: REASON }),
+    ).rejects.toMatchObject({ code: 'invoice_paid_out', status: 409 });
+    expect((await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).status).toBe('DRAFT');
+    expect(await amountOwed(world.practitionerId)).toBe(4_000_000);
+  });
+
+  it('is not lost to a failed payout, which moved nothing', async () => {
+    const world = await buildWorld();
+    const invoice = await generateInvoice(period(world));
+    const payout = await preparePayout({ practitionerId: world.practitionerId, actorId: world.financeId });
+    await prisma.payout.update({ where: { id: payout.id }, data: { status: 'FAILED' } });
+
+    const voided = await voidInvoice({ invoiceId: invoice.id, actorId: world.financeId, reason: REASON });
+    expect(voided.status).toBe('VOID');
+  });
+
+  it('leaves exactly one of a void and an issue standing when both are pressed at once', async () => {
+    const world = await buildWorld();
+    const invoice = await generateInvoice(period(world));
+
+    const outcomes = await Promise.allSettled([
+      voidInvoice({ invoiceId: invoice.id, actorId: world.financeId, reason: REASON }),
+      issueInvoice({ invoiceId: invoice.id, actorId: world.financeId }),
+    ]);
+
+    expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1);
+    const status = (await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).status;
+    expect(['VOID', 'ISSUED']).toContain(status);
+    // The ledger agrees with whichever won.
+    expect(await accountBalance('FACILITY_PAYABLE', world.facilityId)).toBe(status === 'VOID' ? 0 : 4_000_000);
+  });
+
+  it('is not counted as billed or as a draft once void', async () => {
+    const world = await buildWorld();
+    const invoice = await generateInvoice(period(world));
+    expect((await financeSummary()).totals.draftKobo).toBe(4_000_000);
+
+    await voidInvoice({ invoiceId: invoice.id, actorId: world.financeId, reason: REASON });
+
+    const summary = await financeSummary();
+    expect(summary.totals.draftKobo).toBe(0);
+    expect(summary.byMonth.reduce((sum, month) => sum + month.invoicedKobo, 0)).toBe(0);
+  });
+
+  describe('through the route', () => {
+    const call = (invoiceId: string, facilityId: string, body: object) =>
+      voidInvoiceRoute(
+        new Request(`http://localhost/api/v1/invoices/${invoiceId}/void`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ facilityId, ...body }),
+        }),
+        { params: Promise.resolve({ id: invoiceId }) },
+      );
+
+    it('needs a fresh password', async () => {
+      const world = await buildWorld();
+      const invoice = await generateInvoice(period(world));
+      await issueSession({ userId: world.financeId });
+
+      const response = await call(invoice.id, world.facilityId, { reason: REASON });
+
+      expect(response.status).toBe(401);
+      expect((await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).status).toBe('DRAFT');
+    });
+
+    it('needs a reason somebody could read later', async () => {
+      const world = await buildWorld();
+      const invoice = await generateInvoice(period(world));
+      await issueSession({ userId: world.financeId, stepUp: true });
+
+      expect((await call(invoice.id, world.facilityId, { reason: 'oops' })).status).toBe(422);
+      expect((await call(invoice.id, world.facilityId, {})).status).toBe(422);
+    });
+
+    it('voids it for a finance officer with a fresh session', async () => {
+      const world = await buildWorld();
+      const invoice = await generateInvoice(period(world));
+      await issueSession({ userId: world.financeId, stepUp: true });
+
+      const response = await call(invoice.id, world.facilityId, { reason: REASON });
+
+      expect(response.status).toBe(200);
+      expect((await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).status).toBe('VOID');
+    });
+  });
+});
+
 describe('invoice status', () => {
   it('will not pay a draft that was never issued', async () => {
     const world = await buildWorld();
     const invoice = await generateInvoice(period(world));
 
     await expect(
-      recordPayment({ invoiceId: invoice.id, actorId: world.financeId }),
+      recordPayment(paidInFull(invoice, world)),
     ).rejects.toThrow(/cannot become PAID/);
   });
 
@@ -638,5 +1252,225 @@ describe('invoice status', () => {
     await expect(
       issueInvoice({ invoiceId: invoice.id, actorId: world.financeId }),
     ).rejects.toThrow(/cannot become ISSUED/);
+  });
+});
+
+describe('recording a payment', () => {
+  async function issued() {
+    const world = await buildWorld();
+    const invoice = await generateInvoice(period(world));
+    await issueInvoice({ invoiceId: invoice.id, actorId: world.financeId });
+    return { world, invoice };
+  }
+
+  const unpaid = async (invoiceId: string) => {
+    const row = await prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
+    expect(row.status).toBe('ISSUED');
+    expect(await prisma.ledgerEntry.count({ where: { account: 'CASH' } })).toBe(0);
+  };
+
+  it('keeps the reference, the amount, the date and the payer on the invoice', async () => {
+    const { world, invoice } = await issued();
+
+    const paid = await recordPayment(
+      paidInFull(invoice, world, { reference: '  GTB/INW/77881  ', payerName: ' Kano Teaching Hospital ' }),
+    );
+
+    expect(paid).toMatchObject({
+      status: 'PAID',
+      paymentReference: 'GTB/INW/77881',
+      paymentAmountKobo: invoice.grossKobo,
+      paidOn: lagosToday(),
+      payerName: 'Kano Teaching Hospital',
+    });
+    const row = await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } });
+    expect(row.paymentReference).toBe('GTB/INW/77881');
+    expect(row.paymentAmountKobo).toBe(invoice.grossKobo);
+    expect(row.payerName).toBe('Kano Teaching Hospital');
+    expect(row.paidOn?.toISOString().slice(0, 10)).toBe(lagosToday());
+  });
+
+  it('refuses an amount that is not the invoice, and records nothing', async () => {
+    const { world, invoice } = await issued();
+
+    await expect(
+      recordPayment(paidInFull(invoice, world, { amountKobo: invoice.grossKobo - 100 })),
+    ).rejects.toMatchObject({ code: 'payment_amount_mismatch', status: 422 });
+
+    await unpaid(invoice.id);
+  });
+
+  it('says what the invoice comes to when it refuses the amount', async () => {
+    const { world, invoice } = await issued();
+
+    await expect(
+      recordPayment(paidInFull(invoice, world, { amountKobo: 1 })),
+    ).rejects.toThrow(/40,000/);
+  });
+
+  it('refuses a missing reference or payer', async () => {
+    const { world, invoice } = await issued();
+
+    await expect(recordPayment(paidInFull(invoice, world, { reference: ' ' }))).rejects.toMatchObject({
+      code: 'payment_reference_required',
+    });
+    await expect(recordPayment(paidInFull(invoice, world, { payerName: '' }))).rejects.toMatchObject({
+      code: 'payment_payer_required',
+    });
+    await unpaid(invoice.id);
+  });
+
+  it('refuses a date in the future, one that is not a date, and one before the invoice existed', async () => {
+    const { world, invoice } = await issued();
+    const tomorrow = new Date(Date.now() + 3600_000 + 86_400_000).toISOString().slice(0, 10);
+
+    await expect(recordPayment(paidInFull(invoice, world, { paidOn: tomorrow }))).rejects.toMatchObject({
+      code: 'payment_date_invalid',
+    });
+    await expect(recordPayment(paidInFull(invoice, world, { paidOn: '13/10/2026' }))).rejects.toMatchObject({
+      code: 'payment_date_invalid',
+    });
+    await expect(recordPayment(paidInFull(invoice, world, { paidOn: '2020-01-01' }))).rejects.toMatchObject({
+      code: 'payment_date_invalid',
+    });
+    await unpaid(invoice.id);
+  });
+
+  it('writes the audit row with the amount and date but not the payer or the reference', async () => {
+    const { world, invoice } = await issued();
+
+    await recordPayment(paidInFull(invoice, world, { reference: 'TRF FROM ADAMU BELLO 123', payerName: 'Adamu Bello' }));
+
+    const row = await prisma.auditLog.findFirstOrThrow({ where: { action: 'invoice.paid' } });
+    const written = JSON.stringify(row);
+    expect(written).toContain(String(invoice.grossKobo));
+    expect(written).toContain(lagosToday());
+    expect(written).not.toContain('Adamu');
+    expect(written).not.toContain('ADAMU');
+  });
+
+  it('is what the payment event and the ledger rest on, as before', async () => {
+    const { world, invoice } = await issued();
+
+    await recordPayment(paidInFull(invoice, world));
+
+    expect(await accountBalance('CASH')).toBe(invoice.grossKobo);
+    const events = await prisma.outboxEvent.findMany({ where: { eventType: EVENTS.PaymentCompleted } });
+    expect(events).toHaveLength(1);
+    expect(JSON.stringify(events[0]!.payload)).not.toContain('Kano Teaching Hospital');
+  });
+});
+
+describe('a payout needs a second person', () => {
+  /**
+   * UXO-03. The same holder of payout.manage could prepare a payout and release
+   * it, so one person alone could move money out. The person who prepares one
+   * cannot release it. A pilot with one finance person can turn that off on
+   * purpose; the default is that it is on.
+   */
+  const SETTING = 'PAYOUT_SECOND_APPROVER';
+  const original = process.env[SETTING];
+
+  beforeEach(() => {
+    // The suite runs with it off, so the other cases can prepare and release as one
+    // person; these are about the rule itself, so they run with it unset.
+    delete process.env[SETTING];
+  });
+  afterAll(() => {
+    if (original === undefined) delete process.env[SETTING];
+    else process.env[SETTING] = original;
+  });
+
+  async function preparedPayout() {
+    const world = await buildWorld();
+    await generateInvoice(period(world));
+    const payout = await preparePayout({ practitionerId: world.practitionerId, actorId: world.financeId });
+    const colleague = await createUser({ fullName: 'Second Finance Officer' });
+    await grant({
+      userId: colleague.id,
+      roleKey: 'finance_officer_2',
+      permissions: ['payout.manage', 'invoice.read'],
+      scopeType: 'PLATFORM',
+    });
+    return { world, payout, colleague };
+  }
+
+  const status = async (id: string) => (await prisma.payout.findUniqueOrThrow({ where: { id } })).status;
+
+  it('refuses the person who prepared it, and sends nothing', async () => {
+    const { world, payout } = await preparedPayout();
+
+    await expect(releasePayout({ payoutId: payout.id, actorId: world.financeId })).rejects.toMatchObject({
+      code: 'second_approver_required',
+      status: 403,
+    });
+
+    const row = await prisma.payout.findUniqueOrThrow({ where: { id: payout.id } });
+    expect(row.status).toBe('PREPARED');
+    expect(row.providerReference).toBeNull();
+    expect(row.releasedBy).toBeNull();
+    expect(await prisma.ledgerEntry.count({ where: { payoutId: payout.id } })).toBe(0);
+  });
+
+  it('lets somebody else release it, and records who', async () => {
+    const { payout, colleague } = await preparedPayout();
+
+    await releasePayout({ payoutId: payout.id, actorId: colleague.id });
+
+    const row = await prisma.payout.findUniqueOrThrow({ where: { id: payout.id } });
+    expect(row.status).toBe('SETTLED');
+    expect(row.releasedBy).toBe(colleague.id);
+  });
+
+  it('records who prepared it, from the start', async () => {
+    const { world, payout } = await preparedPayout();
+
+    const row = await prisma.payout.findUniqueOrThrow({ where: { id: payout.id } });
+    expect(row.preparedBy).toBe(world.financeId);
+  });
+
+  it('can be turned off on purpose, for a pilot with one finance person', async () => {
+    const { world, payout } = await preparedPayout();
+    process.env[SETTING] = 'off';
+
+    await releasePayout({ payoutId: payout.id, actorId: world.financeId });
+
+    expect(await status(payout.id)).toBe('SETTLED');
+  });
+
+  it('is on for anything but the word off, so a typo does not remove the control', async () => {
+    const { world, payout } = await preparedPayout();
+    process.env[SETTING] = 'false';
+
+    await expect(releasePayout({ payoutId: payout.id, actorId: world.financeId })).rejects.toMatchObject({
+      code: 'second_approver_required',
+    });
+  });
+
+  it('does not hold one prepared before it was recorded who prepared it', async () => {
+    const { world, payout } = await preparedPayout();
+    await prisma.payout.update({ where: { id: payout.id }, data: { preparedBy: null } });
+
+    await releasePayout({ payoutId: payout.id, actorId: world.financeId });
+
+    expect(await status(payout.id)).toBe('SETTLED');
+  });
+
+  it('is told to the person over the API, and the payout stays prepared', async () => {
+    const { world, payout } = await preparedPayout();
+    await issueSession({ userId: world.financeId, stepUp: true });
+
+    const response = await releasePayoutRoute(
+      new Request(`http://localhost/api/v1/payouts/${payout.id}/release`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({}),
+      }),
+      { params: Promise.resolve({ id: payout.id }) },
+    );
+
+    expect(response.status).toBe(403);
+    expect(((await response.json()) as { error: { code: string } }).error.code).toBe('second_approver_required');
+    expect(await status(payout.id)).toBe('PREPARED');
   });
 });

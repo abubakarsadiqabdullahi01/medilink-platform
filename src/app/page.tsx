@@ -18,6 +18,8 @@ import {
   UserRound,
 } from 'lucide-react';
 import { buttonVariants } from '@/components/ui/button';
+import { SupportContact } from '@/components/app/support-contact';
+import { TextSizeControl } from '@/components/app/text-size-control';
 import { cn } from '@/lib/utils';
 
 /**
@@ -140,6 +142,9 @@ const assurances = [
   },
 ];
 
+// The contact line is configuration read at request time, not baked in at build.
+export const dynamic = 'force-dynamic';
+
 export default function LandingPage() {
   return (
     <div className="bg-white text-foreground">
@@ -173,6 +178,7 @@ export default function LandingPage() {
             </a>
           </nav>
           <div className="flex shrink-0 items-center gap-2 sm:gap-4">
+            <TextSizeControl className="hidden sm:flex" />
             <Link
               href="/login"
               className="hidden text-sm font-medium text-foreground/75 underline-offset-4 hover:text-primary hover:underline sm:inline"
@@ -227,7 +233,7 @@ export default function LandingPage() {
               <div className="mt-9 flex flex-wrap items-center gap-x-5 gap-y-3">
                 <Link
                   href="/register"
-                  className={cn(buttonVariants({ size: 'lg' }), 'h-11 px-7 text-[15px]')}
+                  className={cn(buttonVariants({ size: 'lg' }), 'h-11 px-7 text-base')}
                 >
                   Create an account <ArrowRight aria-hidden="true" />
                 </Link>
@@ -424,7 +430,7 @@ export default function LandingPage() {
                 href="/register"
                 className={cn(
                   buttonVariants({ size: 'lg' }),
-                  'h-11 w-fit shrink-0 px-7 text-[15px]',
+                  'h-11 w-fit shrink-0 px-7 text-base',
                 )}
               >
                 Create an account <ArrowRight aria-hidden="true" />
@@ -467,7 +473,20 @@ export default function LandingPage() {
             <Link href="/register" className="hover:text-white">
               Create an account
             </Link>
+            <Link href="/terms" className="hover:text-white">
+              Terms
+            </Link>
+            <Link href="/privacy" className="hover:text-white">
+              Privacy notice
+            </Link>
+            <Link href="/contact" className="hover:text-white">
+              Contact
+            </Link>
           </nav>
+        </div>
+        {/* Shown only when a line has been configured: nothing here invents one. */}
+        <div className="mx-auto mt-6 max-w-7xl">
+          <SupportContact tone="dark" />
         </div>
         <div className="mx-auto mt-8 max-w-7xl border-t border-white/10 pt-6 text-xs">
           © {new Date().getFullYear()} Medilink

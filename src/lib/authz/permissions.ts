@@ -35,7 +35,7 @@ export const PERMISSIONS = {
   'timesheet.submit': 'Submit a timesheet',
   'timesheet.approve': 'Approve a timesheet',
   'invoice.read': 'View an invoice',
-  'payout.manage': 'Initiate or release a payout',
+  'payout.manage': 'Raise and issue invoices, record payment, prepare and release payouts (requires step-up auth)',
   'payout.account.change': 'Change a payout bank account (requires step-up auth)',
 
   // governance
@@ -45,6 +45,8 @@ export const PERMISSIONS = {
   'incident.manage': 'Manage a clinical incident, including suspension',
   'audit.read': 'Read the audit trail',
   'config.manage': 'Edit controlled vocabularies and rate floors',
+  'system.manage': 'See failures in background work and replay an event that gave up',
+  'data.erase': 'Carry out an erasure request: replace a person\'s details and delete their files (requires step-up auth)',
 
   // Module 18, the pilot's suggestion log. These two are the only keys added
   // to Section 8.8's catalogue by this codebase, and the reason is that no
@@ -76,6 +78,12 @@ export type Permission = keyof typeof PERMISSIONS;
  */
 export const STEP_UP_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   'payout.account.change',
+  // The money acts: issuing a bill, recording that it was paid, preparing and
+  // releasing a payout. All five routes name this one permission, and all are
+  // what an open finance session on a stolen laptop is used for.
+  'payout.manage',
+  // Erasing a person is not undone. See ERASURE in audit-compliance.
+  'data.erase',
   // Granting a role is how an attacker with one session gets a durable
   // second one. It is also rare enough that asking for a password again
   // costs an administrator seconds a month.
@@ -178,7 +186,7 @@ const ADMINISTRATOR: Permission[] = [
   'service_request.read', 'assignment.confirm', 'assignment.cancel',
   'invoice.read', 'payout.manage',
   'dispute.manage', 'sanction.apply', 'incident.manage',
-  'audit.read',
+  'audit.read', 'system.manage', 'data.erase',
   'suggestion.submit', 'suggestion.triage',
 ];
 

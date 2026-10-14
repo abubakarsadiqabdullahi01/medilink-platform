@@ -23,6 +23,7 @@ test('a practitioner signs up in three steps and lands in their own console', as
   await page.getByLabel('Phone number').fill(phone);
   // Tagged, so the next run's world builder clears this account away.
   await page.getByLabel(/^Email/).fill(`chika.${suffix}@e2e.medilink.test`);
+  await page.getByRole('checkbox', { name: /privacy notice/ }).check();
   await page.getByRole('button', { name: 'Send me a code' }).click();
 
   await expect(page.getByText('Confirm your number', { exact: true })).toBeVisible();
@@ -56,6 +57,7 @@ test('a wrong code is refused and the account stays unverified', async ({ page }
   await page.getByLabel('Full name').fill('Dayo Testwrongcode');
   await page.getByLabel('Phone number').fill(phone);
   await page.getByLabel(/^Email/).fill(`dayo.${suffix}@e2e.medilink.test`);
+  await page.getByRole('checkbox', { name: /privacy notice/ }).check();
   await page.getByRole('button', { name: 'Send me a code' }).click();
 
   await expect(page.getByText('Confirm your number', { exact: true })).toBeVisible();

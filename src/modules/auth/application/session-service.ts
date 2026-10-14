@@ -202,13 +202,14 @@ export async function stepUpSession(input: {
       identifier: user.phone,
       createdAt: { gt: new Date(now.getTime() - LOGIN_FAILURE_WINDOW_SECONDS * 1000) },
     },
-    select: { succeeded: true, createdAt: true },
+    select: { succeeded: true, createdAt: true, reason: true },
   });
 
   const lock = lockoutState(attempts, now);
   if (lock.locked) {
     await prisma.loginAttempt.create({
       data: {
+        createdAt: now,
         identifier: user.phone,
         userId: user.id,
         succeeded: false,
@@ -223,6 +224,7 @@ export async function stepUpSession(input: {
 
   await prisma.loginAttempt.create({
     data: {
+      createdAt: now,
       identifier: user.phone,
       userId: user.id,
       succeeded: verified,

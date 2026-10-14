@@ -142,6 +142,8 @@ export async function runMatch(input: RunMatchParams): Promise<MatchRunView> {
       userId: profile.userId,
       professionalCategoryId: profile.professionalCategoryId,
       specialtyId: profile.specialtyId,
+      cadreLevelId: profile.cadreLevelId,
+      supervised: profile.supervised,
       yearsOfExperience: profile.yearsOfExperience,
       proximity: proximityTier({
         facilityStateId: facility.stateId,
@@ -163,6 +165,8 @@ export async function runMatch(input: RunMatchParams): Promise<MatchRunView> {
     {
       professionalCategoryId: request.professionalCategoryId,
       specialtyId: request.specialtyId,
+      cadreLevelId: request.cadreLevelId,
+      supervisionAvailable: request.supervisionAvailable,
     },
     candidates,
   );

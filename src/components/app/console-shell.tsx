@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { prefetch } from '@/lib/ui/api';
 import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   Activity,
@@ -29,6 +29,8 @@ import {
 import { cn } from '@/lib/utils';
 import { Avatar } from '@/components/app/avatar';
 import { SuggestionDialog } from '@/components/app/suggestion-dialog';
+import { NotificationBell } from '@/components/app/notification-bell';
+import { TextSizeControl } from '@/components/app/text-size-control';
 import { api } from '@/lib/ui/api';
 import { useSession } from '@/lib/ui/session';
 import { Button } from '@/components/ui/button';
@@ -145,15 +147,60 @@ export function ConsoleShell({
     return () => document.documentElement.classList.remove('dark');
   }, []);
 
-  // Escape closes the mobile drawer. The overlay is a click target and the X
-  // is a button, so this is the keyboard's way out of the same thing.
+  const openerRef = useRef<HTMLButtonElement>(null);
+  const drawerRef = useRef<HTMLElement>(null);
+
+  /**
+   * The mobile drawer behaves like the modal it announces itself as.
+   *
+   * It said `aria-modal` and did none of what that promises: Tab walked out of
+   * it into the page behind, closing it dropped focus on nothing, and the page
+   * scrolled underneath. Now focus moves into it, Tab and Shift+Tab stay inside
+   * it, Escape closes it, the page behind does not scroll, and focus goes back to
+   * the button that opened it. The overlay is a click target and the X is a
+   * button; this is the keyboard's way through the same thing.
+   */
   useEffect(() => {
     if (!open) return;
+    const drawer = drawerRef.current;
+    const opener = openerRef.current;
+    const reachable = () =>
+      Array.from(
+        drawer?.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      );
+
+    reachable()[0]?.focus();
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') setOpen(false);
+      if (event.key === 'Escape') {
+        setOpen(false);
+        return;
+      }
+      if (event.key !== 'Tab') return;
+
+      const items = reachable();
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (!first || !last) return;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     }
+
     window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      opener?.focus();
+    };
   }, [open]);
 
   function toggleTheme() {
@@ -171,7 +218,7 @@ export function ConsoleShell({
     <nav className="space-y-6">
       {visible.map((section) => (
         <div key={section.heading}>
-          <p className="mb-2 px-3 text-[0.7rem] font-semibold uppercase tracking-wider text-muted-foreground">
+          <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             {section.heading}
           </p>
           <ul className="space-y-0.5">
@@ -210,9 +257,17 @@ export function ConsoleShell({
 
   return (
     <div className="flex min-h-dvh bg-background">
+      {/* First thing a keyboard reaches: otherwise every page begins with the
+          whole navigation, and there is no way past it but to tab through it. */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[60] focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-primary-foreground focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+      >
+        Skip to main content
+      </a>
       <aside className="sticky top-0 hidden h-dvh w-64 shrink-0 flex-col border-r bg-card lg:flex">
         <div className="p-5">
-          <p className="text-[0.7rem] font-semibold uppercase tracking-widest text-muted-foreground">
+          <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
             Medilink
           </p>
           <p className="mt-0.5 font-semibold tracking-tight">{title}</p>
@@ -225,6 +280,7 @@ export function ConsoleShell({
         <div className="fixed inset-0 z-50 lg:hidden">
           <div className="absolute inset-0 bg-foreground/40" onClick={() => setOpen(false)} />
           <aside
+            ref={drawerRef}
             role="dialog"
             aria-modal="true"
             aria-label={`${title} navigation`}
@@ -249,6 +305,7 @@ export function ConsoleShell({
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-40 flex h-14 items-center gap-3 border-b bg-background/85 px-4 backdrop-blur sm:px-6">
           <Button
+            ref={openerRef}
             variant="ghost"
             size="icon"
             className="lg:hidden"
@@ -262,6 +319,8 @@ export function ConsoleShell({
           <p className="truncate font-semibold tracking-tight lg:hidden">{title}</p>
 
           <div className="ml-auto flex items-center gap-1">
+            <NotificationBell />
+            <TextSizeControl />
             <Button variant="ghost" size="icon" onClick={toggleTheme} aria-label="Toggle theme">
               {dark ? <Sun /> : <Moon />}
             </Button>
@@ -308,7 +367,15 @@ export function ConsoleShell({
           and a queue card's text is short by nature. Tables, rosters and tile
           grids get the room.
         */}
-        <main className="min-w-0 flex-1 p-4 sm:p-6 lg:p-8">{children}</main>
+        <main
+          id="main-content"
+          // Focusable by script only: the skip link moves focus here, and a
+          // heading that cannot take focus would leave it where it was.
+          tabIndex={-1}
+          className="min-w-0 flex-1 p-4 outline-none sm:p-6 lg:p-8"
+        >
+          {children}
+        </main>
       </div>
     </div>
   );

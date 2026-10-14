@@ -73,6 +73,11 @@ export const attachEvidenceSchema = z.object({
 export type AttachEvidenceInput = z.infer<typeof attachEvidenceSchema>;
 
 export const disputeQueueSchema = z.object({
+  /**
+   * Set when a facility reads the cases over its own shifts. Without it this is the
+   * adjudicator's queue, and needs `dispute.manage` over the whole platform.
+   */
+  facilityId: uuid.optional(),
   status: z.enum(['OPEN', 'UNDER_REVIEW', 'RESOLVED', 'WITHDRAWN']).optional(),
   /** Matches the practitioner's name or the facility's. */
   search: z.string().trim().max(120).optional(),

@@ -5,9 +5,12 @@ import { randomUUID } from 'node:crypto';
 import { publishEvent } from '@/lib/outbox';
 import { EVENTS } from '@/lib/events';
 import {
+  bookingTermsFor,
   getAssignment,
   markAssignmentCompleted,
 } from '@/modules/matching/application/assignment';
+import { termsOfBooking } from '@/modules/rates-contracts/application/rate-card';
+import { priceStoredTimesheet } from '@/modules/rates-contracts/domain/pricing';
 import { getServiceRequest } from '@/modules/service-requests/application/request';
 import { AttendanceErrors } from '@/modules/attendance/domain/errors';
 import {
@@ -287,6 +290,19 @@ export async function reviewTimesheet(input: ReviewParams): Promise<TimesheetVie
       after: { status: approved ? 'APPROVED' : 'REJECTED', amountKobo: timesheet.amountKobo },
     });
 
+    if (!approved) {
+      await publishEvent(tx, {
+        eventType: EVENTS.TimesheetRejected,
+        aggregateType: 'timesheets.timesheets',
+        aggregateId: timesheet.id,
+        payload: {
+          assignmentId: input.assignmentId,
+          userId: assignment.userId,
+          facilityId: assignment.facilityId,
+        },
+      });
+    }
+
     if (approved) {
       await publishEvent(tx, {
         eventType: EVENTS.TimesheetApproved,
@@ -425,6 +441,22 @@ export async function correctTimesheet(input: CorrectParams): Promise<TimesheetV
   return computeAndSaveTimesheet(input.assignmentId);
 }
 
+/**
+ * What the facility will be billed for the shift, which is not `amountKobo`.
+ *
+ * `amountKobo` is the hours at the base rate. The premiums on the facility's own
+ * card - night, holiday, overtime - are added when the invoice is raised, so the
+ * screen that asks a facility to approve a timesheet showed ₦40,000 for a shift
+ * that was then invoiced at ₦60,000. Priced here by the same function the
+ * invoice uses, on the terms fixed when the shift was booked.
+ */
+export interface BilledFigures {
+  billedKobo: number;
+  premiumKobo: number;
+}
+
+export type TimesheetWithBilling = TimesheetView & BilledFigures;
+
 export interface RevisionView {
   revision: number;
   previous: unknown;
@@ -445,8 +477,8 @@ export interface RevisionView {
  */
 export async function timesheetsForAssignments(
   assignmentIds: string[],
-): Promise<Map<string, { timesheet: TimesheetView; revisions: RevisionView[] }>> {
-  const out = new Map<string, { timesheet: TimesheetView; revisions: RevisionView[] }>();
+): Promise<Map<string, { timesheet: TimesheetWithBilling; revisions: RevisionView[] }>> {
+  const out = new Map<string, { timesheet: TimesheetWithBilling; revisions: RevisionView[] }>();
   if (assignmentIds.length === 0) return out;
 
   const records = await prisma.attendanceRecord.findMany({
@@ -466,14 +498,25 @@ export async function timesheetsForAssignments(
     : [];
 
   const recordOf = new Map(records.map((row) => [row.id, row]));
+  const bookings = await bookingTermsFor(records.map((row) => row.assignmentId));
   for (const timesheet of timesheets) {
     const record = recordOf.get(timesheet.attendanceRecordId);
     if (!record) continue;
+
+    // Without its booking there is nothing to price on, so the base figure is
+    // all that is known and no premium is claimed.
+    const booking = bookings.get(record.assignmentId);
+    const priced = booking
+      ? priceStoredTimesheet(timesheet, await termsOfBooking(booking)).priced
+      : null;
+
     out.set(record.assignmentId, {
       timesheet: {
         ...timesheet,
         assignmentId: record.assignmentId,
         attendanceStatus: record.status,
+        billedKobo: priced?.totalKobo ?? timesheet.amountKobo,
+        premiumKobo: priced?.premiumKobo ?? 0,
       },
       revisions: revisions
         .filter((row) => row.timesheetId === timesheet.id)

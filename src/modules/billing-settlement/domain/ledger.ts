@@ -147,6 +147,21 @@ export function entriesForApprovedWork(work: ApprovedWork): LedgerEntry[] {
   return entries;
 }
 
+/**
+ * The entries that undo `entriesForApprovedWork` for the same shift: every
+ * amount with its sign turned over, so each account is back where it was. The
+ * original entries are kept; a ledger is added to, never rewritten.
+ */
+export function entriesForVoidedWork(work: ApprovedWork): LedgerEntry[] {
+  const entries = entriesForApprovedWork(work).map((entry) => ({
+    ...entry,
+    amountKobo: entry.amountKobo === 0 ? 0 : -entry.amountKobo,
+    memo: `Voided: ${entry.memo}`,
+  }));
+  assertBalanced(entries);
+  return entries;
+}
+
 /** A facility settling its invoice: cash in, payable cleared. */
 export function entriesForPayment(input: {
   facilityId: string;

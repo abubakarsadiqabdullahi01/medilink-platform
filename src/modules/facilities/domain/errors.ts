@@ -29,8 +29,19 @@ export const FacilityErrors = {
   duplicateCacNumber: () =>
     new FacilityError(
       'duplicate_cac_number',
-      'A facility with that CAC registration number already exists.',
+      'A facility with that registration number already exists.',
       409,
+    ),
+
+  invalidRegistrationReference: (problem: string) =>
+    new FacilityError('invalid_registration_reference', problem, 422),
+
+  /** Everything missing, in words, so it is fixed once rather than discovered a refusal at a time. */
+  approvalBlocked: (reasons: string[]) =>
+    new FacilityError(
+      'approval_blocked',
+      `This facility cannot be approved yet: ${reasons.join('; ')}.`,
+      422,
     ),
 
   alreadyVerified: () =>
@@ -46,6 +57,27 @@ export const FacilityErrors = {
       'cannot_verify_own_facility',
       'You cannot verify a facility you represent.',
       403,
+    ),
+
+  notRejected: () =>
+    new FacilityError(
+      'not_rejected',
+      'Only a facility that was refused can be sent back for review.',
+      409,
+    ),
+
+  nothingChanged: () =>
+    new FacilityError(
+      'nothing_changed',
+      'Correct what compliance asked about first. A facility that has not changed would only be refused again for the same reason.',
+      409,
+    ),
+
+  cacLocked: () =>
+    new FacilityError(
+      'cac_locked',
+      'The registration number can only be corrected after a facility has been refused. Contact Medilink to change it.',
+      409,
     ),
 
   /**

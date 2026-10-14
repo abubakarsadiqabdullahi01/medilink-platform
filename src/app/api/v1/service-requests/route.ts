@@ -8,6 +8,7 @@ import {
   createServiceRequest,
   listServiceRequests,
 } from '@/modules/service-requests/application/request';
+import { deriveShiftType } from '@/modules/service-requests/domain/shift-type';
 
 /**
  * /api/v1/service-requests — draft a request (POST) or list them (GET).
@@ -23,7 +24,11 @@ export async function POST(request: Request) {
     permission: 'service_request.publish',
     scope: (input) => ({ type: 'FACILITY', id: input.facilityId }),
     action: async ({ input, session }) =>
-      createServiceRequest({ ...input, actorId: session.userId }),
+      createServiceRequest({
+        ...input,
+        shiftType: input.shiftType ?? deriveShiftType(input.startsAt, input.endsAt),
+        actorId: session.userId,
+      }),
     successStatus: 201,
   });
 }

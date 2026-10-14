@@ -38,7 +38,7 @@ import {
   PageHeader,
   QueueSkeleton,
 } from '@/components/app/page-shell';
-import { formatAgo, formatDate } from '@/components/app/format';
+import { expiryOf, formatAgo, formatDate } from '@/components/app/format';
 
 interface Submission {
   id: string;
@@ -47,6 +47,8 @@ interface Submission {
   status: string;
   referenceNumber: string | null;
   expiresAt: string | null;
+  /** The date printed on the document, as read by the reviewer. */
+  documentExpiresOn: string | null;
   createdAt: string;
   reviewNotes: string | null;
   practitionerName: string;
@@ -56,6 +58,8 @@ interface Submission {
   documentObjectKey: string | null;
   /** How it is checked: a NIN or licence number is confirmed from the practitioner's page. */
   verificationMethod: string;
+  /** Whether it has an expiry date to read off the document. */
+  credentialTypeExpires: boolean;
 }
 
 // [value, label] rather than a derived label: MORE_INFO_REQUESTED reads badly
@@ -125,6 +129,8 @@ export default function CredentialsPage() {
   const filtered = credentialTypeId !== 'all' || Boolean(applied);
 
   const [notes, setNotes] = useState<Record<string, string>>({});
+  // The expiry date the reviewer reads off a document, per submission.
+  const [printed, setPrinted] = useState<Record<string, string>>({});
 
   const review = useQueueAction<{
     id: string;
@@ -135,6 +141,9 @@ export default function CredentialsPage() {
       api.post(`/api/v1/credentials/${id}/review`, {
         decision,
         reviewNotes: notes[id]?.trim() || undefined,
+        // Only sent with an approval: an expiry is recorded when a credential is
+        // approved, and the server refuses it with anything else.
+        printedExpiryDate: decision === 'approve' ? printed[id] || undefined : undefined,
       }),
     success: ({ decision }) =>
       decision === 'approve'
@@ -305,7 +314,7 @@ export default function CredentialsPage() {
                     <Detail label="Document">
                       {row.documentObjectKey ? 'Attached' : 'None attached'}
                     </Detail>
-                    <Detail label="Expires">{formatDate(row.expiresAt)}</Detail>
+                    <Detail label="Expires">{expiryOf(row)?.text ?? '—'}</Detail>
                     <Detail label="Submitted">
                       {formatDate(row.createdAt)} · {formatAgo(row.createdAt)}
                     </Detail>
@@ -357,6 +366,29 @@ export default function CredentialsPage() {
                           }
                         />
                       </div>
+
+                      {row.credentialTypeExpires &&
+                      row.verificationMethod !== 'nimc_verification' &&
+                      row.verificationMethod !== 'mdcn_status_check' ? (
+                        <div className="space-y-2">
+                          <Label htmlFor={`printed-${row.id}`}>
+                            Expiry date on the document{' '}
+                            <span className="font-normal text-muted-foreground">
+                              — read it off the document. If none is printed, leave it empty and an
+                              estimate is used.
+                            </span>
+                          </Label>
+                          <Input
+                            id={`printed-${row.id}`}
+                            type="date"
+                            className="max-w-xs"
+                            value={printed[row.id] ?? ''}
+                            onChange={(event) =>
+                              setPrinted((current) => ({ ...current, [row.id]: event.target.value }))
+                            }
+                          />
+                        </div>
+                      ) : null}
 
                       <div className="flex flex-wrap gap-2">
                         {row.verificationMethod === 'nimc_verification' ||

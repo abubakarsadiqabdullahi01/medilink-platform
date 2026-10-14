@@ -1,8 +1,10 @@
 'use client';
 
 import {
+  Building2,
   CalendarPlus,
   FileText,
+  Gavel,
   LayoutDashboard,
   Percent,
   ReceiptText,
@@ -65,6 +67,12 @@ const SECTIONS: NavSection[] = [
         permission: 'invoice.read',
       },
       {
+        href: '/facility/disputes',
+        label: 'Disputes',
+        icon: Gavel,
+        permission: 'dispute.manage',
+      },
+      {
         href: '/facility/rates',
         label: 'Rates and allowances',
         icon: Percent,
@@ -80,7 +88,10 @@ const SECTIONS: NavSection[] = [
   },
   {
     heading: 'Your facility',
-    items: [{ href: '/facility/staff', label: 'Staff', icon: UsersRound, permission: 'role.grant' }],
+    items: [
+      { href: '/facility/profile', label: 'Facility profile', icon: Building2, permission: 'facility.read' },
+      { href: '/facility/staff', label: 'Staff', icon: UsersRound, permission: 'role.grant' },
+    ],
   },
 ];
 

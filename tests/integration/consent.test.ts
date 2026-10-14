@@ -23,6 +23,7 @@ import {
   listRequests,
   raiseRequest,
 } from '@/modules/audit-compliance/application/data-subject';
+import { submitPayoutAccount } from '@/modules/billing-settlement/application/payout-account';
 import { clearCookies } from './support/cookie-jar';
 import { createUser } from './support/fixtures';
 
@@ -369,6 +370,25 @@ describe('the export', () => {
     expect(data.notIncluded.ledger.length).toBeGreaterThan(30);
   });
 
+  it('says where they are paid, with the last four digits and never the number or what seals it', async () => {
+    const user = await createUser({ fullName: 'Rita Musa' });
+    await submitPayoutAccount({
+      userId: user.id,
+      bankName: 'Guaranty Trust Bank',
+      accountName: 'MUSA RITA',
+      accountNumber: '0123456789',
+    });
+
+    const data = await exportSubjectData(user.id);
+    const serialised = JSON.stringify(data);
+
+    expect(data.payoutAccounts).toHaveLength(1);
+    expect(data.payoutAccounts[0]).toMatchObject({ bankName: 'Guaranty Trust Bank', accountLast4: '6789' });
+    expect(serialised).not.toContain('0123456789');
+    expect(serialised).not.toContain('Sealed');
+    expect(serialised).not.toContain('fingerprint');
+  });
+
   it('names every section it promises', async () => {
     const user = await createUser({ fullName: 'Rita Musa' });
     const data = await exportSubjectData(user.id);
@@ -388,6 +408,7 @@ describe('the export', () => {
       'agreementsAccepted',
       'dataSubjectRequests',
       'payouts',
+      'payoutAccounts',
     ]) {
       expect(Object.keys(data), key).toContain(key);
     }

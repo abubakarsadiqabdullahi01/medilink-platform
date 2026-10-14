@@ -22,15 +22,24 @@ export const ROUTES: RouteDefinition[] = [
   { method: 'GET', path: '/api/v1/assignments/:id/disputes', permission: 'dispute.manage', scopeType: 'SELF' },
   { method: 'GET', path: '/api/v1/assignments/:id/disputes', permission: 'dispute.manage', scopeType: 'FACILITY' },
   { method: 'GET', path: '/api/v1/disputes', permission: 'dispute.manage', scopeType: 'PLATFORM' },
+  // With facilityId: the cases over that facility's own shifts.
+  { method: 'GET', path: '/api/v1/disputes', permission: 'dispute.manage', scopeType: 'FACILITY' },
   { method: 'GET', path: '/api/v1/disputes/:id', permission: 'dispute.manage', scopeType: 'PLATFORM' },
+  { method: 'GET', path: '/api/v1/disputes/:id', permission: 'dispute.manage', scopeType: 'FACILITY' },
   { method: 'POST', path: '/api/v1/disputes/:id/review', permission: 'dispute.manage', scopeType: 'PLATFORM' },
   { method: 'POST', path: '/api/v1/disputes/:id/resolve', permission: 'dispute.manage', scopeType: 'PLATFORM' },
+  // A party acts as themselves (SELF) or, for a facility, as the facility they name
+  // (FACILITY): the same route, the scope chosen by whether `facilityId` is given.
   { method: 'POST', path: '/api/v1/disputes/:id/withdraw', permission: 'dispute.manage', scopeType: 'SELF' },
+  { method: 'POST', path: '/api/v1/disputes/:id/withdraw', permission: 'dispute.manage', scopeType: 'FACILITY' },
   { method: 'POST', path: '/api/v1/disputes/:id/evidence/upload-url', permission: 'dispute.manage', scopeType: 'SELF' },
+  { method: 'POST', path: '/api/v1/disputes/:id/evidence/upload-url', permission: 'dispute.manage', scopeType: 'FACILITY' },
   { method: 'POST', path: '/api/v1/disputes/:id/evidence', permission: 'dispute.manage', scopeType: 'SELF' },
+  { method: 'POST', path: '/api/v1/disputes/:id/evidence', permission: 'dispute.manage', scopeType: 'FACILITY' },
   { method: 'GET', path: '/api/v1/disputes/:id/evidence', permission: 'dispute.manage', scopeType: 'PLATFORM' },
   // Reading one attachment. SELF because a party may re-read what they or the
   // other side put in; a PLATFORM holder's grant covers every scope, so the
   // adjudicator working the case reaches it through the same entry.
   { method: 'POST', path: '/api/v1/disputes/:id/evidence/:evidenceId/url', permission: 'dispute.manage', scopeType: 'SELF' },
+  { method: 'POST', path: '/api/v1/disputes/:id/evidence/:evidenceId/url', permission: 'dispute.manage', scopeType: 'FACILITY' },
 ];

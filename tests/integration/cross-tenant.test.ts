@@ -100,6 +100,7 @@ interface Case {
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
 const iso = (offsetMs: number) => new Date(Date.now() + offsetMs).toISOString();
+const today = new Date().toISOString().slice(0, 10);
 
 const onFacility = (
   route: string,
@@ -477,9 +478,54 @@ const CASES: Case[] = [
   })),
   onPlatform('invoices/[id]/pay', 'POST', (c) => ({
     ...ID(c.t.invoiceId),
-    body: { facilityId: c.t.facilityId },
+    body: {
+      facilityId: c.t.facilityId,
+      paymentReference: 'FT-0001',
+      amountKobo: 100,
+      paidOn: today,
+      payerName: 'Cross Tenant Probe',
+    },
+  })),
+  onPlatform('invoices/[id]/void', 'POST', (c) => ({
+    ...ID(c.t.invoiceId),
+    body: { facilityId: c.t.facilityId, reason: 'Raised against the wrong hospital.' },
   })),
   onPlatform('payouts/[id]/release', 'POST', (c) => ({ ...ID(c.t.payoutId), body: {} })),
+  onPlatform('payouts/[id]/settle', 'POST', (c) => ({
+    ...ID(c.t.payoutId),
+    body: { bankReference: 'FT-0001', paidOn: today },
+  })),
+  onPlatform('payouts/[id]/fail', 'POST', (c) => ({
+    ...ID(c.t.payoutId),
+    body: { reason: 'The bank returned the transfer.' },
+  })),
+  onPlatform('payouts/[id]/cancel', 'POST', (c) => ({
+    ...ID(c.t.payoutId),
+    body: { reason: 'Raised in error.' },
+  })),
+  // A practitioner's bank account, reviewed or read by the platform's finance team only.
+  // No tenant owns one, so the practitioner's id stands in for an account's.
+  onPlatform('payout-accounts/[id]/review', 'POST', (c) => ({
+    ...ID(c.t.practitionerId),
+    body: { decision: 'reject', note: 'Not a match.' },
+  })),
+  onPlatform('payout-accounts/practitioner/[id]', 'GET', (c) => ID(c.t.practitionerId)),
+
+  // ── platform configuration, the register and operations ─────────────────
+  // None of these records belongs to a hospital. They are here because they take
+  // an identifier, and a hospital's people must be refused every one.
+  onPlatform('cadre-levels/[id]/active', 'POST', (c) => ({ ...ID(c.t.facilityId), body: { active: false } })),
+  onPlatform('registration-categories/[id]/active', 'POST', (c) => ({
+    ...ID(c.t.facilityId),
+    body: { active: false },
+  })),
+  onPlatform('holidays/[id]', 'DELETE', (c) => ID(c.t.facilityId)),
+  onPlatform('sanctions/[id]/remove', 'POST', (c) => ({
+    ...ID(c.t.facilityId),
+    body: { reason: 'Listed in error.' },
+  })),
+  onPlatform('data-requests/[id]/erase', 'POST', (c) => ID(c.t.practitionerId)),
+  onPlatform('admin/system/events/[id]/replay', 'POST', (c) => ID(c.t.facilityId)),
 
   // ── the suggestion box ───────────────────────────────────────────────────
   onPlatform('suggestions/[id]/triage', 'POST', (c) => ({
@@ -692,6 +738,7 @@ const SCOPED_WRITES: ScopedCase[] = [
  */
 const NO_TENANT_IDENTIFIER: Record<string, string> = {
   'admin/performance': 'platform-only aggregate; takes no identifier',
+  'admin/system': 'platform-only operations status; takes no identifier',
   agreements: "the caller's own acceptance, or the platform's publishing; takes no identifier",
   'agreements/versions': 'the platform’s own list; takes no identifier',
   'auth/login': 'before sign-in; no tenant data',
@@ -706,6 +753,7 @@ const NO_TENANT_IDENTIFIER: Record<string, string> = {
   'auth/verify-phone': 'before sign-in; no tenant data',
   'availability/blocks': 'creates for the caller; takes no identifier',
   'availability/slots': 'creates for the caller; takes no identifier',
+  'cadre-levels': 'platform-only reference data; names a profession, which no hospital owns',
   consent: 'the caller’s own record; takes no identifier',
   'credentials/document-upload-url': 'for the caller’s own upload; takes no identifier',
   'dashboard/finance': 'platform-only aggregate; takes no identifier',
@@ -716,17 +764,27 @@ const NO_TENANT_IDENTIFIER: Record<string, string> = {
   'facilities/register': 'creates for the caller; takes no identifier',
   'finance/invoices': 'the platform’s list; takes no identifier',
   health: 'public',
+  'health/background': 'operations probe; no tenant data',
+  holidays: 'platform-only calendar; takes no identifier',
   'incidents/queue': 'the platform’s queue; takes no identifier',
   invitations: 'the caller’s own invitations, read from the session',
   'me/data-requests': 'the caller’s own record, read from the session',
   'me/erasure': 'the caller’s own record, read from the session',
   'me/export': 'the caller’s own record, read from the session',
+  'me/notifications': 'the caller’s own inbox, read from the session',
+  'me/notifications/read':
+    'the caller’s own inbox: the ids in the body are matched against the session’s own messages, which inbox.test.ts attacks',
+  'me/payout-account': 'the caller’s own account, read from the session',
+  'payout-accounts': 'the platform’s review queue; takes no identifier',
   'practitioners/me': 'the caller’s own profile, read from the session',
   'practitioners/me/photo-upload-url': 'the caller’s own photograph; takes no identifier',
   'practitioners/me/photo-url': 'the caller’s own photograph; takes no identifier',
   'practitioners/me/submit': 'the caller’s own application; takes no identifier',
   practitioners: 'the platform’s directory; takes no identifier',
+  'rate-floors': 'platform-only pay floors by profession and level; no hospital owns one',
   reference: 'public reference data',
+  'registration-categories': 'platform-only reference data; names a profession, which no hospital owns',
+  sanctions: 'the platform’s register of listed people; takes no tenant identifier',
   'suggestions/summary': 'the platform’s aggregate; takes no identifier',
   unhonoured: 'the platform’s queue; takes no identifier',
 };
@@ -793,6 +851,14 @@ const PLATFORM_ROUTES: ScopedCase[] = [
         folioNumber: 'MDCN/1/1',
         registrationStatus: 'ACTIVE',
       },
+    }),
+  },
+  {
+    route: 'practitioners/verification/standing',
+    method: 'POST',
+    role: 'owner',
+    request: (c) => ({
+      body: { userId: c.t.practitionerId, cadreLevelId: null, registrationCategoryId: null },
     }),
   },
   {

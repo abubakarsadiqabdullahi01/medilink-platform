@@ -18,6 +18,13 @@ export class AuthError extends HttpError {
 }
 
 export const AuthErrors = {
+  termsNotAccepted: () =>
+    new AuthError(
+      'terms_not_accepted',
+      'Please read and accept the privacy notice to create an account.',
+      422,
+    ),
+
   invalidCredentials: () =>
     new AuthError('invalid_credentials', 'That phone number or password is not correct.', 401),
 
@@ -31,6 +38,21 @@ export const AuthErrors = {
 
   otpThrottled: (retryAfterSeconds: number) =>
     new AuthError('otp_throttled', 'Wait a moment before requesting another code.', 429, retryAfterSeconds),
+
+  tooManyAttempts: (retryAfterSeconds: number) =>
+    new AuthError(
+      'too_many_attempts',
+      'Too many sign-in attempts from this connection. Try again later, or from another connection.',
+      429,
+      retryAfterSeconds,
+    ),
+
+  setupTokenInvalid: () =>
+    new AuthError(
+      'setup_token_invalid',
+      'Your verification has expired or does not match. Verify your phone again to continue.',
+      403,
+    ),
 
   /**
    * The gateway did not take the message. Said plainly, because the other
@@ -65,4 +87,23 @@ export const AuthErrors = {
     new AuthError('account_not_usable', 'This account cannot sign in. Contact support.', 403),
 
   notAuthenticated: () => new AuthError('not_authenticated', 'Sign in to continue.', 401),
+
+  // Raised only by the command that creates the first administrator, which a
+  // person runs at a terminal, so these say plainly what is in the way.
+  administratorExists: () =>
+    new AuthError(
+      'administrator_exists',
+      'A super administrator already exists. Sign in as them and appoint people from the console. If every one of them has lost access, run this again with --additional.',
+      409,
+    ),
+
+  phoneRegistered: () =>
+    new AuthError(
+      'phone_registered',
+      'That number already has an account. This command only creates new ones; it will not take one over.',
+      409,
+    ),
+
+  emailRegistered: () =>
+    new AuthError('email_registered', 'That email address already belongs to an account.', 409),
 } as const;

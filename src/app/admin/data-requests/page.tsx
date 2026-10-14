@@ -188,7 +188,7 @@ export default function DataRequestsPage() {
             <p className="mt-3 text-xs text-muted-foreground">
               {rows.length} on this page
               {overdue > 0 ? (
-                <span className="font-medium text-destructive"> · {overdue} past the deadline</span>
+                <span className="font-medium text-destructive-text"> · {overdue} past the deadline</span>
               ) : null}
             </p>
           ) : null}
@@ -254,7 +254,7 @@ export default function DataRequestsPage() {
                         className={cn(
                           'shrink-0 rounded-full px-2.5 py-1 text-xs font-medium',
                           row.overdue
-                            ? 'bg-destructive/10 text-destructive'
+                            ? 'bg-destructive/10 text-destructive-text'
                             : left <= 7
                               ? 'bg-warning/10 text-warning'
                               : 'bg-muted text-muted-foreground',

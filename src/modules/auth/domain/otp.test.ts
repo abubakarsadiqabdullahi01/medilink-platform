@@ -8,7 +8,10 @@ import {
   otpExpiry,
   OTP_LENGTH,
   OTP_MAX_ATTEMPTS,
+  OTP_MAX_SENDS_OVERALL_PER_HOUR,
+  OTP_MAX_SENDS_PER_ADDRESS_PER_HOUR,
   OTP_MAX_SENDS_PER_HOUR,
+  evaluateSendBudget,
   OTP_RESEND_COOLDOWN_SECONDS,
   type OtpRecord,
 } from './otp';
@@ -177,5 +180,34 @@ describe('evaluateResend', () => {
       new Date(NOW.getTime() - 2000 * 1000),
     ];
     expect(evaluateResend(shuffled, NOW)).toMatchObject({ reason: 'cooldown' });
+  });
+});
+
+
+describe('evaluateSendBudget', () => {
+  it('allows ordinary use', () => {
+    expect(evaluateSendBudget({ fromThisAddress: 3, overall: 40 })).toEqual({ ok: true });
+  });
+
+  it('stops one address once it has had its share', () => {
+    expect(
+      evaluateSendBudget({ fromThisAddress: OTP_MAX_SENDS_PER_ADDRESS_PER_HOUR, overall: 10 }),
+    ).toMatchObject({ ok: false, reason: 'address_limit' });
+    expect(
+      evaluateSendBudget({ fromThisAddress: OTP_MAX_SENDS_PER_ADDRESS_PER_HOUR - 1, overall: 10 }),
+    ).toEqual({ ok: true });
+  });
+
+  it('stops everybody once the overall budget is spent, whatever the address', () => {
+    expect(
+      evaluateSendBudget({ fromThisAddress: 0, overall: OTP_MAX_SENDS_OVERALL_PER_HOUR }),
+    ).toMatchObject({ ok: false, reason: 'overall_limit' });
+  });
+
+  it('applies only the overall budget when the request carried no address', () => {
+    expect(evaluateSendBudget({ fromThisAddress: null, overall: 10 })).toEqual({ ok: true });
+    expect(
+      evaluateSendBudget({ fromThisAddress: null, overall: OTP_MAX_SENDS_OVERALL_PER_HOUR }),
+    ).toMatchObject({ ok: false, reason: 'overall_limit' });
   });
 });

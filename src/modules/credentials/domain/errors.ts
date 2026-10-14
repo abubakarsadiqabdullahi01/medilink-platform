@@ -6,6 +6,15 @@ import { HttpError } from '@/lib/http/errors';
  */
 export class CredentialError extends HttpError {}
 
+const PRINTED_EXPIRY_MESSAGES = {
+  format: 'Write the expiry date as year-month-day, for example 2029-03-31.',
+  past: 'The expiry date on that document has already passed. An expired document cannot be verified: reject it, or ask for the renewed one.',
+  too_far:
+    'That expiry date is more than fifteen years away, which is nearly always a mistyped year. Check it against the document.',
+  not_applicable: 'This kind of credential does not expire, so there is no expiry date to record.',
+  only_when_approving: 'An expiry date is recorded when a credential is approved, and at no other time.',
+} as const;
+
 export const CredentialErrors = {
   credentialTypeNotFound: () =>
     new CredentialError('credential_type_not_found', 'Choose a valid credential type.', 422),
@@ -40,6 +49,9 @@ export const CredentialErrors = {
 
   submissionNotFound: () =>
     new CredentialError('submission_not_found', 'That credential submission does not exist.', 404),
+
+  printedExpiryInvalid: (problem: 'format' | 'past' | 'too_far' | 'not_applicable' | 'only_when_approving') =>
+    new CredentialError('printed_expiry_invalid', PRINTED_EXPIRY_MESSAGES[problem], 422),
 
   alreadyReviewed: () =>
     new CredentialError('already_reviewed', 'That credential submission has already been reviewed.', 409),

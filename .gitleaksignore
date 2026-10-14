@@ -1,0 +1,4 @@
+# One finding, by fingerprint: a throwaway HMAC key in a unit test for the
+# password-setup token (src/modules/auth/domain/setup-token.test.ts). It is not
+# a credential and appears nowhere else in the repository.
+52353b65084b9a2efca8b3ec95653a45483e633b:src/modules/auth/domain/setup-token.test.ts:generic-api-key:8

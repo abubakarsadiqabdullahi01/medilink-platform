@@ -29,7 +29,8 @@ export default {
   			},
   			destructive: {
   				DEFAULT: 'hsl(var(--destructive))',
-  				foreground: 'hsl(var(--destructive-foreground))'
+  				foreground: 'hsl(var(--destructive-foreground))',
+  				text: 'hsl(var(--destructive-text))'
   			},
   			muted: {
   				DEFAULT: 'hsl(var(--muted))',
@@ -73,6 +74,14 @@ export default {
   				border: 'hsl(var(--sidebar-border))',
   				ring: 'hsl(var(--sidebar-ring))'
   			}
+  		},
+  		// Secondary text was 12px and content 14px, too small for the pilot's readers
+  		// (UXA-01). Content is now 16px, the floor the blueprint asks for, and secondary text
+  		// 14px, with nothing set below that. Everything else is sized in rem, so the larger-text
+  		// switch still scales from here.
+  		fontSize: {
+  			xs: ['0.875rem', { lineHeight: '1.3rem' }],
+  			sm: ['1rem', { lineHeight: '1.5rem' }]
   		},
   		borderRadius: {
   			lg: 'var(--radius)',

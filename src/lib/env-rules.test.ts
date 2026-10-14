@@ -6,8 +6,12 @@ const staging: DeploymentSettings = {
   APP_ENV: 'staging',
   APP_URL: 'https://staging.medilink.ng',
   SESSION_SECRET: 'a-freshly-generated-secret-of-plenty-of-length',
+  CLIENT_IP_HEADER: 'fly-client-ip',
   SMS_PROVIDER: 'termii',
+  SMS_API_KEY: 'a-gateway-key',
+  SMS_SENDER_ID: 'Medilink',
   PAYMENT_PROVIDER: 'none',
+  PAYOUT_ACCOUNT_KEY: 'a-freshly-generated-account-key-of-plenty-of-length',
 };
 
 /** Every provider counted as implemented, so these cases test the other rules. */
@@ -17,6 +21,14 @@ const problemsWith = (settings: DeploymentSettings, appEnvWasSet: boolean) =>
 describe('deploymentProblems', () => {
   it('passes a properly configured staging deploy', () => {
     expect(problemsWith(staging, true)).toEqual([]);
+  });
+
+  it('allows paying by hand in staging and production: it claims nothing it has not been told', () => {
+    // The console gateway reports money as moved that did not; the manual one moves
+    // nothing and waits for a person to say which transfer they made (BIL-05).
+    for (const appEnv of ['staging', 'production'] as const) {
+      expect(deploymentProblems({ ...staging, APP_ENV: appEnv, PAYMENT_PROVIDER: 'manual' }, true)).toEqual([]);
+    }
   });
 
   it('refuses a production process that never said where it is running', () => {
@@ -43,12 +55,46 @@ describe('deploymentProblems', () => {
     ['the example session secret', { SESSION_SECRET: 'change-me-32-chars-minimum-value-here' }, /published/],
     ["CI's session secret", { SESSION_SECRET: 'ci-session-secret-value-at-least-32-chars' }, /published/],
     ['a plain-http address', { APP_URL: 'http://staging.medilink.ng' }, /https/],
+    ['no key for bank account numbers', { PAYOUT_ACCOUNT_KEY: undefined }, /PAYOUT_ACCOUNT_KEY is not set/],
+    ['no word on which header carries the caller\'s address', { CLIENT_IP_HEADER: undefined }, /CLIENT_IP_HEADER is not set/],
+    [
+      'the account key the local process falls back to',
+      { PAYOUT_ACCOUNT_KEY: 'local-development-payout-account-key-not-a-secret' },
+      /PAYOUT_ACCOUNT_KEY is a value published/,
+    ],
+    [
+      "the integration suite's account key",
+      { PAYOUT_ACCOUNT_KEY: 'test-payout-account-key-at-least-32-characters-long' },
+      /PAYOUT_ACCOUNT_KEY is a value published/,
+    ],
   ] as const)('refuses %s outside local', (_label, change, message) => {
     for (const appEnv of ['staging', 'production'] as const) {
       const problems = problemsWith({ ...staging, APP_ENV: appEnv, ...change }, true);
       expect(problems).toHaveLength(1);
       expect(problems[0]).toMatch(message);
     }
+  });
+
+  it('refuses a real SMS provider that has no credentials, naming each missing one', () => {
+    for (const appEnv of ['staging', 'production'] as const) {
+      const termii = deploymentProblems({ ...staging, APP_ENV: appEnv, SMS_PROVIDER: 'termii', SMS_API_KEY: undefined, SMS_SENDER_ID: undefined }, true);
+      expect(termii).toHaveLength(2);
+      expect(termii.join(' ')).toMatch(/SMS_API_KEY/);
+      expect(termii.join(' ')).toMatch(/SMS_SENDER_ID/);
+
+      const talking = deploymentProblems({ ...staging, APP_ENV: appEnv, SMS_PROVIDER: 'africastalking', SMS_API_KEY: 'k', SMS_USERNAME: undefined }, true);
+      expect(talking).toHaveLength(1);
+      expect(talking[0]).toMatch(/SMS_USERNAME/);
+    }
+  });
+
+  it('accepts none as a deliberate answer about the address header', () => {
+    expect(deploymentProblems({ ...staging, CLIENT_IP_HEADER: 'none' }, true)).toEqual([]);
+  });
+
+  it('accepts a real SMS provider that has what it needs', () => {
+    expect(deploymentProblems({ ...staging, SMS_PROVIDER: 'termii', SMS_API_KEY: 'k', SMS_SENDER_ID: 'Medilink' }, true)).toEqual([]);
+    expect(deploymentProblems({ ...staging, SMS_PROVIDER: 'africastalking', SMS_API_KEY: 'k', SMS_USERNAME: 'medilink' }, true)).toEqual([]);
   });
 
   it('lists every problem at once, not one per failed deploy', () => {
@@ -58,19 +104,21 @@ describe('deploymentProblems', () => {
         SMS_PROVIDER: 'console',
         PAYMENT_PROVIDER: 'console',
         APP_URL: 'http://staging.medilink.ng',
+        PAYOUT_ACCOUNT_KEY: undefined,
+        CLIENT_IP_HEADER: undefined,
       },
       true,
     );
-    expect(problems).toHaveLength(3);
+    expect(problems).toHaveLength(5);
   });
 });
 
 describe('an SMS provider with no working adapter (NOT-06)', () => {
-  it('is the only provider the product can send with today: the console one', () => {
-    expect(IMPLEMENTED_SMS_PROVIDERS).toEqual(['console']);
+  it('names every gateway the product can send with today', () => {
+    expect(IMPLEMENTED_SMS_PROVIDERS).toEqual(['console', 'termii', 'africastalking']);
   });
 
-  it.each(['termii', 'africastalking'])('refuses %s, which is accepted by the schema but only throws', (provider) => {
+  it.each(['infobip', 'twilio'])('refuses %s, which has no adapter behind it', (provider) => {
     for (const appEnv of ['staging', 'production'] as const) {
       const problems = deploymentProblems({ ...staging, APP_ENV: appEnv, SMS_PROVIDER: provider }, true);
       expect(problems).toHaveLength(1);
@@ -79,11 +127,11 @@ describe('an SMS provider with no working adapter (NOT-06)', () => {
   });
 
   it('refuses it on a laptop too, where the console adapter is the only one that works', () => {
-    const local = { ...staging, APP_ENV: 'local' as const, APP_URL: 'http://localhost:3000', SMS_PROVIDER: 'termii' };
+    const local = { ...staging, APP_ENV: 'local' as const, APP_URL: 'http://localhost:3000', SMS_PROVIDER: 'infobip' };
     expect(deploymentProblems(local, true)).toHaveLength(1);
   });
 
   it('accepts a provider once it is named as implemented', () => {
-    expect(deploymentProblems(staging, true, ['termii'])).toEqual([]);
+    expect(deploymentProblems({ ...staging, SMS_PROVIDER: 'infobip' }, true, ['infobip'])).toEqual([]);
   });
 });

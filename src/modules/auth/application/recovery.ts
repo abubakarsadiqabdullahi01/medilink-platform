@@ -100,6 +100,21 @@ export async function confirmPasswordReset(input: {
 
     await tx.user.update({ where: { id: user.id }, data: { passwordHash } });
 
+    // Proving the phone with a code is a success in the throttle's eyes: the
+    // lockout counts consecutive failures, and this ends them. Without it the
+    // lock-out message tells a person to reset their password, they do, and
+    // they are still locked out for the rest of the fifteen minutes.
+    await tx.loginAttempt.create({
+      data: {
+        createdAt: now,
+        identifier: phone,
+        userId: user.id,
+        succeeded: true,
+        reason: 'password_reset',
+        ipAddress: input.ipAddress,
+      },
+    });
+
     await recordAudit(tx, {
       action: 'auth.password_reset',
       entityType: 'identity.users',

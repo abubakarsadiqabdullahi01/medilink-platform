@@ -4,6 +4,8 @@ import { recordAudit } from '@/lib/audit';
 import { publishEvent } from '@/lib/outbox';
 import { EVENTS } from '@/lib/events';
 import { HttpError } from '@/lib/http/errors';
+import { rateTermsFor } from '@/modules/rates-contracts/application/rate-card';
+import { assertAgreementsAccepted } from '@/modules/audit-compliance/application/consent';
 import {
   DEFAULT_INVITATION_HOURS,
   canTransitionAssignment,
@@ -139,7 +141,7 @@ export async function invitePractitioners(input: InviteParams): Promise<Invitati
   if (request.startsAt.getTime() <= now.getTime()) throw AssignmentErrors.shiftStarted();
   if (!(await getFacility(request.facilityId)).canPublish)
     throw AssignmentErrors.facilityNotActive();
-  const blockers = await bookingBlockersFor(input.userIds, request.professionalCategoryId, now);
+  const blockers = await bookingBlockersFor(input.userIds, request, now);
   const refused = input.userIds.filter(
     (userId) => (blockers.get(userId) ?? ['not_eligible']).length > 0,
   );
@@ -188,6 +190,8 @@ export async function invitePractitioners(input: InviteParams): Promise<Invitati
             expiresAt,
             respondedAt: null,
             declineReason: null,
+            // An acceptance of the earlier offer does not stand for this one.
+            termsAccepted: Prisma.DbNull,
             invitedBy: input.actorId,
             matchRunId: input.matchRunId ?? existing.matchRunId,
           },
@@ -208,7 +212,14 @@ export async function invitePractitioners(input: InviteParams): Promise<Invitati
           eventType: EVENTS.ShiftInvited,
           aggregateType: 'matching.invitations',
           aggregateId: reopened.id,
-          payload: { invitationId: reopened.id, userId, serviceRequestId: request.id },
+          payload: {
+            invitationId: reopened.id,
+            userId,
+            serviceRequestId: request.id,
+            // Tells one offer of the same invitation from the next: a reopened
+            // invitation is the same row, and the person has to be told again.
+            offeredAt: new Date().toISOString(),
+          },
         });
 
         created.push(toInvitationView(reopened));
@@ -241,7 +252,12 @@ export async function invitePractitioners(input: InviteParams): Promise<Invitati
         eventType: EVENTS.ShiftInvited,
         aggregateType: 'matching.invitations',
         aggregateId: invitation.id,
-        payload: { invitationId: invitation.id, userId, serviceRequestId: request.id },
+        payload: {
+          invitationId: invitation.id,
+          userId,
+          serviceRequestId: request.id,
+          offeredAt: new Date().toISOString(),
+        },
       });
 
       created.push(toInvitationView(invitation));
@@ -274,14 +290,47 @@ export async function respondToInvitation(input: RespondParams): Promise<Invitat
   // practitioner still eligible, in the profession and consenting. Otherwise a
   // lapsed licence is accepted onto the shift and discovered at confirmation —
   // or not at all.
+  let termsAccepted: Prisma.InputJsonValue | undefined;
   if (accepted) {
+    // The engagement terms and the privacy notice in force, accepted by this person.
+    await assertAgreementsAccepted(input.userId, 'PRACTITIONER');
+
     const request = await prisma.serviceRequest.findFirst({
       where: { id: invitation.serviceRequestId, deletedAt: null },
-      select: { status: true, startsAt: true, professionalCategoryId: true },
+      select: {
+        status: true,
+        startsAt: true,
+        endsAt: true,
+        professionalCategoryId: true,
+        cadreLevelId: true,
+        supervisionAvailable: true,
+        hourlyRateKobo: true,
+        cancellationTerms: true,
+        notes: true,
+        cadreLevel: { select: { name: true } },
+        facility: { select: { name: true, addressLine: true } },
+      },
     });
     if (!request || request.status !== 'PUBLISHED') throw AssignmentErrors.invitationClosed();
+
+    // What they were shown, copied at the moment they said yes. A dispute about
+    // a late cancellation turns on what was agreed, and the request's own
+    // columns say only what they say now.
+    termsAccepted = {
+      acceptedAt: now.toISOString(),
+      facilityName: request.facility.name,
+      addressLine: request.facility.addressLine,
+      startsAt: request.startsAt.toISOString(),
+      endsAt: request.endsAt.toISOString(),
+      hourlyRateKobo: request.hourlyRateKobo,
+      cancellationTerms: request.cancellationTerms,
+      notes: request.notes,
+      // What level the shift was for and whether anybody was supervising, as they were shown.
+      levelName: request.cadreLevel?.name ?? null,
+      supervisionAvailable: request.supervisionAvailable,
+    };
     if (request.startsAt.getTime() <= now.getTime()) throw AssignmentErrors.shiftStarted();
-    if ((await bookingBlockers(input.userId, request.professionalCategoryId, now)).length > 0) {
+    if ((await bookingBlockers(input.userId, request, now)).length > 0) {
       throw AssignmentErrors.cannotAccept();
     }
   }
@@ -293,6 +342,7 @@ export async function respondToInvitation(input: RespondParams): Promise<Invitat
         status: accepted ? 'ACCEPTED' : 'DECLINED',
         respondedAt: now,
         declineReason: accepted ? null : input.reason,
+        ...(termsAccepted ? { termsAccepted } : {}),
       },
     });
     if (applied.count !== 1) throw AssignmentErrors.invitationClosed();
@@ -334,6 +384,7 @@ export async function respondToInvitation(input: RespondParams): Promise<Invitat
           invitationId: updated.id,
           userId: input.userId,
           serviceRequestId: updated.serviceRequestId,
+          acceptedAt: new Date().toISOString(),
         },
       });
     }
@@ -491,6 +542,11 @@ export async function confirmAssignment(input: ConfirmParams): Promise<Assignmen
   });
   if (!known) throw AssignmentErrors.assignmentNotFound();
 
+  // The allowances in force for this shift's date, fixed on the booking. A
+  // published shift's terms cannot change, so reading them before the locks is safe.
+  // The facility and the practitioner are not: they are re-checked inside the locks.
+  const rateTerms = await rateTermsFor(known.facilityId, known.startsAt, new Date());
+
   return prisma.$transaction(async (tx: Tx) => {
     await lockRequest(tx, known.id);
     await lockPractitioner(tx, input.userId);
@@ -506,7 +562,7 @@ export async function confirmAssignment(input: ConfirmParams): Promise<Assignmen
     const checkedAt = new Date();
     const [facility, bookingBlockersNow] = await Promise.all([
       getFacility(request.facilityId, tx),
-      bookingBlockers(input.userId, request.professionalCategoryId, checkedAt, tx),
+      bookingBlockers(input.userId, request, checkedAt, tx),
     ]);
 
     // Capacity and conflicting assignments are read inside their request and
@@ -552,6 +608,9 @@ export async function confirmAssignment(input: ConfirmParams): Promise<Assignmen
         startsAt: request.startsAt,
         endsAt: request.endsAt,
         confirmedBy: input.actorId,
+        // Priced on what applied when this was booked, not on whatever applies
+        // when it is invoiced.
+        rateTerms: { ...rateTerms },
       },
     });
 
@@ -777,6 +836,29 @@ export async function getAssignment(assignmentId: string): Promise<AssignmentVie
 }
 
 /**
+ * What each of these bookings is priced on: the facility, when the shift starts,
+ * and the allowances fixed when it was booked.
+ *
+ * For `timesheets`, which shows a facility what a shift will be billed and may
+ * not read `matching.assignments` itself. One query for the whole page.
+ */
+export async function bookingTermsFor(
+  assignmentIds: string[],
+): Promise<Map<string, { facilityId: string; startsAt: Date; rateTerms: unknown }>> {
+  if (assignmentIds.length === 0) return new Map();
+  const rows = await prisma.assignment.findMany({
+    where: { id: { in: assignmentIds } },
+    select: { id: true, facilityId: true, startsAt: true, rateTerms: true },
+  });
+  return new Map(
+    rows.map((row) => [
+      row.id,
+      { facilityId: row.facilityId, startsAt: row.startsAt, rateTerms: row.rateTerms },
+    ]),
+  );
+}
+
+/**
  * Whether this facility has booked this person: a live, finished or no-show
  * assignment, but not one that was cancelled — a cancelled booking is a person
  * who never turned up on the ward.
@@ -972,6 +1054,15 @@ export interface InvitationQueueRow extends InvitationView {
   urgency: string;
   startsAt: Date;
   endsAt: Date;
+  /** What a dispute turns on, shown before the practitioner says yes. */
+  cancellationTerms: string;
+  notes: string | null;
+  addressLine: string;
+  headcount: number;
+  /** The level the shift is for, when its profession has levels (REQ-01). */
+  levelName: string | null;
+  /** Whether somebody is there to supervise. */
+  supervisionAvailable: boolean;
 }
 
 /**
@@ -1003,7 +1094,12 @@ export async function listInvitationsFor(userId: string): Promise<InvitationQueu
           urgency: true,
           startsAt: true,
           endsAt: true,
-          facility: { select: { name: true } },
+          cancellationTerms: true,
+          notes: true,
+          headcount: true,
+          supervisionAvailable: true,
+          cadreLevel: { select: { name: true } },
+          facility: { select: { name: true, addressLine: true } },
         },
       })
     : [];
@@ -1017,6 +1113,8 @@ export async function listInvitationsFor(userId: string): Promise<InvitationQueu
     return [
       {
         ...toInvitationView(row),
+        levelName: request.cadreLevel?.name ?? null,
+        supervisionAvailable: request.supervisionAvailable,
         facilityName: request.facility.name,
         professionalCategoryId: request.professionalCategoryId,
         specialtyId: request.specialtyId,
@@ -1025,6 +1123,10 @@ export async function listInvitationsFor(userId: string): Promise<InvitationQueu
         urgency: request.urgency,
         startsAt: request.startsAt,
         endsAt: request.endsAt,
+        cancellationTerms: request.cancellationTerms,
+        notes: request.notes,
+        addressLine: request.facility.addressLine,
+        headcount: request.headcount,
       },
     ];
   });

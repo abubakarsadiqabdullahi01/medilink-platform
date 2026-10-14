@@ -19,10 +19,20 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Textarea } from '@/components/ui/textarea';
 import { Combobox } from '@/components/app/combobox';
 import { StatusBadge } from '@/components/app/status-badge';
 import { EmptyState, PageHeader, QueueSkeleton } from '@/components/app/page-shell';
-import { formatDate, formatMinutes, formatNaira } from '@/components/app/format';
+import { useStepUp } from '@/components/app/step-up';
+import { formatDate, formatMinutes, formatNaira, parseNairaToKobo } from '@/components/app/format';
 
 interface FacilitySummary {
   id: string;
@@ -53,6 +63,10 @@ interface Invoice {
   grossKobo: number;
   platformFeeKobo: number;
   status: string;
+  /** What was recorded when it was marked paid. */
+  paymentReference: string | null;
+  paidOn: string | null;
+  payerName: string | null;
   lines: InvoiceLine[];
 }
 
@@ -102,6 +116,34 @@ export default function InvoicesPage() {
     void queryClient.invalidateQueries({ queryKey: ['tile'] });
   }
 
+  const stepUp = useStepUp('Issuing, and recording payment of, an invoice moves money.');
+
+  const [voiding, setVoiding] = useState<Invoice | null>(null);
+  const [voidReason, setVoidReason] = useState('');
+
+  // Recording a payment says which transfer it was, so it can be checked against
+  // the bank statement later (BIL-07). The amount is typed, not prefilled: typing
+  // it is the check that what the bank shows is what the invoice says.
+  const [paying, setPaying] = useState<Invoice | null>(null);
+  const [payment, setPayment] = useState({ reference: '', amount: '', paidOn: '', payer: '' });
+  const amountKobo = parseNairaToKobo(payment.amount);
+  const paymentReady =
+    payment.reference.trim().length >= 3 &&
+    payment.payer.trim().length >= 2 &&
+    amountKobo !== null &&
+    payment.paidOn !== '';
+
+  function startPayment(invoice: Invoice) {
+    setPaying(invoice);
+    setPayment({
+      reference: '',
+      amount: '',
+      // Today in Lagos, which is when somebody is recording a transfer they can see.
+      paidOn: new Date(Date.now() + 3600_000).toISOString().slice(0, 10),
+      payer: (facilities.data?.facilities ?? []).find((row) => row.id === invoice.facilityId)?.name ?? '',
+    });
+  }
+
   const generate = useMutation({
     mutationFn: () =>
       api.post('/api/v1/invoices', {
@@ -113,7 +155,10 @@ export default function InvoicesPage() {
       toast.success('Draft raised', { description: 'Check it, then issue it.' });
       refresh();
     },
-    onError: (error) => toast.error('Nothing to bill', { description: errorMessage(error) }),
+    onError: (error) => {
+      if (stepUp.handle(error, () => generate.mutate())) return;
+      toast.error('Nothing to bill', { description: errorMessage(error) });
+    },
   });
 
   const issue = useMutation({
@@ -123,23 +168,180 @@ export default function InvoicesPage() {
       toast.success('Issued');
       refresh();
     },
-    onError: (error) => toast.error('Could not issue it', { description: errorMessage(error) }),
+    onError: (error, invoice) => {
+      if (stepUp.handle(error, () => issue.mutate(invoice))) return;
+      toast.error('Could not issue it', { description: errorMessage(error) });
+    },
+  });
+
+  const voidIt = useMutation({
+    mutationFn: (invoice: Invoice) =>
+      api.post(`/api/v1/invoices/${invoice.id}/void`, {
+        facilityId: invoice.facilityId,
+        reason: voidReason.trim(),
+      }),
+    onSuccess: () => {
+      toast.success('Voided', {
+        description: 'What was credited for it is reversed, and its shifts can be invoiced again.',
+      });
+      setVoiding(null);
+      setVoidReason('');
+      refresh();
+    },
+    onError: (error, invoice) => {
+      if (stepUp.handle(error, () => voidIt.mutate(invoice))) return;
+      toast.error('Could not void it', { description: errorMessage(error) });
+    },
   });
 
   const pay = useMutation({
     mutationFn: (invoice: Invoice) =>
-      api.post(`/api/v1/invoices/${invoice.id}/pay`, { facilityId: invoice.facilityId }),
+      api.post(`/api/v1/invoices/${invoice.id}/pay`, {
+        facilityId: invoice.facilityId,
+        paymentReference: payment.reference.trim(),
+        amountKobo,
+        paidOn: payment.paidOn,
+        payerName: payment.payer.trim(),
+      }),
     onSuccess: () => {
       toast.success('Recorded as paid', {
         description: 'The ledger now shows the facility owing nothing on it.',
       });
+      setPaying(null);
       refresh();
     },
-    onError: (error) => toast.error('Could not record it', { description: errorMessage(error) }),
+    onError: (error, invoice) => {
+      if (stepUp.handle(error, () => pay.mutate(invoice))) return;
+      toast.error('Could not record it', { description: errorMessage(error) });
+    },
   });
 
   return (
     <>
+      {stepUp.dialog}
+      <Dialog
+        open={voiding !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setVoiding(null);
+            setVoidReason('');
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Void {voiding?.number}</DialogTitle>
+            <DialogDescription>
+              Cancels this draft and reverses what the ledger credited for it. Its shifts can then
+              be invoiced again. It cannot be undone, and an invoice that has been issued cannot
+              be voided here.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label htmlFor="void-reason">Why is it being voided?</Label>
+            <Textarea
+              id="void-reason"
+              value={voidReason}
+              maxLength={500}
+              onChange={(event) => setVoidReason(event.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              At least 10 characters. It is kept with your name.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setVoiding(null)}>
+              Keep it
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={voidReason.trim().length < 10}
+              loading={voidIt.isPending}
+              onClick={() => voiding && voidIt.mutate(voiding)}
+            >
+              Void invoice
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={paying !== null} onOpenChange={(open) => (open ? null : setPaying(null))}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Record payment of {paying?.number}</DialogTitle>
+            <DialogDescription>
+              There is no gateway to capture a payment, so this records a transfer you can see in
+              the bank. Enter what the statement shows; the invoice is {paying ? formatNaira(paying.grossKobo) : ''}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="pay-reference">Bank reference for the transfer</Label>
+              <Input
+                id="pay-reference"
+                value={payment.reference}
+                maxLength={100}
+                onChange={(event) => setPayment({ ...payment, reference: event.target.value })}
+              />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="pay-amount">Amount received (₦)</Label>
+                <Input
+                  id="pay-amount"
+                  inputMode="decimal"
+                  value={payment.amount}
+                  onChange={(event) => setPayment({ ...payment, amount: event.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="pay-date">Date it arrived</Label>
+                <Input
+                  id="pay-date"
+                  type="date"
+                  value={payment.paidOn}
+                  onChange={(event) => setPayment({ ...payment, paidOn: event.target.value })}
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="pay-payer">Paid by, as the statement names them</Label>
+              <Input
+                id="pay-payer"
+                value={payment.payer}
+                maxLength={120}
+                onChange={(event) => setPayment({ ...payment, payer: event.target.value })}
+              />
+            </div>
+            {payment.amount !== '' && amountKobo === null ? (
+              <p className="text-xs text-destructive-text">That is not an amount in naira.</p>
+            ) : null}
+            {paying && amountKobo !== null && amountKobo !== paying.grossKobo ? (
+              <Alert variant="warning">
+                <TriangleAlert />
+                <AlertDescription>
+                  That is not the invoice amount, {formatNaira(paying.grossKobo)}. Part payments and
+                  one transfer for several invoices cannot be recorded yet, and the system will
+                  refuse it.
+                </AlertDescription>
+              </Alert>
+            ) : null}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPaying(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="success"
+              disabled={!paymentReady}
+              loading={pay.isPending}
+              onClick={() => paying && pay.mutate(paying)}
+            >
+              <Wallet />
+              Record payment
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <PageHeader
         title="Invoices"
         description="Raised from shifts a facility has already approved, so nothing here can bill for hours they did not accept."
@@ -153,7 +355,7 @@ export default function InvoicesPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap items-end gap-3">
-          <div className="min-w-[18rem] space-y-1.5">
+          <div className="w-full space-y-1.5 sm:w-auto sm:min-w-[18rem]">
             <Label htmlFor="facility">Facility</Label>
             {/* Searchable: a plain dropdown is fine over four hospitals and
                 not over four hundred, and this list grows with the pilot. */}
@@ -281,6 +483,11 @@ export default function InvoicesPage() {
 
                   <div className="flex flex-wrap gap-2">
                     {invoice.status === 'DRAFT' ? (
+                      <Button variant="outline" onClick={() => setVoiding(invoice)}>
+                        Void it
+                      </Button>
+                    ) : null}
+                    {invoice.status === 'DRAFT' ? (
                       <Button
                         loading={issue.isPending && issue.variables?.id === invoice.id}
                         onClick={() => issue.mutate(invoice)}
@@ -292,8 +499,7 @@ export default function InvoicesPage() {
                     {invoice.status === 'ISSUED' ? (
                       <Button
                         variant="success"
-                        loading={pay.isPending && pay.variables?.id === invoice.id}
-                        onClick={() => pay.mutate(invoice)}
+                        onClick={() => startPayment(invoice)}
                       >
                         <Wallet />
                         Record payment
@@ -301,6 +507,13 @@ export default function InvoicesPage() {
                     ) : null}
                   </div>
                 </div>
+
+                {invoice.status === 'PAID' && invoice.paymentReference ? (
+                  <p className="text-xs text-muted-foreground">
+                    Paid on {formatDate(invoice.paidOn)} by {invoice.payerName}, bank reference{' '}
+                    <span className="font-mono">{invoice.paymentReference}</span>.
+                  </p>
+                ) : null}
 
                 {invoice.status === 'ISSUED' ? (
                   <Alert variant="info">

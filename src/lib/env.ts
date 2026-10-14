@@ -32,6 +32,11 @@ const schema = z.object({
 
   SMS_PROVIDER: z.enum(['console', 'termii', 'africastalking']).default('console'),
   SMS_API_KEY: z.string().optional(),
+  // The sender ID registered with the gateway (Termii requires one; Africa's Talking
+  // uses its shared one without), and Africa's Talking's account username ('sandbox'
+  // for its sandbox).
+  SMS_SENDER_ID: z.string().optional(),
+  SMS_USERNAME: z.string().optional(),
   // A file the console adapter also appends each message to, one JSON object
   // per line. The browser journeys read one-time codes from it; it means
   // nothing to any other adapter and is ignored by them.
@@ -41,9 +46,28 @@ const schema = z.object({
   // 'console' is the local stub, the same shape SMS_PROVIDER uses. It
   // refuses to run outside local, because a stub that reports money as paid
   // in staging is worse than no gateway at all.
-  PAYMENT_PROVIDER: z.enum(['console', 'paystack', 'remita', 'none']).default('none'),
+  //
+  // 'manual' is for a pilot with no gateway: releasing a payout hands it to
+  // finance, who make the bank transfer themselves and record its reference
+  // here, which is what completes it. It is allowed everywhere because it
+  // claims nothing it has not been told.
+  PAYMENT_PROVIDER: z.enum(['console', 'manual', 'paystack', 'remita', 'none']).default('none'),
   PAYSTACK_SECRET_KEY: z.string().optional(),
   PAYSTACK_WEBHOOK_SECRET: z.string().optional(),
+
+  // Seals the account numbers practitioners are paid into (BIL-06). Its own key,
+  // not the session secret: that one signs cookies and rotating it signs everybody
+  // out, and this one protects data that must stay readable. Required outside
+  // local (see env-rules.ts); a local process falls back to a fixed key that is
+  // not a secret. Changing it makes every stored number unreadable, so a practitioner
+  // is asked for theirs again rather than finance being shown a wrong one.
+  PAYOUT_ACCOUNT_KEY: z
+    .string()
+    .optional()
+    .transform((value) => (value === '' ? undefined : value))
+    .refine((value) => value === undefined || value.length >= 32, {
+      message: 'PAYOUT_ACCOUNT_KEY must be at least 32 characters.',
+    }),
 
   // Identity and professional-registration checks default to `none` — both
   // need a paid provider subscription this project does not have, and the
@@ -54,6 +78,19 @@ const schema = z.object({
 
   MDCN_VERIFICATION_PROVIDER: z.enum(['none', 'sandbox', 'live']).default('none'),
   MDCN_VERIFICATION_API_KEY: z.string().optional(),
+
+  // How a person reaches Medilink (UXW-03). Read by lib/support-contact.ts, which
+  // validates what it finds; declared here so the set is in one place.
+  SUPPORT_PHONE: z.string().optional(),
+  SUPPORT_WHATSAPP: z.string().optional(),
+  SUPPORT_EMAIL: z.string().optional(),
+  SUPPORT_HOURS: z.string().optional(),
+
+  // The one header the deployment's edge sets and overwrites with the caller's address
+  // (`fly-client-ip`, `cf-connecting-ip`, `x-real-ip`). When set it is the only header read for
+  // the address, so a caller cannot choose their own by writing X-Forwarded-For. Unset, the
+  // first X-Forwarded-For entry is used, which is right only behind an edge that replaces it.
+  CLIENT_IP_HEADER: z.string().trim().toLowerCase().optional(),
 
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 

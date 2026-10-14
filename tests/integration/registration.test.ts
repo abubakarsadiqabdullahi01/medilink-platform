@@ -37,8 +37,14 @@ async function signUp(accountType?: 'practitioner' | 'staff', consentToSharing?:
   sequence += 1;
   const phone = `0803999${String(1000 + sequence).slice(-4)}`;
   await startRegistration({ phone, fullName: 'Ngozi Okonkwo-Bello' });
-  await verifyRegistrationPhone({ phone, code: lastOtpCode() });
-  return setInitialPassword({ phone, password: PASSWORD, accountType, consentToSharing });
+  const { setupToken } = await verifyRegistrationPhone({ phone, code: lastOtpCode() });
+  return setInitialPassword({
+    phone,
+    password: PASSWORD,
+    setupToken: setupToken!,
+    accountType,
+    consentToSharing,
+  });
 }
 
 async function registeredEvents(userId: string) {
@@ -139,5 +145,72 @@ describe('consent to be shown to facilities', () => {
   it('is never recorded for a staff account', async () => {
     const { userId } = await signUp('staff', true);
     expect(await prisma.consentRecord.count({ where: { userId } })).toBe(0);
+  });
+});
+
+
+describe('claiming a number that verified and never set a password', () => {
+  /**
+   * An abandoned sign-up stays in this state for ever: the phone is verified
+   * and there is no password. Setting one used to need nothing but the phone
+   * number, so anybody who knew it could take the account and choose what it was.
+   */
+  async function verifiedWithNoPassword() {
+    sequence += 1;
+    const phone = `0803998${String(1000 + sequence).slice(-4)}`;
+    await startRegistration({ phone, fullName: 'Ngozi Okonkwo-Bello' });
+    const verified = await verifyRegistrationPhone({ phone, code: lastOtpCode() });
+    return { phone, verified };
+  }
+
+  it('is refused to somebody who only knows the number', async () => {
+    const { phone } = await verifiedWithNoPassword();
+
+    for (const setupToken of ['', 'guess', '9999999999.deadbeef']) {
+      await expect(
+        setInitialPassword({ phone, password: PASSWORD, setupToken, accountType: 'staff' }),
+      ).rejects.toMatchObject({ code: 'setup_token_invalid', status: 403 });
+    }
+    const user = await prisma.user.findUniqueOrThrow({ where: { phone: `+234${phone.slice(1)}` } });
+    expect(user.passwordHash).toBeNull();
+  });
+
+  it('is refused with a token that belongs to another account', async () => {
+    const mine = await verifiedWithNoPassword();
+    const theirs = await verifiedWithNoPassword();
+
+    await expect(
+      setInitialPassword({
+        phone: theirs.phone,
+        password: PASSWORD,
+        setupToken: mine.verified.setupToken!,
+      }),
+    ).rejects.toMatchObject({ code: 'setup_token_invalid' });
+  });
+
+  it('is refused once the token has run out', async () => {
+    const { phone, verified } = await verifiedWithNoPassword();
+
+    await expect(
+      setInitialPassword({
+        phone,
+        password: PASSWORD,
+        setupToken: verified.setupToken!,
+        now: new Date(Date.now() + 31 * 60 * 1000),
+      }),
+    ).rejects.toMatchObject({ code: 'setup_token_invalid' });
+  });
+
+  it('works for the person who verified the number, once', async () => {
+    const { phone, verified } = await verifiedWithNoPassword();
+
+    await expect(
+      setInitialPassword({ phone, password: PASSWORD, setupToken: verified.setupToken! }),
+    ).resolves.toMatchObject({ accountStatus: 'UNDER_REVIEW' });
+
+    // The token is still in date, and the account already has a password.
+    await expect(
+      setInitialPassword({ phone, password: PASSWORD, setupToken: verified.setupToken! }),
+    ).rejects.toMatchObject({ code: 'password_already_set' });
   });
 });

@@ -1,3 +1,5 @@
+import { instantToLagosLocal } from '@/lib/lagos-date';
+
 /**
  * Formatting, in one place, because a date shown two ways on two pages is a
  * date somebody misreads.
@@ -24,6 +26,27 @@ export function formatDate(value: string | Date | null | undefined): string {
     month: 'short',
     year: 'numeric',
   });
+}
+
+/**
+ * When a credential expires, in words, and whether the date is the document's.
+ *
+ * The date printed on the document is the one a practitioner recognises (CRE-04).
+ * A credential verified without one has only an estimate, worked out from the
+ * review date, and showing it as if it were printed would put a date in front of
+ * somebody that appears nowhere on what they uploaded.
+ */
+export function expiryOf(row: {
+  expiresAt: string | Date | null;
+  documentExpiresOn?: string | null;
+}): { date: string; fromDocument: boolean; text: string } | null {
+  if (row.documentExpiresOn) {
+    const date = formatDate(row.documentExpiresOn);
+    return { date, fromDocument: true, text: date };
+  }
+  if (!row.expiresAt) return null;
+  const date = formatDate(row.expiresAt);
+  return { date, fromDocument: false, text: `${date} (an estimate, no date was read from the document)` };
 }
 
 /** "3 hours ago", for a queue where age is the thing you are scanning for. */
@@ -61,6 +84,20 @@ export function formatAgo(value: string | Date | null | undefined): string {
 }
 
 /**
+ * What somebody typed as an amount in naira, as integer kobo, or null if it is
+ * not an amount. No floating point: "40,000.10" is 4,000,010 kobo and must not
+ * become 4,000,009.999999999. At most two decimal places, because a third is
+ * money that does not exist.
+ */
+export function parseNairaToKobo(text: string): number | null {
+  const cleaned = text.replace(/[₦,\s]/g, '');
+  const match = /^(\d+)(?:\.(\d{1,2}))?$/.exec(cleaned);
+  if (!match) return null;
+  const kobo = Number(match[1]) * 100 + Number((match[2] ?? '').padEnd(2, '0') || '0');
+  return Number.isSafeInteger(kobo) ? kobo : null;
+}
+
+/**
  * Integer kobo in, naira out. Rule 3: money is only ever computed in kobo,
  * and this is the single place it becomes something with a decimal point.
  */
@@ -82,15 +119,14 @@ export function formatMinutes(minutes: number | null | undefined): string {
 }
 
 /**
- * An instant as a `datetime-local` input wants it: `YYYY-MM-DDTHH:mm` in the
- * browser's own time, which for every user of this product is WAT.
+ * An instant as a `datetime-local` input wants it: `YYYY-MM-DDTHH:mm`, in Lagos
+ * time and not in whatever zone the device is set to. Read back with
+ * `lagosLocalToInstant`.
  */
 export function toLocalInput(value: string | Date | null | undefined): string {
   if (!value) return '';
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  return Number.isNaN(date.getTime()) ? '' : instantToLagosLocal(date);
 }
 
 /** A uuid nobody needs to read in full, but which has to be recognisable. */

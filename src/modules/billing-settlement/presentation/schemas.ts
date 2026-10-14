@@ -22,9 +22,40 @@ export const listInvoicesSchema = z.object({
 export const invoiceActionSchema = z.object({ id: uuid, facilityId: uuid });
 export type InvoiceActionInput = z.infer<typeof invoiceActionSchema>;
 
+/**
+ * A payment is recorded with what makes it checkable: the bank's reference, how
+ * much arrived, when and from whom. Whether the amount is the invoice's and the
+ * date is plausible is the application's to say, so it can say why.
+ */
+export const recordPaymentSchema = invoiceActionSchema.extend({
+  paymentReference: z.string().trim().min(1).max(200),
+  amountKobo: z.coerce.number().int().positive(),
+  paidOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Write the date as year-month-day.'),
+  payerName: z.string().trim().min(1).max(300),
+});
+export type RecordPaymentInput = z.infer<typeof recordPaymentSchema>;
+
+export const voidInvoiceSchema = invoiceActionSchema.extend({
+  reason: z.string().trim().min(10).max(500),
+});
+
 export const preparePayoutSchema = z.object({ practitionerId: uuid });
 
 export const payoutIdSchema = z.object({ id: uuid });
+
+/**
+ * A transfer made by hand, as finance record it. What counts as a plausible
+ * reference and date is the application's to say, so it can say why.
+ */
+export const settlePayoutSchema = payoutIdSchema.extend({
+  bankReference: z.string().trim().min(1).max(200),
+  paidOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Write the date as year-month-day.'),
+});
+
+/** Failing or cancelling a payout says why, once, and the reason is kept with it. */
+export const payoutReasonSchema = payoutIdSchema.extend({
+  reason: z.string().trim().min(1).max(500),
+});
 
 export const myPayoutsSchema = z.object({
   scopeType: z.enum(['SELF', 'PLATFORM']),

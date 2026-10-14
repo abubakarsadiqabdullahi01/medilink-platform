@@ -31,12 +31,18 @@ import {
  * the attendance record remembers its own pre-dispute state instead of this
  * table doing it.
  *
- * **Nothing here publishes an event on resolution, and that is deliberate.**
- * Upholding sends the figures back to `SUBMITTED`, so the ordinary approval
- * path publishes `TimesheetApproved` again when they are decided; dismissing
- * restores the record unchanged, so downstream has nothing to react to. An
- * event announcing a resolution would carry no information the existing ones
- * do not, and Section 8.2's vocabulary is not mine to extend for that.
+ * **Everybody concerned is told what happens to a case.** Opening, being
+ * picked up, being decided and being withdrawn each publish an event in the
+ * same transaction as the change, and the notification handlers turn them into
+ * texts. The admin screen has long said that marking a case under review "tells
+ * the other side somebody is looking" and that both sides read the outcome; with
+ * only DisputeOpened published and nothing consuming it, neither was true.
+ *
+ * Resolution publishes the *outcome* and never the officer's notes: a text
+ * message is not where a finding belongs, and the parties read the reasons in
+ * the app. Upholding still sends the figures back to `SUBMITTED`, so the
+ * ordinary approval path publishes `TimesheetApproved` again when they are
+ * decided; that is a separate fact and this event does not stand in for it.
  */
 
 export const DisputeErrors = {
@@ -158,6 +164,20 @@ export async function sideOnCase(
   return null;
 }
 
+/** What every dispute event carries: enough to find the people, nothing of the argument. */
+function eventPayload(
+  row: { id: string; assignmentId: string; raisedParty: string },
+  assignment: { userId: string; facilityId: string },
+) {
+  return {
+    disputeId: row.id,
+    assignmentId: row.assignmentId,
+    userId: assignment.userId,
+    facilityId: assignment.facilityId,
+    raisedParty: row.raisedParty,
+  };
+}
+
 /** Open, or being worked. Both are live cases as far as every rule here goes. */
 const LIVE: DisputeStatusValue[] = ['OPEN', 'UNDER_REVIEW'];
 
@@ -196,7 +216,8 @@ export async function raiseDispute(input: RaiseDisputeParams): Promise<DisputeVi
   // told "cannot be opened: not_a_party, not_yet_decided, …" - a 409 that
   // confirmed the shift exists and listed what state its attendance was in. The
   // evidence routes already answer an outsider as if the id did not exist; this
-  // is the same rule for the door in front of them (AUT-10).
+  // is the same rule for the door in front of them (AUT-10). An adjudicator is an
+  // outsider here too: they weigh a case, they do not open one, and can read it.
   if (party === null) throw DisputeErrors.assignmentNotFound();
 
   const attendance = await getAttendance(input.assignmentId);
@@ -306,6 +327,13 @@ export async function beginReview(input: {
       after: { status: next.status },
     });
 
+    await publishEvent(tx, {
+      eventType: EVENTS.DisputeUnderReview,
+      aggregateType: 'disputes.disputes',
+      aggregateId: row.id,
+      payload: eventPayload(next, assignment),
+    });
+
     return next;
   });
 
@@ -370,6 +398,13 @@ export async function resolveDispute(input: ResolveDisputeParams): Promise<Dispu
       after: { status: next.status, outcome: next.outcome },
     });
 
+    await publishEvent(tx, {
+      eventType: EVENTS.DisputeResolved,
+      aggregateType: 'disputes.disputes',
+      aggregateId: row.id,
+      payload: { ...eventPayload(next, assignment), outcome },
+    });
+
     return next;
   });
 
@@ -398,9 +433,8 @@ export async function withdrawDispute(input: {
 }): Promise<DisputeView> {
   const { row, assignment } = await loadCase(input.disputeId);
 
-  // Somebody with no part in the case is told it does not exist, not that it
-  // "cannot be withdrawn": a party who did not raise it still gets the specific
-  // answer below, an outsider gets nothing to learn from (AUT-10).
+  // Somebody with no part in the case gets "not found", not a refusal that confirms
+  // it exists. Only then is the question whether they are the one who raised it.
   if ((await sideOnCase(input.actorId, assignment)) === null) throw DisputeErrors.notFound();
 
   const blockers = withdrawBlockers({
@@ -431,6 +465,13 @@ export async function withdrawDispute(input: {
       after: { status: next.status },
     });
 
+    await publishEvent(tx, {
+      eventType: EVENTS.DisputeWithdrawn,
+      aggregateType: 'disputes.disputes',
+      aggregateId: row.id,
+      payload: eventPayload(next, assignment),
+    });
+
     return next;
   });
 
@@ -447,6 +488,22 @@ export async function withdrawDispute(input: {
 export async function getDispute(disputeId: string): Promise<DisputeView> {
   const { row, assignment } = await loadCase(disputeId);
   return toView(row, assignment.userId, assignment.facilityId);
+}
+
+/**
+ * Which of these shifts have a case open or being worked on them.
+ *
+ * For billing, which holds back what was credited for a shift in dispute and
+ * may not read this module's tables. A resolved or withdrawn case is not
+ * live: the hold lifts the moment the case ends.
+ */
+export async function assignmentsUnderDispute(assignmentIds: string[]): Promise<Set<string>> {
+  if (assignmentIds.length === 0) return new Set();
+  const rows = await prisma.dispute.findMany({
+    where: { assignmentId: { in: assignmentIds }, status: { in: LIVE } },
+    select: { assignmentId: true },
+  });
+  return new Set(rows.map((row) => row.assignmentId));
 }
 
 /**
@@ -558,4 +615,59 @@ export async function listDisputes(
     disputes,
     nextCursor: rows.length > limit ? (page[page.length - 1]?.id ?? null) : null,
   };
+}
+
+
+/** A case as the facility it is over sees it in a list. */
+export interface FacilityDisputeRow extends DisputeView {
+  practitionerName: string;
+  shiftStartsAt: Date;
+  /** Whether it was the facility's side that raised it. */
+  raisedByFacility: boolean;
+}
+
+/**
+ * Every case over this facility's own shifts, newest first, every status: a case
+ * decided last month is still something the facility answers for.
+ *
+ * The facility is the shift's, not the caller's word: the filter is the
+ * assignment's own facility. The route has already proved the caller holds
+ * `dispute.manage` over it.
+ */
+export async function listDisputesForFacility(
+  facilityId: string,
+  status?: DisputeStatusValue,
+): Promise<FacilityDisputeRow[]> {
+  const rows = await prisma.dispute.findMany({
+    where: { assignment: { facilityId }, ...(status ? { status } : {}) },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    take: 200,
+    include: {
+      assignment: {
+        select: { userId: true, facilityId: true, startsAt: true, user: { select: { fullName: true } } },
+      },
+    },
+  });
+
+  return rows.map((row) => ({
+    ...toView(row, row.assignment.userId, row.assignment.facilityId),
+    practitionerName: row.assignment.user.fullName,
+    shiftStartsAt: row.assignment.startsAt,
+    raisedByFacility: row.raisedParty === 'FACILITY',
+  }));
+}
+
+/**
+ * One case, for somebody who is a party to it or the adjudicator, and for nobody
+ * else: a stranger gets "not found", the answer an id that does not exist would
+ * get. Also says which side the viewer is on.
+ */
+export async function getCaseForParty(
+  disputeId: string,
+  viewerId: string,
+): Promise<{ dispute: DisputeView; side: CaseSide }> {
+  const { row, assignment } = await loadCase(disputeId);
+  const side = await sideOnCase(viewerId, assignment);
+  if (side === null) throw DisputeErrors.notFound();
+  return { dispute: toView(row, assignment.userId, assignment.facilityId), side };
 }

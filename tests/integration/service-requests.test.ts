@@ -39,8 +39,18 @@ interface ApiResult {
   body: Record<string, unknown>;
 }
 
-const NEXT_WEEK = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+// 20:00 WAT next week, not "now plus seven days": the type of a shift is worked out from
+// its hours (UXF-06), so a test that books a night shift has to book it at night however
+// late in the day the suite happens to run.
+const NEXT_WEEK = (() => {
+  const start = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  start.setUTCHours(19, 0, 0, 0);
+  return start;
+})();
 const NEXT_WEEK_END = new Date(NEXT_WEEK.getTime() + 8 * 60 * 60 * 1000);
+/** 08:00 to 16:00 WAT on the same day. */
+const DAY_START = new Date(NEXT_WEEK.getTime() - 12 * 60 * 60 * 1000);
+const DAY_END = new Date(DAY_START.getTime() + 8 * 60 * 60 * 1000);
 
 /** The seeded floor for a doctor's night shift is 650,000 kobo an hour. */
 const NIGHT_FLOOR_KOBO = 650_000;
@@ -158,12 +168,13 @@ async function setUp(options: { verified?: boolean } = {}): Promise<Fixture> {
 }
 
 function requestBody(fixture: Fixture, overrides: Record<string, unknown> = {}) {
+  const day = overrides.shiftType === 'DAY';
   return {
     facilityId: fixture.facilityId,
     professionalCategoryId: fixture.categoryId,
     shiftType: 'NIGHT',
-    startsAt: NEXT_WEEK.toISOString(),
-    endsAt: NEXT_WEEK_END.toISOString(),
+    startsAt: (day ? DAY_START : NEXT_WEEK).toISOString(),
+    endsAt: (day ? DAY_END : NEXT_WEEK_END).toISOString(),
     headcount: 2,
     hourlyRateKobo: NIGHT_FLOOR_KOBO,
     urgency: 'ROUTINE',
@@ -225,6 +236,37 @@ describe('step 6.1 — the rate floor', () => {
     expect(String((created.body.error as { message: string }).message)).toContain(
       `₦${(NIGHT_FLOOR_KOBO / 100).toLocaleString('en-NG')}`,
     );
+  });
+
+  it('works out the type from the hours when it is left out, and holds the shift to that floor', async () => {
+    const fixture = await setUp();
+    const { shiftType: _omitted, ...body } = requestBody(fixture);
+    void _omitted;
+
+    const night = await callCreate({ ...body, hourlyRateKobo: NIGHT_FLOOR_KOBO - 1 });
+    const fine = await callCreate(body);
+
+    expect(night.status).toBe(422);
+    expect(fine.status).toBe(201);
+    expect(fine.body.shiftType).toBe('NIGHT');
+  });
+
+  it('refuses a night shift labelled a day shift, which would hold it to the lower floor', async () => {
+    const fixture = await setUp();
+
+    const mislabelled = await callCreate(requestBody(fixture, { shiftType: 'DAY', startsAt: NEXT_WEEK.toISOString(), endsAt: NEXT_WEEK_END.toISOString(), hourlyRateKobo: 500_000 }));
+
+    expect(mislabelled.status).toBe(422);
+    expect(JSON.stringify(mislabelled.body)).toContain('night shift');
+    expect(await prisma.serviceRequest.count()).toBe(0);
+  });
+
+  it('refuses a day shift labelled a night shift too', async () => {
+    const fixture = await setUp();
+
+    const mislabelled = await callCreate(requestBody(fixture, { shiftType: 'NIGHT', startsAt: DAY_START.toISOString(), endsAt: DAY_END.toISOString() }));
+
+    expect(mislabelled.status).toBe(422);
   });
 
   it('applies the day floor to a day shift', async () => {
@@ -302,6 +344,10 @@ describe('the Stage 5.10 gate condition, finally testable', () => {
     const past = new Date(Date.now() - 60 * 60 * 1000);
     const created = await callCreate(
       requestBody(fixture, {
+        // Left to be worked out: a shift an hour ago is a day or a night one depending on
+        // when the suite runs, and the floor it is held to follows.
+        shiftType: undefined,
+        hourlyRateKobo: 5_000_000,
         startsAt: past.toISOString(),
         endsAt: new Date(past.getTime() + 60 * 60 * 1000).toISOString(),
       }),

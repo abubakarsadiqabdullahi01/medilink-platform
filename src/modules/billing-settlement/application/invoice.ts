@@ -4,12 +4,16 @@ import { recordAudit } from '@/lib/audit';
 import { publishEvent } from '@/lib/outbox';
 import { EVENTS } from '@/lib/events';
 import { HttpError } from '@/lib/http/errors';
-import { activeRateCard } from '@/modules/rates-contracts/application/rate-card';
-import { DEFAULT_RATE_CARD, priceTimesheet } from '@/modules/rates-contracts/domain/pricing';
+import { lagosDate } from '@/lib/lagos-date';
+import { lockPayouts } from './payout';
+import { paymentProblem, type PaymentProblem } from '../domain/payment';
+import { termsOfBooking } from '@/modules/rates-contracts/application/rate-card';
+import { priceStoredTimesheet } from '@/modules/rates-contracts/domain/pricing';
 import {
   PLATFORM_FEE_UNSET_BP,
   entriesForApprovedWork,
   entriesForPayment,
+  entriesForVoidedWork,
   platformFeeKobo,
   type LedgerEntry,
 } from '../domain/ledger';
@@ -37,7 +41,38 @@ export const InvoiceErrors = {
     ),
   wrongStatus: (from: string, to: string) =>
     new HttpError('invoice_wrong_status', `A ${from} invoice cannot become ${to}.`, 409),
+  payment: (problem: PaymentProblem, grossKobo: number) =>
+    new HttpError(...paymentError(problem, grossKobo)),
+  paidOut: () =>
+    new HttpError(
+      'invoice_paid_out',
+      'A payout has been prepared or made for a practitioner on this invoice since it was raised, so it cannot be voided. Resolve the payout first.',
+      409,
+    ),
 };
+
+const naira = (kobo: number) => `₦${(kobo / 100).toLocaleString('en-NG', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+
+function paymentError(problem: PaymentProblem, grossKobo: number): [string, string, number] {
+  switch (problem) {
+    case 'reference':
+      return ['payment_reference_required', 'Enter the bank\'s reference for the transfer (3 to 100 characters).', 422];
+    case 'payer':
+      return ['payment_payer_required', 'Enter who paid, as the bank statement names them.', 422];
+    case 'amount':
+      return [
+        'payment_amount_mismatch',
+        `The amount must be what the invoice comes to, ${naira(grossKobo)}. Part payments, over-payments and one transfer covering several invoices are not supported yet; do not record them as paid in full.`,
+        422,
+      ];
+    case 'date':
+      return ['payment_date_invalid', 'Enter the date the money arrived, as year-month-day.', 422];
+    case 'future':
+      return ['payment_date_invalid', 'The date the money arrived cannot be in the future.', 422];
+    case 'before_issue':
+      return ['payment_date_invalid', 'The money cannot have arrived before the invoice was issued.', 422];
+  }
+}
 
 /** Read from configuration, so 3.1 is a deployment decision rather than a deploy. */
 function platformFeeBp(): number {
@@ -70,15 +105,22 @@ export interface InvoiceView {
   status: string;
   issuedAt: Date | null;
   paidAt: Date | null;
+  /** The bank's reference for the transfer, as recorded when it was marked paid. */
+  paymentReference: string | null;
+  paymentAmountKobo: number | null;
+  /** The date the money arrived, `YYYY-MM-DD`. */
+  paidOn: string | null;
+  payerName: string | null;
   lines: InvoiceLineView[];
 }
 
-interface InvoiceRow extends Omit<InvoiceView, 'lines'> {
+interface InvoiceRow extends Omit<InvoiceView, 'lines' | 'paidOn'> {
+  paidOn: Date | null;
   lines: InvoiceLineView[];
 }
 
 function toView(row: InvoiceRow): InvoiceView {
-  return { ...row, lines: row.lines };
+  return { ...row, paidOn: row.paidOn?.toISOString().slice(0, 10) ?? null, lines: row.lines };
 }
 
 /** Writes one balanced transaction. `entriesFor*` has already refused it if it does not balance. */
@@ -102,34 +144,9 @@ async function postTransaction(
   return transactionId;
 }
 
-/**
- * The exclusive split, from the bands the timesheet recorded.
- *
- * `nightMinutes` and `holidayMinutes` overlap on the timesheet by design — a
- * reader wants to see both — so pricing needs the buckets that do not. They
- * used to be rebuilt here by subtracting one overlapping figure from the other,
- * which loses minutes unless the holiday happens to sit wholly inside the
- * night or the night wholly inside the holiday: a shift 18:00-02:00 with the
- * second day a holiday was billed 120 minutes short, and with the first day a
- * holiday, 120 night minutes short. The timesheet computed the exact split
- * when it was worked out and now keeps it, so this reads it back.
- *
- * Holiday takes precedence over night, so `holidayMinutes` is the holiday
- * bucket as it stands; ordinary is what is left.
- */
-function exclusiveBands(sheet: {
-  billableMinutes: number;
-  nightOnlyMinutes: number;
-  holidayMinutes: number;
-}) {
-  return {
-    ordinaryMinutes: Math.max(
-      0,
-      sheet.billableMinutes - sheet.nightOnlyMinutes - sheet.holidayMinutes,
-    ),
-    nightMinutes: sheet.nightOnlyMinutes,
-    holidayMinutes: sheet.holidayMinutes,
-  };
+/** One line as it is written, before the invoice that holds it exists. */
+interface InvoiceLineData extends InvoiceLineView {
+  rateCardId: string | null;
 }
 
 export interface GenerateInvoiceParams {
@@ -162,7 +179,8 @@ export async function generateInvoice(input: GenerateInvoiceParams): Promise<Inv
   const alreadyBilled = new Set(
     (
       await prisma.invoiceLine.findMany({
-        where: { assignmentId: { in: approved.map((row) => row.assignmentId) } },
+        // A voided line no longer counts: its shift can be invoiced again.
+        where: { assignmentId: { in: approved.map((row) => row.assignmentId) }, voidedAt: null },
         select: { assignmentId: true },
       })
     ).map((row) => row.assignmentId),
@@ -173,25 +191,24 @@ export async function generateInvoice(input: GenerateInvoiceParams): Promise<Inv
   );
   if (billable.length === 0) throw InvoiceErrors.nothingToBill();
 
-  const card = await activeRateCard(input.facilityId);
-  const rates = card ?? DEFAULT_RATE_CARD;
-
-  const lines = billable.map((row) => {
+  // Each shift is priced on the terms fixed when it was booked. A booking made
+  // before terms were kept has none, and is priced on the card in force on the
+  // shift's date - which is what the card's own dates meant. This used to be one
+  // card, "the active one", for every shift on the invoice, so a facility could
+  // replace its card between booking and billing and change what was agreed.
+  const lines: InvoiceLineData[] = [];
+  for (const row of billable) {
     const sheet = row.timesheet!;
-    const bands = exclusiveBands(sheet);
-    const priced = priceTimesheet(
-      {
-        ...bands,
-        overtimeMinutes: sheet.overtimeMinutes,
-        onCallMinutes: sheet.onCallMinutes,
-        hourlyRateKobo: sheet.hourlyRateKobo,
-      },
-      rates,
-    );
+    const terms = await termsOfBooking({
+      facilityId: input.facilityId,
+      startsAt: row.assignment.startsAt,
+      rateTerms: row.assignment.rateTerms,
+    });
+    const { bands, priced } = priceStoredTimesheet(sheet, terms);
 
-    return {
+    lines.push({
       assignmentId: row.assignmentId,
-      rateCardId: card?.id ?? null,
+      rateCardId: terms.rateCardId,
       practitionerId: row.assignment.userId,
       hourlyRateKobo: sheet.hourlyRateKobo,
       ...bands,
@@ -200,8 +217,8 @@ export async function generateInvoice(input: GenerateInvoiceParams): Promise<Inv
       baseKobo: priced.baseKobo,
       premiumKobo: priced.premiumKobo,
       amountKobo: priced.totalKobo,
-    };
-  });
+    });
+  }
 
   const grossKobo = lines.reduce((total, line) => total + line.amountKobo, 0);
   const feeKobo = platformFeeKobo(grossKobo, platformFeeBp());
@@ -264,6 +281,100 @@ export async function generateInvoice(input: GenerateInvoiceParams): Promise<Inv
   });
 }
 
+/**
+ * Cancels a draft invoice and reverses what the ledger credited for it (BIL-08).
+ *
+ * Only a draft: an issued invoice has been put to the facility as a bill, and
+ * taking one back is a credit note, which needs the commercial decisions the
+ * money model has not yet made. Nothing is deleted. The original entries stay
+ * and a reversing transaction cancels each one, the lines are marked void so
+ * their shifts can be invoiced again, and the reason is on the audit row.
+ *
+ * Refused once a payout has been prepared or made for any practitioner on it
+ * since it was raised, because the practitioner was credited the moment the
+ * draft was raised and that credit may already have been paid out; reversing it
+ * would take it from a balance that no longer holds it.
+ */
+export async function voidInvoice(input: {
+  invoiceId: string;
+  actorId: string;
+  reason: string;
+}): Promise<InvoiceView> {
+  return prisma.$transaction(async (tx: Tx) => {
+    // Locked first, so a void and an issue pressed together take turns and the
+    // loser sees what the winner did.
+    await tx.$executeRaw`SELECT 1 FROM billing.invoices WHERE id = ${input.invoiceId}::uuid FOR UPDATE`;
+    const existing = await tx.invoice.findUnique({ where: { id: input.invoiceId } });
+    if (!existing) throw InvoiceErrors.notFound();
+    if (existing.status !== 'DRAFT') throw InvoiceErrors.wrongStatus(existing.status, 'VOID');
+
+    const lines = await tx.invoiceLine.findMany({
+      where: { invoiceId: existing.id, voidedAt: null },
+      orderBy: { id: 'asc' },
+    });
+
+    // Payouts are decided under this lock, in a fixed order so two voids over the
+    // same people cannot wait on each other.
+    const practitioners = [...new Set(lines.map((line) => line.practitionerId))].sort();
+    for (const practitionerId of practitioners) await lockPayouts(tx, practitionerId);
+
+    const moved = await tx.payout.count({
+      where: {
+        practitionerId: { in: practitioners },
+        status: { in: ['PREPARED', 'RELEASED', 'SETTLED'] },
+        createdAt: { gte: existing.createdAt },
+      },
+    });
+    if (moved > 0) throw InvoiceErrors.paidOut();
+
+    const applied = await tx.invoice.updateMany({
+      where: { id: existing.id, status: 'DRAFT' },
+      data: { status: 'VOID' },
+    });
+    if (applied.count !== 1) throw InvoiceErrors.wrongStatus(existing.status, 'VOID');
+    await tx.invoiceLine.updateMany({
+      where: { invoiceId: existing.id, voidedAt: null },
+      data: { voidedAt: new Date() },
+    });
+
+    // The same apportionment the credit used, so each reversal is its credit.
+    for (const line of lines) {
+      const share =
+        existing.grossKobo === 0
+          ? 0
+          : Math.floor((existing.platformFeeKobo * line.amountKobo) / existing.grossKobo);
+      await postTransaction(
+        tx,
+        entriesForVoidedWork({
+          facilityId: existing.facilityId,
+          practitionerId: line.practitionerId,
+          grossKobo: line.amountKobo,
+          platformFeeKobo: share,
+        }),
+        { invoiceId: existing.id },
+      );
+    }
+
+    await recordAudit(tx, {
+      action: 'invoice.voided',
+      entityType: 'billing.invoices',
+      entityId: existing.id,
+      actorId: input.actorId,
+      scopeType: 'FACILITY',
+      scopeId: existing.facilityId,
+      reason: input.reason,
+      before: { status: existing.status, grossKobo: existing.grossKobo },
+      after: { status: 'VOID' },
+    });
+
+    const invoice = await tx.invoice.findUniqueOrThrow({
+      where: { id: existing.id },
+      include: { lines: true },
+    });
+    return toView(invoice);
+  });
+}
+
 /** A draft becomes an invoice somebody can be asked to pay. */
 export async function issueInvoice(input: {
   invoiceId: string;
@@ -296,6 +407,20 @@ export async function issueInvoice(input: {
       after: { status: invoice.status },
     });
 
+    // The facility is told when the bill is ready, which is now and not when the
+    // draft was raised: a draft is still being checked.
+    await publishEvent(tx, {
+      eventType: EVENTS.InvoiceIssued,
+      aggregateType: 'billing.invoices',
+      aggregateId: invoice.id,
+      payload: {
+        invoiceId: invoice.id,
+        facilityId: invoice.facilityId,
+        number: invoice.number,
+        grossKobo: invoice.grossKobo,
+      },
+    });
+
     return toView(invoice);
   });
 }
@@ -311,15 +436,46 @@ export async function issueInvoice(input: {
 export async function recordPayment(input: {
   invoiceId: string;
   actorId: string;
+  /** The bank's own reference for the transfer. */
+  reference: string;
+  /** What arrived. Must equal the invoice: there is no model for part payments. */
+  amountKobo: number;
+  /** The date the money arrived, `YYYY-MM-DD`. */
+  paidOn: string;
+  /** Who paid, as the bank statement names them. */
+  payerName: string;
+  now?: Date;
 }): Promise<InvoiceView> {
   const existing = await prisma.invoice.findUnique({ where: { id: input.invoiceId } });
   if (!existing) throw InvoiceErrors.notFound();
   if (existing.status !== 'ISSUED') throw InvoiceErrors.wrongStatus(existing.status, 'PAID');
 
+  // Checked before anything is written, and against what the invoice says rather
+  // than what the screen showed: the amount the person types is the check.
+  const now = input.now ?? new Date();
+  const problem = paymentProblem(
+    {
+      reference: input.reference,
+      amountKobo: input.amountKobo,
+      paidOn: input.paidOn,
+      payerName: input.payerName,
+    },
+    { grossKobo: existing.grossKobo, issuedOn: existing.issuedAt ? lagosDate(existing.issuedAt) : null },
+    now,
+  );
+  if (problem) throw InvoiceErrors.payment(problem, existing.grossKobo);
+
   return prisma.$transaction(async (tx: Tx) => {
     const applied = await tx.invoice.updateMany({
       where: { id: input.invoiceId, status: 'ISSUED' },
-      data: { status: 'PAID', paidAt: new Date() },
+      data: {
+        status: 'PAID',
+        paidAt: now,
+        paymentReference: input.reference.trim(),
+        paymentAmountKobo: input.amountKobo,
+        paidOn: new Date(`${input.paidOn}T00:00:00.000Z`),
+        payerName: input.payerName.trim(),
+      },
     });
     if (applied.count !== 1) throw InvoiceErrors.wrongStatus(existing.status, 'PAID');
 
@@ -334,6 +490,9 @@ export async function recordPayment(input: {
       include: { lines: true },
     });
 
+    // The amount and the date, and not who paid or the bank's reference: a
+    // reference often carries the payer's name, and the audit trail is kept for
+    // good. Both are on the invoice, which is the billing record.
     await recordAudit(tx, {
       action: 'invoice.paid',
       entityType: 'billing.invoices',
@@ -341,7 +500,7 @@ export async function recordPayment(input: {
       actorId: input.actorId,
       scopeType: 'FACILITY',
       scopeId: invoice.facilityId,
-      after: { status: invoice.status, amountKobo: invoice.grossKobo },
+      after: { status: invoice.status, amountKobo: invoice.grossKobo, paidOn: input.paidOn, referenceRecorded: true },
     });
 
     await publishEvent(tx, {

@@ -250,7 +250,7 @@ export default function DashboardPage() {
                       {result.isPending ? (
                         <Skeleton className="mt-2 h-7 w-10" />
                       ) : result.isError ? (
-                        <p className="mt-2 text-sm text-destructive">Could not load</p>
+                        <p className="mt-2 text-sm text-destructive-text">Could not load</p>
                       ) : (
                         <>
                           <p
@@ -325,7 +325,7 @@ export default function DashboardPage() {
                   {summary.isPending ? (
                     <Skeleton className="h-24 w-full" />
                   ) : summary.isError ? (
-                    <p className="text-sm text-destructive">Could not load</p>
+                    <p className="text-sm text-destructive-text">Could not load</p>
                   ) : severityCounts.length === 0 ? (
                     <p className="text-sm text-muted-foreground">Nothing open.</p>
                   ) : (
@@ -384,7 +384,7 @@ export default function DashboardPage() {
                   {summary.isPending ? (
                     <Skeleton className="h-24 w-full" />
                   ) : summary.isError ? (
-                    <p className="text-sm text-destructive">Could not load</p>
+                    <p className="text-sm text-destructive-text">Could not load</p>
                   ) : (data?.recent ?? []).length === 0 ? (
                     <p className="text-sm text-muted-foreground">Nothing recorded yet.</p>
                   ) : (

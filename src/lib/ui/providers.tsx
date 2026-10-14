@@ -1,11 +1,12 @@
 'use client';
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Toaster } from '@/components/ui/sonner';
 import { MotionProvider } from '@/components/app/motion';
 import { ApiError } from '@/lib/ui/api';
 import { timing } from '@/lib/ui/query-keys';
+import { applyTextSize, readTextSize } from '@/lib/ui/text-size';
 
 /**
  * React Query, configured for a console rather than for a content site.
@@ -43,6 +44,12 @@ export function Providers({ children }: { children: ReactNode }) {
         },
       }),
   );
+
+  // Applies the reader's chosen text size on every page, including the ones with
+  // no control of their own, so the choice follows them from page to page.
+  useEffect(() => {
+    applyTextSize(readTextSize());
+  }, []);
 
   return (
     <QueryClientProvider client={client}>

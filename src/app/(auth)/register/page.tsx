@@ -11,6 +11,7 @@ import { api, errorMessage } from '@/lib/ui/api';
 import { useZodForm } from '@/lib/ui/form';
 import { consoleFor, type SessionState } from '@/lib/ui/session';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { TextSizeControl } from '@/components/app/text-size-control';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -56,6 +57,12 @@ const detailsSchema = z.object({
     // wrong before a round trip.
     .regex(/^[\d\s+()-]{10,}$/, "That does not look like a Nigerian mobile number."),
   email: z.union([z.literal(''), z.string().email('That email address is not valid.')]),
+  // Recorded against the privacy notice in force. Always asked, so what somebody
+  // sees does not depend on whether a notice has been published yet; the server
+  // refuses without it once one has.
+  acceptTerms: z.literal(true, {
+    errorMap: () => ({ message: 'Please read and accept the privacy notice to continue.' }),
+  }),
 });
 
 const codeSchema = z.object({
@@ -85,7 +92,7 @@ const passwordSchema = z
 function FieldError({ message }: { message?: string }) {
   if (!message) return null;
   return (
-    <p role="alert" className="text-xs text-destructive">
+    <p role="alert" className="text-xs text-destructive-text">
       {message}
     </p>
   );
@@ -110,7 +117,7 @@ function RegisterForm() {
   const [sharing, setSharing] = useState(false);
 
   const details = useZodForm(detailsSchema, {
-    defaultValues: { fullName: '', phone: '', email: '' },
+    defaultValues: { fullName: '', phone: '', email: '', acceptTerms: undefined as unknown as true },
   });
   const codeForm = useZodForm(codeSchema, { defaultValues: { code: '' } });
   const passwordForm = useZodForm(passwordSchema, {
@@ -130,14 +137,25 @@ function RegisterForm() {
         phone: values.phone,
         fullName: values.fullName,
         email: values.email.trim() || undefined,
+        acceptedTerms: values.acceptTerms,
       }),
     onSuccess: () => setStep(1),
   });
 
+  // Handed back by verifying the phone and required to set the password: it is
+  // what ties the last step to the code that was just entered.
+  const [setupToken, setSetupToken] = useState('');
+
   const verify = useMutation({
     mutationFn: (values: z.infer<typeof codeSchema>) =>
-      api.post('/api/v1/auth/verify-phone', { phone, code: values.code }),
-    onSuccess: () => setStep(2),
+      api.post<{ setupToken: string | null }>('/api/v1/auth/verify-phone', {
+        phone,
+        code: values.code,
+      }),
+    onSuccess: (result) => {
+      setSetupToken(result.setupToken ?? '');
+      setStep(2);
+    },
   });
 
   const resend = useMutation({
@@ -152,6 +170,7 @@ function RegisterForm() {
       await api.post('/api/v1/auth/set-password', {
         phone,
         password,
+        setupToken,
         accountType: forStaff ? 'staff' : 'practitioner',
         consentToSharing: forStaff ? undefined : sharing,
       });
@@ -184,10 +203,11 @@ function RegisterForm() {
   const failure = start.error ?? verify.error ?? finish.error ?? resend.error;
 
   return (
-    <main className="grid min-h-dvh lg:grid-cols-2">
+    <main className="relative grid min-h-dvh lg:grid-cols-2">
+      <TextSizeControl className="absolute right-3 top-3 z-10" />
       <div className="flex items-center justify-center px-6 py-12">
         <div className="w-full max-w-sm">
-          <p className="text-[0.7rem] font-semibold uppercase tracking-widest text-muted-foreground">
+          <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
             Medilink
           </p>
           <h1 className="mt-1 text-2xl font-semibold tracking-tight">
@@ -302,6 +322,29 @@ function RegisterForm() {
                       Your phone is how you sign in and how you recover your account. Medilink does
                       not send email yet — an address here is kept on your record for when it does.
                     </p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="flex items-start gap-3 text-sm">
+                      <input
+                        type="checkbox"
+                        {...details.register('acceptTerms')}
+                        className="mt-1 size-5 shrink-0 rounded border-input accent-primary"
+                        aria-invalid={Boolean(details.formState.errors.acceptTerms) || undefined}
+                      />
+                      <span>
+                        I have read the{' '}
+                        <Link href="/privacy" target="_blank" className="font-medium underline">
+                          privacy notice
+                        </Link>{' '}
+                        and the{' '}
+                        <Link href="/terms" target="_blank" className="font-medium underline">
+                          terms
+                        </Link>{' '}
+                        and I accept them.
+                      </span>
+                    </label>
+                    <FieldError message={details.formState.errors.acceptTerms?.message} />
                   </div>
 
                   {/* Not disabled until the schema is satisfied. A button
@@ -497,7 +540,7 @@ function RegisterForm() {
             <>
               <Card className="border-white/15 bg-white/10 text-primary-foreground shadow-none">
                 <CardHeader className="p-4">
-                  <CardTitle className="text-sm">Your facility is checked against its CAC registration</CardTitle>
+                  <CardTitle className="text-sm">Your facility is checked against its registration</CardTitle>
                   <CardDescription className="text-primary-foreground/75">
                     You can set it up and add colleagues straight away — it just cannot offer a
                     shift to anybody until compliance has confirmed it is real.

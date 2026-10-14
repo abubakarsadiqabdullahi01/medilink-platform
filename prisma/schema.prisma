@@ -45,6 +45,7 @@ model User {
   credentialSubmissions CredentialSubmission[]
   representedFacilities Facility[]
   payouts               Payout[]
+  payoutAccounts        PayoutAccount[]
   agreementAcceptances  AgreementAcceptance[]
   consentRecords        ConsentRecord[]
   dataSubjectRequests   DataSubjectRequest[]
@@ -191,10 +192,15 @@ model OtpCode {
   attempts   Int      @default(0)
   consumedAt DateTime? @map("consumed_at")
   createdAt  DateTime @default(now()) @map("created_at")
+  // The network address the request came from, so sends can be counted per
+  // source as well as per person. Null when the request carried none.
+  requestIp  String?  @map("request_ip")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, purpose, consumedAt])
+  @@index([requestIp, createdAt])
+  @@index([createdAt])
   @@map("otp_codes")
   @@schema("identity")
 }
@@ -317,8 +323,52 @@ model ProfessionalCategory {
   credentialRequirements CredentialRequirement[]
   serviceRequests ServiceRequest[]
   practitionerProfiles PractitionerProfile[]
+  cadreLevels CadreLevel[]
 
   @@map("professional_categories")
+  @@schema("config")
+}
+
+// A rung within a profession: house officer, medical officer, registrar, consultant.
+// What the rungs are is the regulators' to say and compliance's to enter (CFG-04); no
+// level ships with the product. `rank` orders them within one profession, 1 the most
+// junior, and is never compared across professions. Retired, not deleted: a level a
+// shift or a practitioner already holds must keep meaning what it meant.
+model CadreLevel {
+  id                     String   @id @default(uuid()) @db.Uuid
+  professionalCategoryId String   @map("professional_category_id") @db.Uuid
+  /// `<profession key>.<slug of the name>`, unique, and what a client names.
+  key                    String   @unique
+  name                   String
+  rank                   Int
+  isActive               Boolean  @default(true) @map("is_active")
+  owner                  String
+  createdAt              DateTime @default(now()) @map("created_at")
+
+  category ProfessionalCategory @relation(fields: [professionalCategoryId], references: [id])
+  registrations ProfessionalRegistration[]
+  serviceRequests ServiceRequest[]
+
+  @@unique([professionalCategoryId, rank])
+  @@map("cadre_levels")
+  @@schema("config")
+}
+
+// How a practitioner stands on the register: full, provisional, intern, post-basic.
+// `supervisionRequired` is what makes the rest of the platform treat somebody on it
+// as supervised: they can be offered only shifts that say supervision is available.
+model RegistrationCategory {
+  id                  String   @id @default(uuid()) @db.Uuid
+  key                 String   @unique
+  name                String
+  supervisionRequired Boolean  @default(false) @map("supervision_required")
+  isActive            Boolean  @default(true) @map("is_active")
+  owner               String
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  registrations ProfessionalRegistration[]
+
+  @@map("registration_categories")
   @@schema("config")
 }
 
@@ -422,6 +472,8 @@ model RateFloor {
   id            String   @id @default(uuid()) @db.Uuid
   categoryKey   String   @map("category_key")
   specialtyKey  String   @default("*") @map("specialty_key")
+  /// `*` for every level; otherwise a `config.cadre_levels.key` of this profession (REQ-01).
+  cadreLevelKey String   @default("*") @map("cadre_level_key")
   shiftType     String   @map("shift_type")
   minHourlyKobo Int      @map("min_hourly_kobo")
   currency      String   @default("NGN")
@@ -429,7 +481,7 @@ model RateFloor {
   owner         String
   createdAt     DateTime @default(now()) @map("created_at")
 
-  @@unique([categoryKey, specialtyKey, shiftType, effectiveFrom])
+  @@unique([categoryKey, specialtyKey, cadreLevelKey, shiftType, effectiveFrom])
   @@map("rate_floors")
   @@schema("config")
 }
@@ -519,10 +571,14 @@ model CredentialSubmission {
   reviewedBy  String?   @map("reviewed_by") @db.Uuid
   reviewedAt  DateTime? @map("reviewed_at")
   reviewNotes String?   @map("review_notes")
-  // Computed once at verification time from credentialType.reviewDays when
-  // credentialType.expires is true. Nothing reads this yet — no expiry
-  // sweep exists — stored now so a future one is additive, not a backfill.
+  // The instant this stops counting, which the expiry sweep and the warnings
+  // act on. When the reviewer read a date off the document it is the end of
+  // that day in Lagos; with none read it is the review date plus the type's
+  // reviewDays, and documentExpiresOn is null so every screen can say so.
   expiresAt DateTime? @map("expires_at")
+  // The date printed on the document, as the reviewer read it. The one the
+  // practitioner is shown (CRE-04).
+  documentExpiresOn DateTime? @map("document_expires_on") @db.Date
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
@@ -562,9 +618,13 @@ model Facility {
   id             String  @id @default(uuid()) @db.Uuid
   name           String
   facilityTypeId String  @map("facility_type_id") @db.Uuid
-  // Unique at the database level, not checked in application code: step 5.4
-  // asks for a duplicate to be refused "on the constraint, not in code".
-  cacNumber      String  @unique @map("cac_number")
+  // What the facility is registered under, and which register that is. The column
+  // is still called cac_number and still holds a CAC number for a company; for a
+  // government facility it holds the ministry's or the board's reference.
+  // Unique per kind at the database level, not checked in application code: step
+  // 5.4 asks for a duplicate to be refused "on the constraint, not in code".
+  registrationKind RegistrationKind @default(CAC) @map("registration_kind")
+  cacNumber      String  @map("cac_number")
 
   stateId     String  @map("state_id") @db.Uuid
   lgaId       String? @map("lga_id") @db.Uuid
@@ -589,6 +649,9 @@ model Facility {
   verifiedBy  String?   @map("verified_by") @db.Uuid
   verifiedAt  DateTime? @map("verified_at")
   reviewNotes String?   @map("review_notes")
+  /// What the officer confirmed before approving: the licence seen, matching, the
+  /// registration checked, and how.
+  verificationChecks Json? @map("verification_checks")
 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
@@ -609,7 +672,19 @@ model Facility {
   @@index([status])
   @@index([stateId, status])
   @@index([representativeUserId])
+  @@unique([registrationKind, cacNumber])
   @@map("facilities")
+  @@schema("facilities")
+}
+
+/// Which register a facility's reference is from. A company has a CAC number; a
+/// government hospital or primary health centre has a ministry or state board
+/// reference instead.
+enum RegistrationKind {
+  CAC
+  GOVERNMENT
+  OTHER
+
   @@schema("facilities")
 }
 
@@ -711,6 +786,10 @@ model ProfessionalRegistration {
   practiceType        String?            @map("practice_type")
   registrationStatus  RegistrationStatus @map("registration_status")
   location            String?
+  // Where they stand, as the officer read it from the register (PRA-01, PRA-02). Null
+  // until somebody records it, and only ever one a profession actually has.
+  cadreLevelId           String? @map("cadre_level_id") @db.Uuid
+  registrationCategoryId String? @map("registration_category_id") @db.Uuid
   evidenceRetrievedAt DateTime           @map("evidence_retrieved_at")
   expiresAt           DateTime?          @map("expires_at")
   source              VerificationSource
@@ -719,7 +798,9 @@ model ProfessionalRegistration {
   updatedAt           DateTime           @updatedAt @map("updated_at")
   deletedAt           DateTime?          @map("deleted_at")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user                 User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cadreLevel           CadreLevel?           @relation(fields: [cadreLevelId], references: [id])
+  registrationCategory RegistrationCategory? @relation(fields: [registrationCategoryId], references: [id])
 
   // One registration per regulator per practitioner: a doctor holds one MDCN
   // folio, not several.
@@ -924,6 +1005,12 @@ model ServiceRequest {
   facilityId             String  @map("facility_id") @db.Uuid
   professionalCategoryId String  @map("professional_category_id") @db.Uuid
   specialtyId            String? @map("specialty_id") @db.Uuid
+  // The level the shift is for, when the profession has levels (REQ-01). Only somebody
+  // recorded at exactly this level is offered it. Null for a profession with none defined.
+  cadreLevelId           String? @map("cadre_level_id") @db.Uuid
+  // Whether somebody is there to supervise. A practitioner on a register that needs
+  // supervision can be offered only a shift that says so.
+  supervisionAvailable   Boolean @default(false) @map("supervision_available")
 
   shiftType ShiftType @map("shift_type")
   startsAt  DateTime  @map("starts_at")
@@ -958,6 +1045,7 @@ model ServiceRequest {
   facility             Facility             @relation(fields: [facilityId], references: [id])
   professionalCategory ProfessionalCategory @relation(fields: [professionalCategoryId], references: [id])
   specialty            Specialty?           @relation(fields: [specialtyId], references: [id])
+  cadreLevel           CadreLevel?          @relation(fields: [cadreLevelId], references: [id])
 
   @@index([status, startsAt])
   // A facility's shifts by status in start order, a page at a time.
@@ -1053,6 +1141,12 @@ model Invitation {
   respondedAt      DateTime?        @map("responded_at")
   declineReason    String?          @map("decline_reason")
   invitedBy        String?          @map("invited_by") @db.Uuid
+  // What the practitioner was shown when they accepted: cancellation terms,
+  // notes, address, rate and times, copied at that moment. The request's own
+  // columns can be read later but they are not what was agreed if anything
+  // moved in between. Null until accepted, and cleared when an offer is made
+  // again, so one acceptance cannot stand for the next offer.
+  termsAccepted    Json?            @map("terms_accepted")
   createdAt        DateTime         @default(now()) @map("created_at")
   updatedAt        DateTime         @updatedAt @map("updated_at")
 
@@ -1085,6 +1179,11 @@ model Assignment {
   endsAt           DateTime         @map("ends_at")
   status           AssignmentStatus @default(CONFIRMED)
   confirmedBy      String           @map("confirmed_by") @db.Uuid
+  // The facility's allowances (night, holiday, overtime, on-call multipliers)
+  // as they stood when this was booked, with the card they came from. What the
+  // shift is priced on, so a card replaced afterwards cannot change what was
+  // agreed. Null on bookings made before this existed.
+  rateTerms        Json?            @map("rate_terms")
   createdAt        DateTime         @default(now()) @map("created_at")
   updatedAt        DateTime         @updatedAt @map("updated_at")
 
@@ -1161,9 +1260,12 @@ model NotificationMessage {
   relatedId   String?   @map("related_id") @db.Uuid
   sentAt      DateTime? @map("sent_at")
   failureReason String? @map("failure_reason")
+  // When the person opened it in the app's inbox. Null is unread (UXP-01).
+  readAt      DateTime? @map("read_at")
   createdAt   DateTime  @default(now()) @map("created_at")
 
   @@index([userId, createdAt])
+  @@index([userId, readAt, createdAt])
   @@index([relatedType, relatedId])
   @@index([userId, kind, relatedId])
   @@map("messages")
@@ -1854,6 +1956,16 @@ model Invoice {
   issuedAt DateTime?     @map("issued_at")
   paidAt   DateTime?     @map("paid_at")
 
+  // What was recorded when somebody marked it paid, so the payment can be checked
+  // against a bank statement later (BIL-07). `paidAt` is when it was recorded;
+  // `paidOn` is when the money arrived. The amount must equal `grossKobo` today,
+  // because there is no model for part payments. Null on an invoice paid before
+  // these were captured.
+  paymentReference  String? @map("payment_reference")
+  paymentAmountKobo Int?    @map("payment_amount_kobo")
+  paidOn            DateTime? @map("paid_on") @db.Date
+  payerName         String? @map("payer_name")
+
   createdBy String   @map("created_by") @db.Uuid
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -1884,7 +1996,10 @@ enum InvoiceStatus {
 model InvoiceLine {
   id           String @id @default(uuid()) @db.Uuid
   invoiceId    String @map("invoice_id") @db.Uuid
-  assignmentId String @unique @map("assignment_id") @db.Uuid
+  /// One live line per shift: a partial unique index over `voided_at IS NULL`,
+  /// in migrations/20261013160000_invoice_lines_voidable. Prisma cannot express
+  /// it, so there is no `@unique` here.
+  assignmentId String @map("assignment_id") @db.Uuid
 
   /// The rate card that priced it, so the figures can be explained later.
   rateCardId String? @map("rate_card_id") @db.Uuid
@@ -1902,11 +2017,14 @@ model InvoiceLine {
   premiumKobo Int @map("premium_kobo")
   amountKobo  Int @map("amount_kobo")
 
-  createdAt DateTime @default(now()) @map("created_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  /// Set when the invoice is voided. The line is kept; it no longer pins the shift.
+  voidedAt  DateTime? @map("voided_at")
 
   invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
 
   @@index([invoiceId])
+  @@index([assignmentId])
   @@map("invoice_lines")
   @@schema("billing")
 }
@@ -1955,9 +2073,20 @@ model Payout {
   providerReference String? @map("provider_reference")
   failureReason     String? @map("failure_reason")
 
+  // Who prepared it, so release can refuse the same person (UXO-03). Null on a
+  // payout prepared before this was recorded, which nothing then holds back.
+  preparedBy String?   @map("prepared_by") @db.Uuid
   releasedBy String?   @map("released_by") @db.Uuid
   releasedAt DateTime? @map("released_at")
   settledAt  DateTime? @map("settled_at")
+  /// The date the bank transfer was made, as finance recorded it, when a person
+  /// paid it by hand (BIL-05). Null for a payout a gateway settled.
+  paidOn DateTime? @map("paid_on") @db.Date
+
+  /// The verified account this was prepared for (BIL-06). Releasing checks it is
+  /// still the practitioner's, so an account changed in between is not paid to. Null
+  /// on a payout prepared before accounts were recorded.
+  accountId String? @map("account_id") @db.Uuid
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -1969,11 +2098,59 @@ model Payout {
   @@schema("billing")
 }
 
+/// Where a practitioner is paid (BIL-06). A practitioner gives one, a finance
+/// officer verifies it, and a payout is made only to a verified one. At most one is
+/// PENDING and at most one VERIFIED per person, which the database holds with two
+/// partial unique indexes Prisma cannot express (see the migration).
+enum PayoutAccountStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+  /// Superseded by a newer one, or withdrawn by the practitioner submitting another.
+  REPLACED
+
+  @@schema("billing")
+}
+
+model PayoutAccount {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @map("user_id") @db.Uuid
+
+  bankName String @map("bank_name")
+  /// The name the bank holds the account under, as the practitioner gave it.
+  accountName String @map("account_name")
+  accountLast4 String @map("account_last4")
+  /// AES-256-GCM under PAYOUT_ACCOUNT_KEY (see infrastructure/account-vault.ts).
+  /// Opened only to show finance where to transfer, and each time is audited.
+  accountNumberSealed String @map("account_number_sealed")
+  /// A keyed hash of the number, so one account given by two people is found
+  /// without opening either.
+  fingerprint String
+
+  status PayoutAccountStatus @default(PENDING)
+
+  reviewedBy String?   @map("reviewed_by") @db.Uuid
+  reviewedAt DateTime? @map("reviewed_at")
+  /// Why it was rejected, or why a mismatch was accepted.
+  reviewNote String? @map("review_note")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, status])
+  @@index([fingerprint])
+  @@map("payout_accounts")
+  @@schema("billing")
+}
+
 enum PayoutStatus {
   PREPARED
   RELEASED
   SETTLED
   FAILED
+  /// Withdrawn by finance before anybody released it.
+  CANCELLED
 
   @@schema("billing")
 }

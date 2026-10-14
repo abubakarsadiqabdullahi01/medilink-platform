@@ -4,10 +4,12 @@ import {
   preparePayoutSchema,
 } from '@/modules/billing-settlement/presentation/schemas';
 import {
-  amountOwed,
   listPayouts,
+  payoutPosition,
   preparePayout,
+  secondApproverRequired,
 } from '@/modules/billing-settlement/application/payout';
+import { paidByHand } from '@/modules/billing-settlement/infrastructure/gateway';
 
 /**
  * POST /api/v1/payouts — prepare one for everything a practitioner is owed.
@@ -43,11 +45,28 @@ export async function GET(request: Request) {
       // What is credited and not yet paid out, from the ledger — the number a
       // practitioner opens the page to read, and the one no list of payouts
       // can give them.
-      const [payouts, owedKobo] = await Promise.all([
+      // `heldKobo` is the part of it that is on a shift in dispute and will not
+      // be paid until the case ends.
+      const [payouts, position] = await Promise.all([
         listPayouts(practitionerId),
-        amountOwed(practitionerId),
+        payoutPosition(practitionerId),
       ]);
-      return { payouts, owedKobo };
+      // The practitioner is shown their payout, not which member of staff prepared
+      // it. Staff are told whether it was they, which is what decides whether they
+      // can release it (UXO-03).
+      const shaped = payouts.map(({ preparedBy, ...rest }) =>
+        input.scopeType === 'PLATFORM' ? { ...rest, preparedByYou: preparedBy === session.userId } : rest,
+      );
+      return input.scopeType === 'PLATFORM'
+        ? {
+            payouts: shaped,
+            ...position,
+            secondApproverRequired: secondApproverRequired(),
+            // Whether finance make the bank transfer and record it, which decides
+            // what the screen offers for a payout that has been released.
+            paidByHand: paidByHand(),
+          }
+        : { payouts: shaped, ...position };
     },
   });
 }

@@ -38,6 +38,7 @@ import {
   QueueSkeleton,
 } from '@/components/app/page-shell';
 import { formatMinutes, formatNaira, formatWhen, toLocalInput } from '@/components/app/format';
+import { lagosLocalToInstant } from '@/lib/lagos-date';
 
 interface Assignment {
   id: string;
@@ -70,7 +71,11 @@ interface Timesheet {
   holidayMinutes: number;
   onCallMinutes: number;
   hourlyRateKobo: number;
+  /** The hours at the base rate. */
   amountKobo: number;
+  /** What the shift will be billed, allowances included: what Approve commits to. */
+  billedKobo: number;
+  premiumKobo: number;
   revision: number;
 }
 
@@ -225,9 +230,9 @@ export default function TimesheetsPage() {
         breakMinutes: Number(breakMinutes || '0'),
         onCallMinutes: Number(onCallMinutes || '0'),
         checkedInAt:
-          checkedIn && checkedIn !== recordedTimes.in ? new Date(checkedIn).toISOString() : undefined,
+          checkedIn && checkedIn !== recordedTimes.in ? lagosLocalToInstant(checkedIn).toISOString() : undefined,
         checkedOutAt:
-          checkedOut && checkedOut !== recordedTimes.out ? new Date(checkedOut).toISOString() : undefined,
+          checkedOut && checkedOut !== recordedTimes.out ? lagosLocalToInstant(checkedOut).toISOString() : undefined,
         reason: correctionReason.trim(),
       }),
     onSuccess: () => {
@@ -416,15 +421,22 @@ export default function TimesheetsPage() {
                     <Detail label="Worked">{formatMinutes(sheet.workedMinutes)}</Detail>
                     <Detail label="Break">{formatMinutes(sheet.breakMinutes)}</Detail>
                     <Detail label="Billable">{formatMinutes(sheet.billableMinutes)}</Detail>
-                    <Detail label="Amount">
-                      <strong>{formatNaira(sheet.amountKobo)}</strong>
+                    <Detail label="To be billed">
+                      <strong>{formatNaira(sheet.billedKobo)}</strong>
                     </Detail>
                   </DetailGrid>
 
-                  {/* These figures are at the base rate. Module 11 applies this
-                      facility's rate card to the bands when the shift is
-                      invoiced, so the invoice can come to more than the amount
-                      shown here. */}
+                  {/* Approving commits to the billed figure, so that is what is
+                      shown: the hours at the base rate plus the allowances this
+                      facility's own rate card adds. Showing the base amount
+                      alone had the invoice come to more than was approved. */}
+                  {sheet.premiumKobo > 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      {formatNaira(sheet.amountKobo)} for the hours, plus{' '}
+                      {formatNaira(sheet.premiumKobo)} in night, holiday and overtime allowances from
+                      your rate card.
+                    </p>
+                  ) : null}
                   <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
                     <span>Night {formatMinutes(sheet.nightMinutes)}</span>
                     <span>Overtime {formatMinutes(sheet.overtimeMinutes)}</span>
@@ -489,7 +501,7 @@ export default function TimesheetsPage() {
                             review.mutate({ assignmentId: assignment.id, decision: 'approve' })
                           }
                         >
-                          Approve {formatNaira(sheet.amountKobo)}
+                          Approve {formatNaira(sheet.billedKobo)}
                         </Button>
                         <Button
                           variant="destructive"

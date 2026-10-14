@@ -52,6 +52,50 @@ describe('reporting is deliberately easy', () => {
   });
 });
 
+describe('patient identifiers', () => {
+  /**
+   * A report must not record who the patient was. The summary is free text, so
+   * what is screened is only what can be recognised with confidence — a number
+   * that is a phone or an ID, an email, a labelled hospital number — and the
+   * screen is narrow on purpose: a report refused for a false alarm is a report
+   * lost, and the report is the point.
+   */
+  const withSummary = (summary: string) =>
+    reportBlockers({ summary, occurredAt: new Date('2026-09-12T09:00:00.000Z'), now: NOW });
+
+  it.each([
+    ['a mobile number', 'The patient called her son on 0803 123 4567 to say the dose was wrong and then collapsed.'],
+    ['an international number', 'Relative reachable on +234 803 123 4567 was told about the wrong dose by the ward sister.'],
+    ['an eleven digit ID', 'Patient NIN 12345678901 was given the wrong dose and the second checker caught it.'],
+    ['an email address', 'The patient emailed amina.yusuf@example.com afterwards about the wrong dose given on the ward.'],
+    ['a labelled hospital number', 'Wrong dose given to hospital number HN/2026/004412 and caught by the second checker.'],
+    ['a labelled folder number', 'Folder No: 99812 was mixed up with another patient on the ward at handover time.'],
+    ['an MRN', 'MRN 7781234 was the record the wrong dose was charted against and corrected later.'],
+  ])('refuses %s', (_label, summary) => {
+    expect(withSummary(summary)).toContain('contains_patient_identifier');
+  });
+
+  it.each([
+    ['doses and strengths', 'Soluble insulin 100 units/ml given where 40 units/ml was charted; hourly glucose 5.6 mmol/L, no harm.'],
+    ['times and dates', 'At 14:30 on 12/09/2026 a 500 mg dose was drawn up twice and caught by the second checker.'],
+    ['ward and bed numbers', 'Bed 14 on Ward 3 had the wrong chart and the nurse in charge corrected it before the round.'],
+    ['a count of people', 'Night shift ran two staff short for six hours with 48 patients on the ward.'],
+    ['large but harmless numbers', 'The infusion pump was set to 125 ml per hour instead of 12.5 and was caught after 20 minutes.'],
+  ])('does not mistake %s for one', (_label, summary) => {
+    expect(withSummary(summary)).toEqual([]);
+  });
+
+  it('still reports everything else wrong at the same time', () => {
+    expect(
+      reportBlockers({
+        summary: 'call 08031234567',
+        occurredAt: new Date(NOW.getTime() + 60_000),
+        now: NOW,
+      }).sort(),
+    ).toEqual(['contains_patient_identifier', 'occurred_in_the_future', 'summary_missing']);
+  });
+});
+
 describe('severity', () => {
   it('puts near miss first, not last', () => {
     // The most useful reports and the easiest to lose.

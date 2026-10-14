@@ -7,10 +7,12 @@ import { logger } from '@/lib/logger';
 import {
   evaluateOtp,
   evaluateResend,
+  evaluateSendBudget,
   generateOtpCode,
   hashOtpCode,
   otpExpiry,
   otpMessageBody,
+  OTP_MAX_ATTEMPTS,
   OTP_MAX_SENDS_PER_HOUR,
   type OtpPurposeKey,
 } from '../domain/otp';
@@ -20,6 +22,36 @@ import { AuthErrors } from '../domain/errors';
  * Issuing and verifying one-time codes. The policy lives in ../domain/otp and
  * is unit-tested without a database; this layer only persists and delivers.
  */
+
+/**
+ * Whether another code may be sent from this address, and at all.
+ *
+ * Counted from the codes themselves rather than from a separate table or from
+ * process memory: Medilink runs more than one web container, and a counter in
+ * memory resets on deploy and is bypassed by spreading requests across
+ * instances. It runs before anything is created, so a refused request leaves
+ * nothing behind — registration calls it before it makes a user row.
+ *
+ * The address is whatever the edge forwards. Where the platform does not
+ * overwrite X-Forwarded-For, a caller can rotate it to dodge the per-address
+ * limit, and the overall budget is what is left standing.
+ */
+export async function assertCanSendCode(input: { ipAddress?: string; now?: Date }): Promise<void> {
+  const since = new Date((input.now ?? new Date()).getTime() - 3600 * 1000);
+
+  const [fromThisAddress, overall] = await Promise.all([
+    input.ipAddress
+      ? prisma.otpCode.count({ where: { requestIp: input.ipAddress, createdAt: { gt: since } } })
+      : Promise.resolve(null),
+    prisma.otpCode.count({ where: { createdAt: { gt: since } } }),
+  ]);
+
+  const verdict = evaluateSendBudget({ fromThisAddress, overall });
+  if (!verdict.ok) {
+    logger.warn('one-time code budget exhausted', { reason: verdict.reason });
+    throw AuthErrors.otpThrottled(verdict.retryAfterSeconds);
+  }
+}
 
 /**
  * Codes are delivered after the transaction commits, not inside it. Holding a
@@ -37,6 +69,8 @@ export async function issueOtp(input: {
 }): Promise<{ expiresAt: Date; sendsRemainingThisHour: number; delivered: boolean }> {
   const now = input.now ?? new Date();
   const purpose = input.purpose;
+
+  await assertCanSendCode({ ipAddress: input.ipAddress, now });
 
   const recent = await prisma.otpCode.findMany({
     where: {
@@ -68,7 +102,7 @@ export async function issueOtp(input: {
     });
 
     await tx.otpCode.create({
-      data: { userId: input.userId, purpose, codeHash, expiresAt },
+      data: { userId: input.userId, purpose, codeHash, expiresAt, requestIp: input.ipAddress },
     });
 
     await recordAudit(tx, {
@@ -107,13 +141,12 @@ export interface VerifiedOtp {
  * Verifies a submitted code without consuming it. Throws on any invalid
  * state: wrong, expired, exhausted, already used, or none outstanding.
  *
- * A wrong guess still increments the code's attempt counter, and that
- * increment is committed — with its own audit row — immediately, in its own
- * transaction, rather than deferred to whatever the caller does next.
- * Deferring it would let an abandoned or crashed request buy a free guess,
- * which is exactly what the counter exists to prevent. The audit row is what
- * closes the gap table-level coverage matching would otherwise paper over:
- * without it, this write is only "covered" because some unrelated
+ * Every verification takes one of the code's five attempts, atomically and
+ * before the guess is judged, so the limit holds under concurrent guessing and
+ * a request abandoned mid-flight has still been counted. A wrong guess also
+ * writes its own audit row, immediately, in its own transaction — which is also
+ * what closes the gap table-level coverage matching would otherwise paper over:
+ * without it, the counter write is only "covered" because some unrelated
  * auth.otp_issued row happens to land in the same test window.
  */
 export async function verifyOtp(input: {
@@ -130,17 +163,32 @@ export async function verifyOtp(input: {
     orderBy: { createdAt: 'desc' },
   });
 
+  // The attempt is taken *before* the guess is judged, in one conditional
+  // statement. The counter used to be read, judged and then incremented in a
+  // separate step, so guesses arriving together all read the old count and all
+  // were compared: the five-try limit could be exceeded by as many requests as
+  // fit in one round trip. Here the database hands out at most five attempts
+  // per code, and a request that does not get one is refused without its guess
+  // being looked at — so the number of codes tried can never exceed the limit.
+  // It also means a guess abandoned mid-flight has still been counted.
+  if (record) {
+    const taken = await prisma.otpCode.updateMany({
+      where: { id: record.id, consumedAt: null, attempts: { lt: OTP_MAX_ATTEMPTS } },
+      data: { attempts: { increment: 1 } },
+    });
+    if (taken.count === 0) {
+      logger.warn('otp verification failed', { userId: input.userId, reason: 'too_many_attempts' });
+      throw AuthErrors.otpExhausted();
+    }
+  }
+
   const submittedHash = hashOtpCode(input.code, input.userId, input.purpose, env.SESSION_SECRET);
+  // Judged against the row as read, which is the count *before* this attempt.
   const verdict = evaluateOtp(record, submittedHash, now);
 
   if (!verdict.ok) {
     if (record && verdict.reason === 'mismatch') {
       await prisma.$transaction(async (tx) => {
-        await tx.otpCode.update({
-          where: { id: record.id },
-          data: { attempts: { increment: 1 } },
-        });
-
         await recordAudit(tx, {
           action: 'auth.otp_attempt_failed',
           entityType: 'identity.otp_codes',

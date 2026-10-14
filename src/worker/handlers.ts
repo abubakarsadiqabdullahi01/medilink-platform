@@ -5,6 +5,13 @@ import { screenPractitioner } from '../modules/practitioners/application/screeni
 import {
   notifyAssignmentCancelled,
   notifyAssignmentConfirmed,
+  notifyDisputeStage,
+  notifyIncidentReported,
+  notifyInvoiceIssued,
+  notifyPayoutAccountReviewed,
+  notifyPayoutAccountSubmitted,
+  notifyPayoutSettled,
+  notifyTimesheetRejected,
 } from '../modules/notifications/application/handlers';
 import {
   notifyCredentialExpired,
@@ -72,6 +79,24 @@ export const handlers: Record<string, EventHandler> = {
   [EVENTS.ShiftCompleted]: async (payload) => {
     await computeAndSaveTimesheet(String(payload.assignmentId ?? ''));
   },
+
+  // Severe and fatal incidents are put in front of the people who can act on
+  // them; the event used to wait in a queue until somebody opened the page.
+  [EVENTS.ClinicalIncidentReported]: async (payload) => {
+    await notifyIncidentReported(payload);
+  },
+
+  // What happens to a dispute after it is opened (opening is above), told to the people in it.
+  [EVENTS.DisputeUnderReview]: (payload) => notifyDisputeStage('dispute.under_review', payload),
+  [EVENTS.DisputeResolved]: (payload) => notifyDisputeStage('dispute.resolved', payload),
+  [EVENTS.DisputeWithdrawn]: (payload) => notifyDisputeStage('dispute.withdrawn', payload),
+
+  // Hours sent back, bills and payments: told to whoever has to act on them or is owed them.
+  [EVENTS.TimesheetRejected]: (payload) => notifyTimesheetRejected(payload),
+  [EVENTS.InvoiceIssued]: (payload) => notifyInvoiceIssued(payload),
+  [EVENTS.PayoutSettled]: (payload) => notifyPayoutSettled(payload),
+  [EVENTS.PayoutAccountSubmitted]: (payload) => notifyPayoutAccountSubmitted(payload),
+  [EVENTS.PayoutAccountReviewed]: (payload) => notifyPayoutAccountReviewed(payload),
 
   [EVENTS.PractitionerRegistered]: async (payload) => {
     // Stage 4.7: send the welcome message through the notification adapter.

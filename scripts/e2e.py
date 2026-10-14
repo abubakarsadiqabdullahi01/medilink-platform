@@ -168,17 +168,19 @@ def main():
     prac_phone = f"+234803{stamp:07d}"[:14]
     prac = Client("practitioner")
     status, body = prac.call(
-        "POST", "/api/v1/auth/register", {"phone": prac_phone, "fullName": "E2E Practitioner"}
+        "POST", "/api/v1/auth/register", {"phone": prac_phone, "fullName": "E2E Practitioner", "acceptedTerms": True}
     )
     check("a practitioner registers", status in (200, 201, 202), f"{status} {str(body)[:160]}")
 
     code = otp_from_logs(prac_phone)
     check("the one-time code reaches the console adapter", code is not None)
     if code:
-        status, _ = prac.call("POST", "/api/v1/auth/verify-phone", {"phone": prac_phone, "code": code})
+        status, verified = prac.call("POST", "/api/v1/auth/verify-phone", {"phone": prac_phone, "code": code})
         check("the phone verifies", status == 200, f"got {status}")
         status, _ = prac.call(
-            "POST", "/api/v1/auth/set-password", {"phone": prac_phone, "password": PASSWORD}
+            "POST",
+            "/api/v1/auth/set-password",
+            {"phone": prac_phone, "password": PASSWORD, "setupToken": verified.get("setupToken", "")},
         )
         check("a password is set", status == 200, f"got {status}")
         status, _ = prac.login(prac_phone)
@@ -240,11 +242,12 @@ def main():
         {
             "facilityId": facility_id,
             "professionalCategoryId": ref["professionalCategoryId"],
-            "shiftType": "DAY",
+            # No shiftType: it is worked out from the hours (a shift three hours from now is
+            # day or night depending on when this runs), and the rate has to clear both floors.
             "startsAt": iso(starts),
             "endsAt": iso(starts + timedelta(hours=8)),
             "headcount": 1,
-            "hourlyRateKobo": 500000,
+            "hourlyRateKobo": 700000,
             "urgency": "ROUTINE",
             "cancellationTerms": "Either party may cancel up to 24 hours before the shift.",
         },

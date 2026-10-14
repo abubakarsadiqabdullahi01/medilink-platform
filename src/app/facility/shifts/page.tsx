@@ -59,6 +59,8 @@ interface ServiceRequest {
   facilityId: string;
   professionalCategoryId: string;
   specialtyId: string | null;
+  cadreLevelId: string | null;
+  supervisionAvailable: boolean;
   shiftType: string;
   startsAt: string;
   endsAt: string;
@@ -352,6 +354,12 @@ export default function ShiftsPage() {
                             {nameOf(reference.data?.specialties, row.specialtyId)}
                           </p>
                         ) : null}
+                        {row.cadreLevelId ? (
+                          <p className="text-xs text-muted-foreground">
+                            {nameOf(reference.data?.cadreLevels, row.cadreLevelId)}
+                            {row.supervisionAvailable ? ' · supervised' : ''}
+                          </p>
+                        ) : null}
                       </Link>
                     </TableCell>
                     <TableCell>
@@ -410,7 +418,7 @@ export default function ShiftsPage() {
                           <Button
                             size="sm"
                             variant="ghost"
-                            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                            className="text-destructive-text hover:bg-destructive/10 hover:text-destructive-text"
                             onClick={() => {
                               setCancelling(row);
                               setReason('');

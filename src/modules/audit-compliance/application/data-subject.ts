@@ -38,6 +38,12 @@ export const DataSubjectErrors = {
       'Only a request still waiting can be picked up.',
       409,
     ),
+  erasureMustBeCarriedOut: () =>
+    new HttpError(
+      'erasure_must_be_carried_out',
+      'An erasure is completed by carrying it out, not by saying it was done. Use Erase, or refuse it with the reason.',
+      409,
+    ),
 };
 
 export interface RequestView {
@@ -106,8 +112,8 @@ export async function raiseRequest(input: {
       actorId: input.userId,
       scopeType: 'SELF',
       scopeId: input.userId,
-      reason: input.detail,
-      after: { kind: input.kind, dueBy: row.dueBy },
+      // What the person wrote stays on the request, where erasure can reach it.
+      after: { kind: input.kind, dueBy: row.dueBy, hasDetail: Boolean(input.detail?.trim()) },
     });
 
     return row;
@@ -188,6 +194,11 @@ export async function closeRequest(input: {
   // A refusal is a lawful outcome and has to be recorded as carefully as a
   // grant — more so, because it is the one somebody appeals.
   if (!input.outcome?.trim()) throw DataSubjectErrors.outcomeRequired();
+  // Closing an erasure as done recorded words and deleted nothing (AUD-01).
+  // Carrying it out closes it; only a refusal is closed by hand.
+  if (existing.kind === 'ERASURE' && input.status === 'COMPLETED') {
+    throw DataSubjectErrors.erasureMustBeCarriedOut();
+  }
 
   const updated = await prisma.$transaction(async (tx: Tx) => {
     const row = await tx.dataSubjectRequest.update({
@@ -332,6 +343,7 @@ export async function exportSubjectData(userId: string) {
     acceptances,
     requests,
     payouts,
+    payoutAccounts,
   ] = await Promise.all([
     prisma.user.findUnique({
       where: { id: userId },
@@ -367,6 +379,21 @@ export async function exportSubjectData(userId: string) {
     }),
     prisma.dataSubjectRequest.findMany({ where: { userId } }),
     prisma.payout.findMany({ where: { practitionerId: userId } }),
+    // Never the sealed number or the hash of it: the last four digits, which is what
+    // the person sees of their own account anywhere in the product.
+    prisma.payoutAccount.findMany({
+      where: { userId },
+      select: {
+        bankName: true,
+        accountName: true,
+        accountLast4: true,
+        status: true,
+        createdAt: true,
+        reviewedAt: true,
+        reviewNote: true,
+      },
+      orderBy: { createdAt: 'asc' },
+    }),
   ]);
 
   if (!user) throw DataSubjectErrors.notFound();
@@ -381,6 +408,8 @@ export async function exportSubjectData(userId: string) {
       ledger:
         'Financial entries have another party on the other side of them. Your own payments appear under "payouts".',
       nin: 'Your NIN is not stored — only a keyed digest of it and the last four digits, which are shown.',
+      bankAccountNumbers:
+        'Your bank account numbers are stored sealed and are opened only to make a transfer to you. Only the last four digits are shown here, as they are everywhere else.',
     },
     account: user,
     profile,
@@ -398,6 +427,7 @@ export async function exportSubjectData(userId: string) {
     })),
     dataSubjectRequests: requests,
     payouts,
+    payoutAccounts,
   };
 }
 
@@ -408,11 +438,14 @@ export async function exportSubjectData(userId: string) {
  * the subject is entitled to before they ask, and an exception is a poor way
  * to carry three reasons and an explanation.
  */
-export async function assessErasure(userId: string) {
+export async function assessErasure(
+  userId: string,
+  db: Pick<Tx, 'assignment' | 'dispute' | 'ledgerEntry'> = prisma,
+) {
   const [confirmedAssignments, owedKobo, openDisputes] = await Promise.all([
-    prisma.assignment.count({ where: { userId, status: 'CONFIRMED' } }),
-    amountOwed(userId),
-    prisma.dispute.count({
+    db.assignment.count({ where: { userId, status: 'CONFIRMED' } }),
+    amountOwed(userId, db),
+    db.dispute.count({
       where: { assignment: { userId }, status: { in: ['OPEN', 'UNDER_REVIEW'] } },
     }),
   ]);

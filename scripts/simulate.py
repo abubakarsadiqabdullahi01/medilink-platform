@@ -233,7 +233,7 @@ def main():
     prac = Client("practitioner")
 
     status, body = prac.call(
-        "POST", "/api/v1/auth/register", {"phone": phone, "fullName": "Simulated Practitioner"}
+        "POST", "/api/v1/auth/register", {"phone": phone, "fullName": "Simulated Practitioner", "acceptedTerms": True}
     )
     check("registers with a phone and a name", status in (200, 201, 202), f"{status} {str(body)[:140]}")
 
@@ -241,10 +241,12 @@ def main():
     check("a one-time code is sent", code is not None, "nothing in the console adapter's output")
 
     if code:
-        status, _ = prac.call("POST", "/api/v1/auth/verify-phone", {"phone": phone, "code": code})
+        status, verified = prac.call("POST", "/api/v1/auth/verify-phone", {"phone": phone, "code": code})
         check("the phone verifies", status == 200, f"got {status}")
         status, _ = prac.call(
-            "POST", "/api/v1/auth/set-password", {"phone": phone, "password": NEW_PASSWORD}
+            "POST",
+            "/api/v1/auth/set-password",
+            {"phone": phone, "password": NEW_PASSWORD, "setupToken": verified.get("setupToken", "")},
         )
         check("a password is set", status == 200, f"got {status}")
         status, _ = prac.login(phone, NEW_PASSWORD)
@@ -540,8 +542,7 @@ def main():
             {
                 "facilityId": own_facility_id,
                 "professionalCategoryId": category_id,
-                "shiftType": "DAY",
-                "startsAt": iso(datetime.now(timezone.utc) + timedelta(hours=3)),
+                    "startsAt": iso(datetime.now(timezone.utc) + timedelta(hours=3)),
                 "endsAt": iso(datetime.now(timezone.utc) + timedelta(hours=11)),
                 "headcount": 1,
                 "hourlyRateKobo": 700000,
@@ -604,7 +605,6 @@ def main():
         {
             "facilityId": facility_id,
             "professionalCategoryId": category_id,
-            "shiftType": "DAY",
             "startsAt": iso(datetime.now(timezone.utc) + timedelta(hours=3)),
             "endsAt": iso(datetime.now(timezone.utc) + timedelta(hours=11)),
             "headcount": 1,
@@ -628,11 +628,15 @@ def main():
     # anybody work in it — every scheduler had to be made by a script.
     ward = Client("ward manager")
     ward_phone = unique_phone()
-    ward.call("POST", "/api/v1/auth/register", {"phone": ward_phone, "fullName": "Simulated Ward Manager"})
+    ward.call("POST", "/api/v1/auth/register", {"phone": ward_phone, "fullName": "Simulated Ward Manager", "acceptedTerms": True})
     ward_code = otp_from_logs(ward_phone)
     if ward_code:
-        ward.call("POST", "/api/v1/auth/verify-phone", {"phone": ward_phone, "code": ward_code})
-        ward.call("POST", "/api/v1/auth/set-password", {"phone": ward_phone, "password": NEW_PASSWORD})
+        _, ward_verified = ward.call("POST", "/api/v1/auth/verify-phone", {"phone": ward_phone, "code": ward_code})
+        ward.call(
+            "POST",
+            "/api/v1/auth/set-password",
+            {"phone": ward_phone, "password": NEW_PASSWORD, "setupToken": ward_verified.get("setupToken", "")},
+        )
         ward.login(ward_phone, NEW_PASSWORD)
     status, body = ward.call("GET", "/api/v1/auth/session")
     ward_id = body.get("user", {}).get("id")
@@ -722,7 +726,6 @@ def main():
         {
             "facilityId": facility_id,
             "professionalCategoryId": category_id,
-            "shiftType": "DAY",
             "startsAt": iso(starts),
             "endsAt": iso(ends),
             "headcount": 1,
@@ -742,7 +745,6 @@ def main():
         {
             "facilityId": facility_id,
             "professionalCategoryId": category_id,
-            "shiftType": "DAY",
             "startsAt": iso(starts),
             "endsAt": iso(ends),
             "headcount": 1,
@@ -901,6 +903,9 @@ def main():
     section("11.  Module 12 — invoiced, paid, settled")
     finance = Client("finance")
     status, _ = finance.login(by_key["superadmin"]["phone"])
+    # Issuing, recording payment and preparing or releasing a payout all need the
+    # password confirmed again (payout.manage is a step-up permission).
+    finance.call("POST", "/api/v1/auth/step-up", {"password": PASSWORD})
     period_start = datetime.now(timezone.utc) - timedelta(days=45)
     period_end = datetime.now(timezone.utc) + timedelta(days=45)
 
@@ -919,9 +924,16 @@ def main():
     note(f"gross {gross} kobo across {len(body.get('lines', []))} line(s), fee {body.get('platformFeeKobo')}")
 
     if raised and invoice_id:
-        status, body = finance.call(
-            "POST", f"/api/v1/invoices/{invoice_id}/pay", {"facilityId": facility_id}
-        )
+        # What a payment record has to say: the bank's reference, the amount, the
+        # date the money arrived (Lagos) and who paid.
+        payment = {
+            "facilityId": facility_id,
+            "paymentReference": f"SIM-TRF-{invoice_id[:8]}",
+            "amountKobo": gross,
+            "paidOn": datetime.now(timezone(timedelta(hours=1))).date().isoformat(),
+            "payerName": "Simulated facility",
+        }
+        status, body = finance.call("POST", f"/api/v1/invoices/{invoice_id}/pay", payment)
         check("a draft cannot be paid before it is issued", status == 409, f"got {status}")
 
         status, body = finance.call(
@@ -930,8 +942,11 @@ def main():
         check("it is issued", status == 200, f"{status} {str(body)[:140]}")
 
         status, body = finance.call(
-            "POST", f"/api/v1/invoices/{invoice_id}/pay", {"facilityId": facility_id}
+            "POST", f"/api/v1/invoices/{invoice_id}/pay", {**payment, "amountKobo": (gross or 0) - 100}
         )
+        check("a payment for less than the invoice is refused", status == 422, f"got {status}")
+
+        status, body = finance.call("POST", f"/api/v1/invoices/{invoice_id}/pay", payment)
         check("and recorded as paid", status == 200, f"{status} {str(body)[:140]}")
 
         status, body = finance.call("POST", "/api/v1/payouts", {"practitionerId": prac_id})
@@ -940,8 +955,17 @@ def main():
         note(f"{body.get('amountKobo')} kobo owed")
 
         if prepared and payout_id:
+            # The person who prepared a payout cannot release it (UXO-03): a second
+            # finance-capable person does, here the operations officer.
             status, body = finance.call("POST", f"/api/v1/payouts/{payout_id}/release", {})
-            check("and released through the gateway", status == 200, f"{status} {str(body)[:140]}")
+            check(
+                "the person who prepared a payout cannot release it",
+                status == 403 and body.get("error", {}).get("code") == "second_approver_required",
+                f"{status} {str(body)[:140]}",
+            )
+            ops.call("POST", "/api/v1/auth/step-up", {"password": PASSWORD})
+            status, body = ops.call("POST", f"/api/v1/payouts/{payout_id}/release", {})
+            check("and a colleague can release it through the gateway", status == 200, f"{status} {str(body)[:140]}")
             check(
                 "the reference says it is a stub, so nobody mistakes it for a bank one",
                 str(body.get("providerReference", "")).startswith("stub-"),

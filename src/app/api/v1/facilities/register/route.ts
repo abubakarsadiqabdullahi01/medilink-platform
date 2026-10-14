@@ -17,8 +17,8 @@ import { registerFacilitySchema } from '@/modules/facilities/presentation/schema
  *
  * What makes it safe is the gate that already existed rather than anything
  * new here. A facility is created `PENDING` and **a pending facility cannot
- * publish a shift**; compliance still verifies every one against its CAC
- * registration and its licence before it can do anything at all. Self-service
+ * publish a shift**; compliance still verifies every one against its registration
+ * reference and its licence before it can do anything at all. Self-service
  * moves who types the details, not who decides.
  *
  * `createFacility` grants the registrant `facility_owner` over what they

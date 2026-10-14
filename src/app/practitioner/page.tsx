@@ -288,7 +288,7 @@ function Overview() {
               {invitations.isPending ? (
                 <Skeleton className="h-9 w-12" />
               ) : invitations.isError ? (
-                <p className="text-sm text-destructive">Could not load</p>
+                <p className="text-sm text-destructive-text">Could not load</p>
               ) : (
                 <>
                   <p className="tabular text-3xl font-semibold">{open.length}</p>
@@ -316,7 +316,7 @@ function Overview() {
               {assignments.isPending ? (
                 <Skeleton className="h-9 w-40" />
               ) : assignments.isError ? (
-                <p className="text-sm text-destructive">Could not load</p>
+                <p className="text-sm text-destructive-text">Could not load</p>
               ) : next ? (
                 <>
                   <p className="font-medium">{formatWhen(next.startsAt)}</p>

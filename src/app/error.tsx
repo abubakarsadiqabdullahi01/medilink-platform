@@ -30,7 +30,7 @@ export default function ErrorBoundary({
   return (
     <main className="flex min-h-[60vh] items-center justify-center p-6">
       <div className="w-full max-w-md text-center">
-        <span className="mx-auto flex size-12 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
+        <span className="mx-auto flex size-12 items-center justify-center rounded-xl bg-destructive/10 text-destructive-text">
           <TriangleAlert className="size-6" aria-hidden="true" />
         </span>
 
