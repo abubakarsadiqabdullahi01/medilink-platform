@@ -200,6 +200,15 @@ async function main(): Promise<void> {
     representativeUserId: pendingOwner.id,
     actorId: admin.id,
   });
+  // A facility in the queue has given its licence, and verifying it needs one on file (UXO-02).
+  // Set directly: the journey is about the officer's checks, not about the upload.
+  await prisma.facility.update({
+    where: { id: pendingFacility.id },
+    data: {
+      licenceNumber: 'E2E/LIC/0002',
+      licenceObjectKey: `facility-licence/${pendingFacility.id}/licence.pdf`,
+    },
+  });
 
   // -------------------------------------------------------- practitioners
   // Cleared to work: every blocker in practitioners/domain/eligibility.ts

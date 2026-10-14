@@ -14,15 +14,22 @@ import { world } from './support/world';
  */
 test.describe.configure({ mode: 'serial' });
 
-const marker = `E2E incident ${Date.now()}`;
+// Six digits, not the whole timestamp: a report is refused when it holds a run of nine or more
+// (it could be a patient's NIN or phone number), and this one is typed into a real report form.
+const marker = `E2E incident ${String(Date.now()).slice(-6)}`;
 
 test('an administrator verifies a facility waiting in the queue', async ({ page }) => {
   await signIn(page, world().admin);
   await page.goto('/admin/facilities');
-  await page.getByLabel('Search by name or CAC number').fill(world().pendingFacility.name);
+  await page.getByLabel('Search by name or registration number').fill(world().pendingFacility.name);
   await page.getByRole('button', { name: 'Search' }).click();
 
   await page.getByRole('button').filter({ hasText: world().pendingFacility.name }).click();
+  // Verify stays disabled until the officer says what they checked (UXO-02).
+  await page.getByLabel('I opened the licence document and it is legible').check();
+  await page.getByLabel(/The name and address on it are this facility/).check();
+  await page.getByLabel('I checked the registration reference with whoever issued it').check();
+  await page.getByLabel('How did you check it?').fill('Phoned the issuing council and read the licence number back.');
   await page.getByRole('button', { name: 'Verify', exact: true }).click();
   await expectToast(page, 'Facility verified');
 

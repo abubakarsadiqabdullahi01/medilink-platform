@@ -126,6 +126,12 @@ services:
       STORAGE_PUBLIC_ENDPOINT: http://localhost:9000
       SMTP_URL: smtp://mail:1025
       SMS_CONSOLE_OUTBOX: .e2e/sms-outbox.jsonl
+      # The money journey is about the invoice and the payout, not about two finance
+      # officers or a verified bank account: those two controls are off for it, and
+      # have their own integration tests. (The stub gateway is `PAYMENT_PROVIDER=console`
+      # in .env.)
+      PAYOUT_SECOND_APPROVER: "off"
+      PAYOUT_REQUIRES_ACCOUNT: "off"
     env_file:
       - .env
     ports:

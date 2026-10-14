@@ -149,6 +149,13 @@ jobs:
       # codes off the console SMS adapter — which only runs in local.
       APP_ENV: local
       SMS_CONSOLE_OUTBOX: .e2e/sms-outbox.jsonl
+      # The money journey pays a nurse through the stub gateway, as a laptop's .env does
+      # (the default is `none`, which refuses every payout). It is about the invoice and
+      # the payout, not about two finance officers or a verified bank account, so those two
+      # controls are off for it and covered by their own integration tests.
+      PAYMENT_PROVIDER: console
+      PAYOUT_SECOND_APPROVER: 'off'
+      PAYOUT_REQUIRES_ACCOUNT: 'off'
     services:
       postgres:
         image: postgres:16

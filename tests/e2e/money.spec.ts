@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
-import { signIn } from './support/session';
-import { card, expectToast, lagosLocal } from './support/ui';
+import { confirmPassword, signIn } from './support/session';
+import { card, confirmItIsYou, expectToast, lagosLocal } from './support/ui';
 import { world } from './support/world';
 
 /**
@@ -36,6 +36,9 @@ test('an administrator raises an invoice for the approved work and issues it', a
   await page.getByLabel('From').fill(lagosLocal(new Date(Date.now() - 3 * DAY)).slice(0, 10));
   await page.getByLabel('Until').fill(lagosLocal(new Date()).slice(0, 10));
   await page.getByRole('button', { name: 'Raise' }).click();
+  // Money moves from here, so the first act of a sign-in asks for the password again;
+  // the issue below is inside the few minutes that answer is good for.
+  await confirmItIsYou(page);
   await expectToast(page, 'Draft raised');
 
   const invoice = card(page, world().practitioner.fullName).filter({
@@ -59,11 +62,18 @@ test('the hospital sees what it owes, shift by shift', async ({ page }) => {
 
 test('the payment is recorded, and the hospital owes nothing', async ({ page }) => {
   await signIn(page, world().admin);
+  await confirmPassword(page);
   await page.goto('/admin/invoices');
   await page.getByLabel('Facility').click();
   await page.getByPlaceholder('Search facilities…').fill('E2E General');
   await page.getByRole('option', { name: /^E2E General Hospital/ }).click();
   await page.getByRole('button', { name: 'Record payment' }).click();
+  // The transfer is recorded as the bank statement shows it: reference and amount, with the
+  // date (today) and the payer (the hospital) already filled in. Not the card's button.
+  const dialog = page.getByRole('dialog', { name: /^Record payment of / });
+  await dialog.getByLabel('Bank reference for the transfer').fill('E2E-TRANSFER-0001');
+  await dialog.getByLabel('Amount received (₦)').fill(gross.replace(/[₦,]/g, ''));
+  await dialog.getByRole('button', { name: 'Record payment' }).click();
   await expectToast(page, 'Recorded as paid');
 
   await page.context().clearCookies();
@@ -84,6 +94,7 @@ test('the nurse sees what she is owed', async ({ page }) => {
 
 test('finance pays her, and her earnings say so', async ({ page }) => {
   await signIn(page, world().admin);
+  await confirmPassword(page);
   await page.goto('/admin/payouts');
   await page.getByLabel('Search by name or number').fill(world().practitioner.fullName);
   await page.getByRole('button', { name: 'Search' }).click();
