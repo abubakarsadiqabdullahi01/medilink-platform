@@ -168,15 +168,20 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # MinIO stands in for Tigris, as it does in docker-compose. Started by
-      # hand because a service container cannot be given `server /data`. The
-      # images come from quay.io: MinIO no longer publishes to Docker Hub, which
-      # answers "pull access denied" for minio/minio.
+      # MinIO stands in for Tigris, as it does in docker-compose. MinIO no longer
+      # publishes its images (minio/minio on Docker Hub and quay.io/minio/minio both
+      # refuse a pull), so this is Bitnami's frozen archive of the last community
+      # build: the same server, started with its own entrypoint rather than
+      # `server /data`, which is why the arguments differ from MinIO's own image.
       - name: object storage
         run: |
-          docker run -d --name minio -p 9000:9000             -e MINIO_ROOT_USER=medilink -e MINIO_ROOT_PASSWORD=medilink-secret             quay.io/minio/minio server /data
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=medilink -e MINIO_ROOT_PASSWORD=medilink-secret \
+            bitnamilegacy/minio:2025.7.23-debian-12-r5
           for i in $(seq 1 30); do curl -sf http://localhost:9000/minio/health/live && break; sleep 2; done
-          docker run --rm --network host --entrypoint sh quay.io/minio/mc -c             "mc alias set local http://localhost:9000 medilink medilink-secret && mc mb --ignore-existing local/medilink-documents"
+          docker run --rm --network host --entrypoint sh bitnamilegacy/minio-client:2025.7.21-debian-12-r3 -c \
+            "mc alias set local http://localhost:9000 medilink medilink-secret && mc mb --ignore-existing local/medilink-documents" \
+            || { docker logs minio; exit 1; }
       - run: pnpm prisma migrate deploy && pnpm db:seed
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm build
