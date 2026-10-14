@@ -9,7 +9,7 @@ export const INTRO = {
   profile:
     'Your profession and where you are based. The matcher scores proximity against them, so they decide which shifts you are offered.',
   availability:
-    'A standing weekly pattern, plus the dates you are away. The matcher reads both — a shift you are not available for is never offered to you.',
+    'A standing weekly pattern, the odd night or day you are free, and the dates you are away. The matcher reads all three — a shift you are not available for is never offered to you.',
   credentials:
     'Every mandatory credential for your profession has to be verified before you can be offered work. A reviewer checks each one by hand.',
   privacy:
