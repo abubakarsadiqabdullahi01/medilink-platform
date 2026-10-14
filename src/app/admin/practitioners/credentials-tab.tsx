@@ -8,13 +8,14 @@ import { api, errorMessage } from '@/lib/ui/api';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
 import { StatusBadge } from '@/components/app/status-badge';
 import { Detail, DetailGrid, EmptyState, QueueSkeleton } from '@/components/app/page-shell';
 import { DocumentDialog } from '@/components/app/document-dialog';
-import { formatAgo, formatDate } from '@/components/app/format';
+import { expiryOf, formatAgo, formatDate } from '@/components/app/format';
 import { isRecordChecked, usePractitionerSubmissions } from './submissions';
 
 /**
@@ -44,6 +45,8 @@ export function CredentialsTab({
 }) {
   const queryClient = useQueryClient();
   const [notes, setNotes] = useState<Record<string, string>>({});
+  // The expiry date the reviewer reads off a document, per submission.
+  const [printed, setPrinted] = useState<Record<string, string>>({});
 
   const queue = usePractitionerSubmissions(userId);
 
@@ -58,6 +61,7 @@ export function CredentialsTab({
       api.post(`/api/v1/credentials/${id}/review`, {
         decision,
         reviewNotes: notes[id]?.trim() || undefined,
+        printedExpiryDate: decision === 'approve' ? printed[id] || undefined : undefined,
       }),
     onSuccess: (_result, { decision }) => {
       toast.success(
@@ -122,7 +126,7 @@ export function CredentialsTab({
                 <Detail label="Document">
                   {row.documentObjectKey ? 'Attached' : 'None attached'}
                 </Detail>
-                <Detail label="Expires">{formatDate(row.expiresAt)}</Detail>
+                <Detail label="Expires">{expiryOf(row)?.text ?? '—'}</Detail>
                 <Detail label="Submitted">{formatDate(row.createdAt)}</Detail>
               </DetailGrid>
 
@@ -172,6 +176,27 @@ export function CredentialsTab({
                       }
                     />
                   </div>
+
+                  {row.credentialTypeExpires && !isRecordChecked(row) ? (
+                    <div className="space-y-2">
+                      <Label htmlFor={`printed-${row.id}`}>
+                        Expiry date on the document{' '}
+                        <span className="font-normal text-muted-foreground">
+                          — read it off the document. If none is printed, leave it empty and an
+                          estimate is used.
+                        </span>
+                      </Label>
+                      <Input
+                        id={`printed-${row.id}`}
+                        type="date"
+                        className="max-w-xs"
+                        value={printed[row.id] ?? ''}
+                        onChange={(event) =>
+                          setPrinted((current) => ({ ...current, [row.id]: event.target.value }))
+                        }
+                      />
+                    </div>
+                  ) : null}
 
                   <div className="flex flex-wrap gap-2">
                     {isRecordChecked(row) ? (

@@ -26,7 +26,7 @@ import {
   referenceProblem,
   referenceToSend,
 } from './evidence-fields';
-import { formatAgo, formatDate } from '@/components/app/format';
+import { expiryOf, formatAgo } from '@/components/app/format';
 
 interface Submission {
   id: string;
@@ -34,6 +34,7 @@ interface Submission {
   status: string;
   referenceNumber: string | null;
   expiresAt: string | null;
+  documentExpiresOn: string | null;
   reviewNotes: string | null;
   createdAt: string;
 }
@@ -226,7 +227,7 @@ export function CredentialsSection({
                       <p className="mt-0.5 text-xs text-muted-foreground">
                         {row.referenceNumber ?? 'Document attached'} · submitted{' '}
                         {formatAgo(row.createdAt)}
-                        {row.expiresAt ? ` · expires ${formatDate(row.expiresAt)}` : ''}
+                        {expiryOf(row) ? ` · expires ${expiryOf(row)!.text}` : ''}
                       </p>
                     </div>
                     <StatusBadge status={row.status} />

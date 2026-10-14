@@ -78,6 +78,14 @@ export const reviewCredentialSchema = z
     id: z.string().uuid(),
     decision: z.enum(['approve', 'reject', 'request_info']),
     reviewNotes: reviewNotes.optional(),
+    // Read off the document by the reviewer. Whether it is a real date, in the
+    // past, or for a type that expires is the application's to say, so it can
+    // say why; the shape alone is checked here.
+    printedExpiryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Write the date as year-month-day.').optional(),
+  })
+  .refine((value) => value.printedExpiryDate === undefined || value.decision === 'approve', {
+    message: 'An expiry date is recorded when a credential is approved, and at no other time.',
+    path: ['printedExpiryDate'],
   })
   .refine((value) => value.decision === 'approve' || Boolean(value.reviewNotes?.length), {
     // A rejection without a reason cannot be acted on, and a request for more

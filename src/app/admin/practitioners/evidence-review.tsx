@@ -489,7 +489,10 @@ function RegistrationCard({
               <div className="space-y-1.5">
                 <Label htmlFor={`expires-${row.id}`}>
                   Expiry date on the licence{' '}
-                  <span className="font-normal text-muted-foreground">— optional</span>
+                  <span className="font-normal text-muted-foreground">
+                    — optional. It is also the date the practitioner sees as when this credential
+                    expires.
+                  </span>
                 </Label>
                 <Input
                   id={`expires-${row.id}`}

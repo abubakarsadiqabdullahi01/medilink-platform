@@ -524,10 +524,14 @@ model CredentialSubmission {
   reviewedBy  String?   @map("reviewed_by") @db.Uuid
   reviewedAt  DateTime? @map("reviewed_at")
   reviewNotes String?   @map("review_notes")
-  // Computed once at verification time from credentialType.reviewDays when
-  // credentialType.expires is true. Nothing reads this yet — no expiry
-  // sweep exists — stored now so a future one is additive, not a backfill.
+  // The instant this stops counting, which the expiry sweep and the warnings
+  // act on. When the reviewer read a date off the document it is the end of
+  // that day in Lagos; with none read it is the review date plus the type's
+  // reviewDays, and documentExpiresOn is null so every screen can say so.
   expiresAt DateTime? @map("expires_at")
+  // The date printed on the document, as the reviewer read it. The one the
+  // practitioner is shown (CRE-04).
+  documentExpiresOn DateTime? @map("document_expires_on") @db.Date
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
   deletedAt DateTime? @map("deleted_at")

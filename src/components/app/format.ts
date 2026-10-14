@@ -26,6 +26,27 @@ export function formatDate(value: string | Date | null | undefined): string {
   });
 }
 
+/**
+ * When a credential expires, in words, and whether the date is the document's.
+ *
+ * The date printed on the document is the one a practitioner recognises (CRE-04).
+ * A credential verified without one has only an estimate, worked out from the
+ * review date, and showing it as if it were printed would put a date in front of
+ * somebody that appears nowhere on what they uploaded.
+ */
+export function expiryOf(row: {
+  expiresAt: string | Date | null;
+  documentExpiresOn?: string | null;
+}): { date: string; fromDocument: boolean; text: string } | null {
+  if (row.documentExpiresOn) {
+    const date = formatDate(row.documentExpiresOn);
+    return { date, fromDocument: true, text: date };
+  }
+  if (!row.expiresAt) return null;
+  const date = formatDate(row.expiresAt);
+  return { date, fromDocument: false, text: `${date} (an estimate, no date was read from the document)` };
+}
+
 /** "3 hours ago", for a queue where age is the thing you are scanning for. */
 export function formatAgo(value: string | Date | null | undefined): string {
   if (!value) return '—';

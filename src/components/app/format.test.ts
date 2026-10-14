@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { recordLabel } from './format';
+import { expiryOf, formatDate, recordLabel } from './format';
 
 describe('recordLabel', () => {
   it('turns the tables the audit trail actually writes into nouns', () => {
@@ -36,5 +36,31 @@ describe('recordLabel', () => {
   it('says something rather than nothing when the row carries no type', () => {
     expect(recordLabel(null)).toBe('Record');
     expect(recordLabel('')).toBe('Record');
+  });
+});
+
+describe('expiryOf', () => {
+  it('shows the date printed on the document, as that date', () => {
+    const result = expiryOf({ expiresAt: '2027-03-31T23:00:00.000Z', documentExpiresOn: '2027-03-31' });
+
+    expect(result).toEqual({ date: formatDate('2027-03-31'), fromDocument: true, text: formatDate('2027-03-31') });
+    expect(result?.text).toContain('31');
+    expect(result?.text).toContain('Mar');
+  });
+
+  it('does not let the instant the credential ends push the printed day forward', () => {
+    // 23:00 UTC on the 31st is midnight in Lagos: the next day. The printed date is the 31st.
+    expect(expiryOf({ expiresAt: '2027-03-31T23:00:00.000Z', documentExpiresOn: '2027-03-31' })?.text).toMatch(/^31 Mar/);
+  });
+
+  it('says an estimate is one, when no date was read', () => {
+    const result = expiryOf({ expiresAt: '2027-10-14T10:00:00.000Z', documentExpiresOn: null });
+
+    expect(result?.fromDocument).toBe(false);
+    expect(result?.text).toMatch(/estimate/i);
+  });
+
+  it('has nothing to say for a credential that does not expire', () => {
+    expect(expiryOf({ expiresAt: null, documentExpiresOn: null })).toBeNull();
   });
 });

@@ -7,6 +7,7 @@
  * practitioner who says "tonight" means tonight in Nigeria, and a phone on
  * roaming or with the wrong zone must not move their evening.
  */
+import { lagosDate, startOfLagosDay } from '@/lib/lagos-date';
 import { WAT_OFFSET_MINUTES, type TimeWindow } from './availability';
 
 const MINUTE = 60 * 1000;
@@ -19,22 +20,7 @@ const TONIGHT_UNTIL_HOUR = 8;
 const NIGHT_ENDS_HOUR = 6;
 
 /** The Lagos calendar day containing this instant, as `YYYY-MM-DD`. */
-export function watDate(at: Date): string {
-  return new Date(at.getTime() + WAT_OFFSET_MINUTES * MINUTE).toISOString().slice(0, 10);
-}
-
-/** The instant of midnight in Lagos at the start of a `YYYY-MM-DD` date. */
-function dayStart(date: string): Date {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
-  if (!match) throw new Error(`"${date}" is not a date written year-month-day.`);
-  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
-  const utc = new Date(Date.UTC(year, month - 1, day));
-  // Date.UTC rolls 2026-13-40 into a real date; a rolled one is a typo.
-  if (utc.getUTCFullYear() !== year || utc.getUTCMonth() !== month - 1 || utc.getUTCDate() !== day) {
-    throw new Error(`"${date}" is not a real date.`);
-  }
-  return new Date(utc.getTime() - WAT_OFFSET_MINUTES * MINUTE);
-}
+export const watDate = lagosDate;
 
 function minuteOfDay(clock: string): number {
   const match = /^(\d{2}):(\d{2})$/.exec(clock);
@@ -56,7 +42,7 @@ export function windowOnDate(
   date: string,
   hours: 'all_day' | { from: string; to: string },
 ): TimeWindow {
-  const start = dayStart(date);
+  const start = startOfLagosDay(date);
   if (hours === 'all_day') return { startsAt: start, endsAt: new Date(start.getTime() + DAY) };
 
   const from = minuteOfDay(hours.from);
@@ -78,8 +64,8 @@ export function tonight(now: Date): TimeWindow {
   const today = watDate(now);
   const evening =
     shifted.getUTCHours() < NIGHT_ENDS_HOUR
-      ? dayStart(today).getTime() - DAY + TONIGHT_FROM_HOUR * 60 * MINUTE
-      : dayStart(today).getTime() + TONIGHT_FROM_HOUR * 60 * MINUTE;
+      ? startOfLagosDay(today).getTime() - DAY + TONIGHT_FROM_HOUR * 60 * MINUTE
+      : startOfLagosDay(today).getTime() + TONIGHT_FROM_HOUR * 60 * MINUTE;
   const startsAt = new Date(evening);
   return {
     startsAt,
@@ -89,6 +75,6 @@ export function tonight(now: Date): TimeWindow {
 
 /** All of today, or of a day ahead, in Lagos. */
 export function allDay(now: Date, daysAhead = 0): TimeWindow {
-  const start = new Date(dayStart(watDate(now)).getTime() + daysAhead * DAY);
+  const start = new Date(startOfLagosDay(watDate(now)).getTime() + daysAhead * DAY);
   return { startsAt: start, endsAt: new Date(start.getTime() + DAY) };
 }

@@ -6,6 +6,7 @@ import {
   type SubmissionForVerification,
 } from '@/modules/credentials/application/submission';
 import { CredentialErrors } from '@/modules/credentials/domain/errors';
+import { printedExpiryProblem } from '@/modules/credentials/domain/submission';
 import {
   recordIdentityVerification,
   recordProfessionalRegistration,
@@ -141,6 +142,22 @@ export async function confirmRegistrationFromSubmission(input: {
     );
   }
 
+  // The date the officer read off the licence is the credential's own expiry too
+  // (CRE-04), not one worked out from the review date. Checked before anything
+  // is recorded, like everything else here: a licence that has already expired is
+  // not one to approve, and the refusal should leave no registration behind. A
+  // licence the officer is recording as suspended or lapsed is rejected, never
+  // approved, so its date is not held to that.
+  const printedExpiry =
+    submission.credentialTypeExpires && input.expiresAt
+      ? input.expiresAt.toISOString().slice(0, 10)
+      : undefined;
+  const mayBeApproved = input.registrationStatus === undefined || input.registrationStatus === 'ACTIVE';
+  const problem = mayBeApproved
+    ? printedExpiryProblem({ expires: submission.credentialTypeExpires }, printedExpiry, new Date())
+    : null;
+  if (problem) throw CredentialErrors.printedExpiryInvalid(problem);
+
   const registration = await recordProfessionalRegistration({
     userId: submission.userId,
     regulator: profile.professionalCategory.regulator,
@@ -170,6 +187,7 @@ export async function confirmRegistrationFromSubmission(input: {
     reviewerId: input.actorId,
     decision: 'approve',
     reviewNotes: 'Checked against the licence they submitted.',
+    printedExpiryDate: printedExpiry,
   });
 
   return { outcome: 'CONFIRMED', registration };
