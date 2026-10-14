@@ -1,3 +1,5 @@
+import { instantToLagosLocal } from '@/lib/lagos-date';
+
 /**
  * Formatting, in one place, because a date shown two ways on two pages is a
  * date somebody misreads.
@@ -117,15 +119,14 @@ export function formatMinutes(minutes: number | null | undefined): string {
 }
 
 /**
- * An instant as a `datetime-local` input wants it: `YYYY-MM-DDTHH:mm` in the
- * browser's own time, which for every user of this product is WAT.
+ * An instant as a `datetime-local` input wants it: `YYYY-MM-DDTHH:mm`, in Lagos
+ * time and not in whatever zone the device is set to. Read back with
+ * `lagosLocalToInstant`.
  */
 export function toLocalInput(value: string | Date | null | undefined): string {
   if (!value) return '';
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  return Number.isNaN(date.getTime()) ? '' : instantToLagosLocal(date);
 }
 
 /** A uuid nobody needs to read in full, but which has to be recognisable. */

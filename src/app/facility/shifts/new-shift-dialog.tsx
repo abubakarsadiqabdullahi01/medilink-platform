@@ -28,6 +28,7 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { formatNaira } from '@/components/app/format';
+import { lagosLocalToInstant } from '@/lib/lagos-date';
 
 /**
  * Publishing a shift.
@@ -76,8 +77,8 @@ export function NewShiftDialog({ facilityId }: { facilityId: string }) {
         professionalCategoryId: categoryId,
         specialtyId: specialtyId || undefined,
         shiftType,
-        startsAt: new Date(startsAt).toISOString(),
-        endsAt: new Date(endsAt).toISOString(),
+        startsAt: lagosLocalToInstant(startsAt).toISOString(),
+        endsAt: lagosLocalToInstant(endsAt).toISOString(),
         headcount: Number(headcount),
         hourlyRateKobo,
         urgency,

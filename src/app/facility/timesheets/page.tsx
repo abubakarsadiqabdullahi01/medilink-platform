@@ -38,6 +38,7 @@ import {
   QueueSkeleton,
 } from '@/components/app/page-shell';
 import { formatMinutes, formatNaira, formatWhen, toLocalInput } from '@/components/app/format';
+import { lagosLocalToInstant } from '@/lib/lagos-date';
 
 interface Assignment {
   id: string;
@@ -229,9 +230,9 @@ export default function TimesheetsPage() {
         breakMinutes: Number(breakMinutes || '0'),
         onCallMinutes: Number(onCallMinutes || '0'),
         checkedInAt:
-          checkedIn && checkedIn !== recordedTimes.in ? new Date(checkedIn).toISOString() : undefined,
+          checkedIn && checkedIn !== recordedTimes.in ? lagosLocalToInstant(checkedIn).toISOString() : undefined,
         checkedOutAt:
-          checkedOut && checkedOut !== recordedTimes.out ? new Date(checkedOut).toISOString() : undefined,
+          checkedOut && checkedOut !== recordedTimes.out ? lagosLocalToInstant(checkedOut).toISOString() : undefined,
         reason: correctionReason.trim(),
       }),
     onSuccess: () => {

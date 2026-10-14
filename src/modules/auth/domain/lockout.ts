@@ -8,6 +8,18 @@ export const LOGIN_MAX_FAILURES = 5;
 export const LOGIN_FAILURE_WINDOW_SECONDS = 900;
 export const LOGIN_LOCKOUT_SECONDS = 900;
 
+/**
+ * Failed sign-ins from one address in an hour, across every number tried.
+ *
+ * The per-number lock cannot see one address trying a thousand numbers once each.
+ * This is generous on purpose: a ward or a clinic can share one address, and what
+ * it caps is guessing, not somebody who forgot their password. The address is
+ * whatever the edge forwards (see `assertCanSendCode`): where the platform does
+ * not overwrite X-Forwarded-For a caller can rotate it, and this does not hold.
+ */
+export const LOGIN_MAX_FAILURES_PER_ADDRESS_PER_HOUR = 300;
+export const LOGIN_ADDRESS_WINDOW_SECONDS = 3600;
+
 export interface AttemptRecord {
   succeeded: boolean;
   createdAt: Date;
@@ -21,6 +33,13 @@ export interface AttemptRecord {
  * another fifteen minutes every time anybody knocked.
  */
 export const LOCKED_OUT_REASON = 'locked_out';
+
+/**
+ * An attempt refused because its address had used up its budget. Written down and
+ * not counted, for the same reason, and against the number as well: a refused
+ * knock from a throttled address must not lock the person who owns that number.
+ */
+export const ADDRESS_THROTTLED_REASON = 'address_throttled';
 
 export interface LockoutState {
   locked: boolean;
@@ -37,7 +56,7 @@ export function lockoutState(attempts: AttemptRecord[], now: Date = new Date()):
   const windowStart = now.getTime() - LOGIN_FAILURE_WINDOW_SECONDS * 1000;
 
   const recent = attempts
-    .filter((attempt) => attempt.reason !== LOCKED_OUT_REASON)
+    .filter((attempt) => attempt.reason !== LOCKED_OUT_REASON && attempt.reason !== ADDRESS_THROTTLED_REASON)
     .filter((attempt) => attempt.createdAt.getTime() > windowStart)
     .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 

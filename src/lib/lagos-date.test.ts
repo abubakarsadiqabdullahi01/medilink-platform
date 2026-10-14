@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { endOfLagosDay, isDateOnly, lagosDate, startOfLagosDay } from './lagos-date';
+import {
+  endOfLagosDay,
+  instantToLagosLocal,
+  isDateOnly,
+  lagosDate,
+  lagosLocalToInstant,
+  startOfLagosDay,
+} from './lagos-date';
 
 describe('Lagos dates', () => {
   it('names the day by Lagos, not UTC', () => {
@@ -28,5 +35,35 @@ describe('Lagos dates', () => {
 
   it('refuses to turn a bad date into an instant', () => {
     expect(() => startOfLagosDay('2027-02-30')).toThrow(/real date/);
+  });
+});
+
+describe('a typed date and time', () => {
+  it('is Lagos time, whatever zone the device is set to', () => {
+    // 20:00 in Lagos is 19:00 UTC.
+    expect(lagosLocalToInstant('2026-10-20T20:00').toISOString()).toBe('2026-10-20T19:00:00.000Z');
+    expect(lagosLocalToInstant('2026-10-20T00:30').toISOString()).toBe('2026-10-19T23:30:00.000Z');
+  });
+
+  it('accepts seconds as well', () => {
+    expect(lagosLocalToInstant('2026-10-20T20:00:30').toISOString()).toBe('2026-10-20T19:00:30.000Z');
+  });
+
+  it('refuses what is not a date and time, or not a real one', () => {
+    for (const bad of ['', '2026-10-20', '20:00', '2026-10-20 20:00', '2026-10-32T20:00', '2026-10-20T25:00', '2026-10-20T20:61']) {
+      expect(() => lagosLocalToInstant(bad), bad).toThrow();
+    }
+  });
+
+  it('turns an instant back into the value an input wants, in Lagos', () => {
+    expect(instantToLagosLocal(new Date('2026-10-20T19:00:00.000Z'))).toBe('2026-10-20T20:00');
+    expect(instantToLagosLocal(new Date('2026-10-19T23:30:00.000Z'))).toBe('2026-10-20T00:30');
+  });
+
+  it('round-trips, at every hour of a day', () => {
+    for (let hour = 0; hour < 24; hour += 1) {
+      const value = `2026-12-31T${String(hour).padStart(2, '0')}:15`;
+      expect(instantToLagosLocal(lagosLocalToInstant(value))).toBe(value);
+    }
   });
 });

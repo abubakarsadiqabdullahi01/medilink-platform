@@ -29,6 +29,7 @@ import {
   windowOnDate,
 } from '@/modules/availability/domain/quick-windows';
 import type { TimeWindow } from '@/modules/availability/domain/availability';
+import { lagosLocalToInstant } from '@/lib/lagos-date';
 
 interface Slot {
   id: string;
@@ -172,8 +173,8 @@ export function AvailabilitySection() {
     queueKey,
     run: () =>
       api.post('/api/v1/availability/blocks', {
-        startsAt: new Date(blockFrom).toISOString(),
-        endsAt: new Date(blockTo).toISOString(),
+        startsAt: lagosLocalToInstant(blockFrom).toISOString(),
+        endsAt: lagosLocalToInstant(blockTo).toISOString(),
         reason: blockReason.trim(),
       }),
     success: 'Blocked out',

@@ -29,6 +29,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { containsPatientIdentifier } from '@/modules/clinical-incidents/domain/incident';
 import { humanise } from '@/components/app/status-badge';
 import { formatWhen } from '@/components/app/format';
+import { lagosLocalToInstant } from '@/lib/lagos-date';
 
 const SEVERITIES = [
   ['NEAR_MISS', 'Near miss — caught before it reached the patient'],
@@ -104,7 +105,7 @@ export function ReportIncidentDialog({ facilityId }: { facilityId: string }) {
     mutationFn: () =>
       api.post('/api/v1/incidents', {
         facilityId,
-        occurredAt: new Date(occurredAt).toISOString(),
+        occurredAt: lagosLocalToInstant(occurredAt).toISOString(),
         severity,
         category,
         summary: summary.trim(),

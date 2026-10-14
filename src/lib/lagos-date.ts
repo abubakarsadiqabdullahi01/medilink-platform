@@ -39,3 +39,30 @@ export function startOfLagosDay(date: string): Date {
 export function endOfLagosDay(date: string): Date {
   return new Date(startOfLagosDay(date).getTime() + DAY);
 }
+
+/**
+ * What a `datetime-local` input holds (`YYYY-MM-DDTHH:mm`, optionally with
+ * seconds) as the instant it names in Lagos.
+ *
+ * `new Date("2026-10-20T20:00")` reads it in the device's own zone, so a phone set
+ * to the wrong one, or a laptop on a different continent, sent a shift or an
+ * hours correction an hour or more out and said nothing. Everybody who uses this
+ * product is working to Lagos time, so that is what a typed time means.
+ */
+export function lagosLocalToInstant(value: string): Date {
+  const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(value);
+  const hours = match ? Number(match[2]) : NaN;
+  const minutes = match ? Number(match[3]) : NaN;
+  const seconds = match?.[4] ? Number(match[4]) : 0;
+  if (!match || !isDateOnly(match[1]!) || hours > 23 || minutes > 59 || seconds > 59) {
+    throw new Error(`"${value}" is not a date and time like 2026-10-20T20:00.`);
+  }
+  return new Date(
+    startOfLagosDay(match[1]!).getTime() + ((hours * 60 + minutes) * 60 + seconds) * 1000,
+  );
+}
+
+/** An instant as a `datetime-local` input wants it, in Lagos. */
+export function instantToLagosLocal(date: Date): string {
+  return new Date(date.getTime() + LAGOS_OFFSET_MINUTES * MINUTE).toISOString().slice(0, 16);
+}

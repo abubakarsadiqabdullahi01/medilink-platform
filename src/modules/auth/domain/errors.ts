@@ -39,6 +39,14 @@ export const AuthErrors = {
   otpThrottled: (retryAfterSeconds: number) =>
     new AuthError('otp_throttled', 'Wait a moment before requesting another code.', 429, retryAfterSeconds),
 
+  tooManyAttempts: (retryAfterSeconds: number) =>
+    new AuthError(
+      'too_many_attempts',
+      'Too many sign-in attempts from this connection. Try again later, or from another connection.',
+      429,
+      retryAfterSeconds,
+    ),
+
   setupTokenInvalid: () =>
     new AuthError(
       'setup_token_invalid',
