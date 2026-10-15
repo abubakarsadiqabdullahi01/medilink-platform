@@ -290,6 +290,23 @@ async function requireFiguresStillHold(
       before: { revision: existing.revision, amountKobo: existing.amountKobo },
       after: { revision: existing.revision + 1, amountKobo: figures.amountKobo },
     });
+
+    // The practitioner's sheet has just taken new figures without their doing anything, so they
+    // are told that it did (not what they are: those are on their screen, with the revision
+    // that kept the old ones). One key per recalculation, so a second recalculation is a second
+    // thing to know and a redelivery of this one is not.
+    await publishEvent(tx, {
+      eventType: EVENTS.TimesheetRecalculated,
+      aggregateType: 'timesheets.timesheets',
+      aggregateId: existing.id,
+      payload: {
+        assignmentId: assignment.id,
+        timesheetId: existing.id,
+        recalculationKey: randomUUID(),
+        userId: assignment.userId,
+        facilityId: assignment.facilityId,
+      },
+    });
   });
 
   throw AttendanceErrors.figuresChanged();

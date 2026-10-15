@@ -24,6 +24,7 @@ import {
   notifyShiftInvited,
   notifySuggestionAnswered,
   notifyTimesheetApproved,
+  notifyTimesheetRecalculated,
   notifyTimesheetSubmitted,
 } from '../modules/notifications/application/event-handlers';
 import { computeAndSaveTimesheet } from '../modules/timesheets/application/timesheet';
@@ -62,6 +63,7 @@ export const handlers: Record<string, EventHandler> = {
   [EVENTS.SuggestionAnswered]: async (payload) => notifySuggestionAnswered(payload),
   [EVENTS.TimesheetSubmitted]: async (payload) => notifyTimesheetSubmitted(payload),
   [EVENTS.TimesheetApproved]: async (payload) => notifyTimesheetApproved(payload),
+  [EVENTS.TimesheetRecalculated]: async (payload) => notifyTimesheetRecalculated(payload),
   [EVENTS.DisputeOpened]: async (payload) => notifyDisputeOpened(payload),
 
   /**

@@ -278,6 +278,7 @@ const ACTION_LABELS: Record<string, string> = {
   'suggestion.triaged': 'Suggestion triaged',
   'timesheet.approved': 'Timesheet approved',
   'timesheet.corrected': 'Timesheet corrected',
+  'timesheet.recalculated': 'Timesheet worked out again at approval',
   'timesheet.rejected': 'Timesheet rejected',
   'timesheet.submitted': 'Timesheet submitted',
   'user.reinstated': 'Account reinstated',
