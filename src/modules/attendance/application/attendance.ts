@@ -20,7 +20,7 @@ import {
 import { IllegalAttendanceTransition } from '../domain/state-machine';
 import { getAssignment } from '@/modules/matching/application/assignment';
 import { AttendanceErrors } from '../domain/errors';
-import { isInFuture } from '../domain/recorded-times';
+import { isInFuture, isLongerThanAShift } from '../domain/recorded-times';
 
 /**
  * Attendance: what actually happened during the shift (steps 7.1–7.3).
@@ -254,6 +254,12 @@ export async function presentCheckInToken(
   if (input.purpose === 'CHECK_OUT' && record.checkedInAt && now <= record.checkedInAt) {
     throw AttendanceErrors.checkoutBeforeCheckIn();
   }
+  // Checked in more than a day ago and never checked out: the timesheet will not price it, and
+  // it used to find that out only after the record existed (TIM-08). Refused before the code is
+  // spent or an attempt counted; the facility records the shift by hand.
+  if (input.purpose === 'CHECK_OUT' && record.checkedInAt && isLongerThanAShift(record.checkedInAt, now)) {
+    throw AttendanceErrors.shiftTooLong();
+  }
 
   const token = await prisma.checkInToken.findFirst({
     where: { attendanceRecordId: record.id, purpose: input.purpose },
@@ -361,6 +367,9 @@ export async function recordManualAttendance(
   // assignment is loaded or a record is made, so a refusal leaves nothing behind.
   if (isInFuture(input.checkedInAt) || isInFuture(input.checkedOutAt)) {
     throw AttendanceErrors.timeInFuture();
+  }
+  if (isLongerThanAShift(input.checkedInAt, input.checkedOutAt)) {
+    throw AttendanceErrors.shiftTooLong();
   }
 
   const assignment = await loadAssignment(input.assignmentId);

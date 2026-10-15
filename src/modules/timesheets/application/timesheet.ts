@@ -12,8 +12,8 @@ import {
 import { termsOfBooking } from '@/modules/rates-contracts/application/rate-card';
 import { priceStoredTimesheet } from '@/modules/rates-contracts/domain/pricing';
 import { getServiceRequest } from '@/modules/service-requests/application/request';
-import { AttendanceErrors } from '@/modules/attendance/domain/errors';
-import { isInFuture } from '@/modules/attendance/domain/recorded-times';
+import { AttendanceError, AttendanceErrors } from '@/modules/attendance/domain/errors';
+import { isInFuture, isLongerThanAShift } from '@/modules/attendance/domain/recorded-times';
 import {
   assertTransition,
   IllegalAttendanceTransition,
@@ -111,16 +111,35 @@ type Figures = Record<(typeof FIGURE_KEYS)[number], number>;
 
 type Context = Awaited<ReturnType<typeof loadContext>>;
 
+/** What a correction proposes, worked out before anything is written (TIM-07). */
+interface FigureOverrides {
+  checkedInAt?: Date;
+  checkedOutAt?: Date;
+  breakMinutes?: number;
+  onCallMinutes?: number;
+}
+
 /**
  * What the shift comes to on the data as it stands now: the check-in and check-out and
  * the break on the attendance record, the rate on the request, the holiday calendar.
  * Computed, not saved.
+ *
+ * With overrides it is what the shift would come to if a correction were made, which is how a
+ * correction is checked before it commits rather than after. A refusal by the domain (a break
+ * longer than the shift, a shift over a day) is a 422 that says which, not a move from a state
+ * to itself.
  */
-async function currentFigures({ record, assignment }: Context): Promise<{
+async function currentFigures(
+  { record, assignment }: Context,
+  overrides: FigureOverrides = {},
+): Promise<{
   figures: Figures;
   existing: Awaited<ReturnType<typeof prisma.timesheet.findUnique>>;
 }> {
-  if (!record.checkedInAt || !record.checkedOutAt) {
+  const checkedInAt = overrides.checkedInAt ?? record.checkedInAt;
+  const checkedOutAt = overrides.checkedOutAt ?? record.checkedOutAt;
+  const breakMinutes = overrides.breakMinutes ?? record.breakMinutes;
+  if (!checkedInAt || !checkedOutAt) {
     throw AttendanceErrors.notCheckedIn();
   }
 
@@ -129,7 +148,7 @@ async function currentFigures({ record, assignment }: Context): Promise<{
     facilityId: assignment.facilityId,
   });
 
-  const holidayDates = await holidayDatesFor(record.checkedInAt, record.checkedOutAt);
+  const holidayDates = await holidayDatesFor(checkedInAt, checkedOutAt);
 
   const existing = await prisma.timesheet.findUnique({
     where: { attendanceRecordId: record.id },
@@ -142,19 +161,20 @@ async function currentFigures({ record, assignment }: Context): Promise<{
   let totals;
   try {
     totals = computeTimesheet({
-      checkedInAt: record.checkedInAt,
-      checkedOutAt: record.checkedOutAt,
-      breakMinutes: record.breakMinutes,
+      checkedInAt,
+      checkedOutAt,
+      breakMinutes,
       scheduledStartsAt: assignment.startsAt,
       scheduledEndsAt: assignment.endsAt,
       hourlyRateKobo: request.hourlyRateKobo,
       holidayDates,
-      onCallMinutes: existing?.onCallMinutes ?? 0,
+      onCallMinutes: overrides.onCallMinutes ?? existing?.onCallMinutes ?? 0,
     });
   } catch (error) {
-    // The domain refuses impossible shifts; those are 422s, not crashes.
+    // The domain refuses impossible shifts; those are 422s that say which (the domain's own
+    // code and words), not a move from a state to itself.
     if (error instanceof TimesheetError) {
-      throw AttendanceErrors.illegalTransition(record.status, record.status);
+      throw new AttendanceError(error.code, error.message, 422);
     }
     throw error;
   }
@@ -550,8 +570,22 @@ export async function correctTimesheet(input: CorrectParams): Promise<TimesheetV
   ) {
     throw AttendanceErrors.timeInFuture();
   }
+  if (isLongerThanAShift(checkedInAt, checkedOutAt)) throw AttendanceErrors.shiftTooLong();
 
-  await prisma.$transaction(async (tx: Tx) => {
+  // Worked out before anything is written (TIM-07), from the times as they would stand: a break
+  // longer than the shift is refused here, with nothing committed, where it used to be found
+  // after the revision and the new times had been.
+  const { figures } = await currentFigures(
+    { record, assignment },
+    {
+      checkedInAt: input.checkedInAt,
+      checkedOutAt: input.checkedOutAt,
+      breakMinutes: input.breakMinutes,
+      onCallMinutes: input.onCallMinutes,
+    },
+  );
+
+  const saved = await prisma.$transaction(async (tx: Tx) => {
     // The whole previous state, before anything moves.
     await tx.timesheetRevision.create({
       data: {
@@ -573,9 +607,11 @@ export async function correctTimesheet(input: CorrectParams): Promise<TimesheetV
       },
     });
 
-    await tx.timesheet.update({
+    // The record, the revision, the figures and the audit row are one change: the figures are
+    // the corrected ones the moment it commits, not worked out in a second step that could fail.
+    const updated = await tx.timesheet.update({
       where: { id: existing.id },
-      data: { revision: { increment: 1 }, onCallMinutes: input.onCallMinutes ?? existing.onCallMinutes },
+      data: { ...figures, revision: { increment: 1 } },
     });
 
     await recordAudit(tx, {
@@ -587,10 +623,13 @@ export async function correctTimesheet(input: CorrectParams): Promise<TimesheetV
       scopeId: assignment.userId,
       reason: input.reason,
       before: { revision: existing.revision, amountKobo: existing.amountKobo },
+      after: { revision: existing.revision + 1, amountKobo: figures.amountKobo },
     });
+
+    return updated;
   });
 
-  return computeAndSaveTimesheet(input.assignmentId);
+  return { ...saved, assignmentId: input.assignmentId, attendanceStatus: 'MANUALLY_CORRECTED' };
 }
 
 /**

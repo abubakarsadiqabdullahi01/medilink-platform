@@ -556,7 +556,8 @@ describe('a time that has not come yet (ATT-04)', () => {
   it('accepts a time a couple of minutes ahead of the server, which is a watch running fast', async () => {
     const world = await buildWorld();
 
-    const result = await record(world, PAST_START, minutesFromNow(2));
+    // An eight-hour shift that ends a couple of minutes ahead of the server's clock.
+    const result = await record(world, minutesFromNow(2 - 8 * 60), minutesFromNow(2));
 
     expect(result.status).toBe('MANUALLY_CORRECTED');
   });
@@ -566,6 +567,86 @@ describe('a time that has not come yet (ATT-04)', () => {
     const longAgo = new Date(Date.now() - 400 * 24 * 60 * 60 * 1000);
 
     const result = await record(world, longAgo, new Date(longAgo.getTime() + 8 * 60 * 60 * 1000));
+
+    expect(result.status).toBe('MANUALLY_CORRECTED');
+  });
+});
+
+/**
+ * TIM-08: no shift longer than a day can be recorded.
+ *
+ * The timesheet will not price one. It used to find that out only after the record existed:
+ * the shift.completed handler threw, retried eight times and dead-lettered, and the
+ * practitioner never got a sheet to submit. Now it is refused where the times are written, with
+ * a message that says what to do.
+ */
+describe('a shift longer than a day (TIM-08)', () => {
+  const reason = 'The ward network was down; recorded from the paper log.';
+
+  it('is refused at check-out, before the code is spent, with what to do about it', async () => {
+    const world = await buildWorld();
+    await checkIn(world);
+    // Checked in more than a day ago: they forgot to check out.
+    await prisma.attendanceRecord.update({
+      where: { assignmentId: world.assignmentId },
+      data: { checkedInAt: new Date(Date.now() - 25 * 60 * 60 * 1000) },
+    });
+    const token = await issueCheckInToken({
+      assignmentId: world.assignmentId,
+      purpose: 'CHECK_OUT',
+      actorId: world.schedulerId,
+    });
+
+    await expect(
+      presentCheckInToken({
+        assignmentId: world.assignmentId,
+        purpose: 'CHECK_OUT',
+        code: token.code,
+        userId: world.practitionerId,
+      }),
+    ).rejects.toMatchObject({ code: 'shift_too_long', status: 422 });
+
+    const record = await prisma.attendanceRecord.findUniqueOrThrow({
+      where: { assignmentId: world.assignmentId },
+    });
+    expect(record.status).toBe('CHECKED_IN');
+    expect(record.checkedOutAt).toBeNull();
+    const spent = await prisma.checkInToken.findFirstOrThrow({
+      where: { attendanceRecordId: record.id, purpose: 'CHECK_OUT' },
+    });
+    expect(spent.consumedAt).toBeNull();
+    expect(spent.attempts).toBe(0);
+  });
+
+  it('is refused in a hand-recording, and nothing is written', async () => {
+    const world = await buildWorld();
+
+    await expect(
+      recordManualAttendance({
+        assignmentId: world.assignmentId,
+        actorId: world.schedulerId,
+        checkedInAt: new Date(PAST_START.getTime() - 24 * 60 * 60 * 1000),
+        checkedOutAt: PAST_END,
+        reason,
+      }),
+    ).rejects.toMatchObject({ code: 'shift_too_long', status: 422 });
+
+    expect(
+      await prisma.attendanceRecord.findUnique({ where: { assignmentId: world.assignmentId } }),
+    ).toBeNull();
+    expect(await prisma.checkInEvent.count()).toBe(0);
+  });
+
+  it('allows a shift of exactly a day, which the timesheet prices', async () => {
+    const world = await buildWorld();
+
+    const result = await recordManualAttendance({
+      assignmentId: world.assignmentId,
+      actorId: world.schedulerId,
+      checkedInAt: PAST_START,
+      checkedOutAt: new Date(PAST_START.getTime() + 24 * 60 * 60 * 1000),
+      reason,
+    });
 
     expect(result.status).toBe('MANUALLY_CORRECTED');
   });

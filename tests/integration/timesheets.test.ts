@@ -449,6 +449,121 @@ describe('a correction to a time that has not come yet (ATT-04)', () => {
   });
 });
 
+/**
+ * TIM-07 and TIM-08: a correction that cannot be priced is refused before it commits, and a
+ * record that cannot be priced says why.
+ *
+ * A correction used to commit the revision and the new times, and only then work out the
+ * figures: a break longer than the shift, or a shift over a day, threw after the change was
+ * already made, and surfaced as an "illegal transition" from a state to itself.
+ */
+describe('a correction that cannot be priced (TIM-07, TIM-08)', () => {
+  async function rejectedSheet() {
+    const world = await buildWorld();
+    await submitTimesheet({ assignmentId: world.assignmentId, userId: world.practitionerId });
+    await reviewTimesheet({
+      assignmentId: world.assignmentId,
+      facilityId: world.facilityId,
+      actorId: world.reviewerId,
+      decision: 'reject',
+      reviewNotes: 'The times look wrong.',
+    });
+    return world;
+  }
+
+  async function nothingChanged(world: World, before: Awaited<ReturnType<typeof getTimesheet>>) {
+    const after = await getTimesheet(world.assignmentId);
+    expect(after.revision).toBe(before.revision);
+    expect(after.amountKobo).toBe(before.amountKobo);
+    expect(after.billableMinutes).toBe(before.billableMinutes);
+    expect(await timesheetRevisions(world.assignmentId)).toHaveLength(0);
+    const record = await prisma.attendanceRecord.findUniqueOrThrow({
+      where: { assignmentId: world.assignmentId },
+    });
+    expect(record.status).toBe('REJECTED');
+    expect(record.checkedInAt?.toISOString()).toBe(WORKED_FROM.toISOString());
+    expect(record.checkedOutAt?.toISOString()).toBe(WORKED_TO.toISOString());
+    expect(record.breakMinutes).toBe(0);
+    expect(await prisma.auditLog.count({ where: { action: 'timesheet.corrected' } })).toBe(0);
+  }
+
+  it('is refused when the break is longer than the shift, with nothing committed', async () => {
+    const world = await rejectedSheet();
+    const before = await getTimesheet(world.assignmentId);
+
+    await expect(
+      correctTimesheet({
+        assignmentId: world.assignmentId,
+        facilityId: world.facilityId,
+        actorId: world.reviewerId,
+        breakMinutes: 9 * 60,
+        reason: 'The ward log shows a nine hour break, which is more than the shift.',
+      }),
+    ).rejects.toMatchObject({ code: 'break_longer_than_shift', status: 422 });
+
+    await nothingChanged(world, before);
+  });
+
+  it('is refused when it would make the shift longer than a day, with nothing committed', async () => {
+    const world = await rejectedSheet();
+    const before = await getTimesheet(world.assignmentId);
+
+    await expect(
+      correctTimesheet({
+        assignmentId: world.assignmentId,
+        facilityId: world.facilityId,
+        actorId: world.reviewerId,
+        checkedInAt: new Date(WORKED_FROM.getTime() - 20 * 60 * 60 * 1000),
+        reason: 'The nurse started the previous evening, which the paper sheet omitted.',
+      }),
+    ).rejects.toMatchObject({ code: 'shift_too_long', status: 422 });
+
+    await nothingChanged(world, before);
+  });
+
+  it('is one transaction when it is allowed: the figures are the corrected ones the moment it commits', async () => {
+    const world = await rejectedSheet();
+
+    const corrected = await correctTimesheet({
+      assignmentId: world.assignmentId,
+      facilityId: world.facilityId,
+      actorId: world.reviewerId,
+      breakMinutes: 60,
+      onCallMinutes: 30,
+      reason: 'Ward log records a one hour break and half an hour on call.',
+    });
+
+    // What the call returned is what is stored: not a figure worked out afterwards, which
+    // could be a different one.
+    const stored = await getTimesheet(world.assignmentId);
+    expect(stored).toMatchObject({
+      billableMinutes: 420,
+      breakMinutes: 60,
+      onCallMinutes: 30,
+      revision: 2,
+      amountKobo: corrected.amountKobo,
+    });
+    expect(await timesheetRevisions(world.assignmentId)).toHaveLength(1);
+  });
+
+  it('says why a record that cannot be priced cannot be, as a 422, not as a move from a state to itself', async () => {
+    const world = await buildWorld();
+    // A record from before the check: thirty hours, written straight into the table.
+    await prisma.attendanceRecord.update({
+      where: { assignmentId: world.assignmentId },
+      data: { checkedOutAt: new Date(WORKED_FROM.getTime() + 30 * 60 * 60 * 1000), status: 'CHECKED_OUT' },
+    });
+
+    await expect(computeAndSaveTimesheet(world.assignmentId)).rejects.toMatchObject({
+      code: 'shift_too_long',
+      status: 422,
+    });
+    await expect(
+      submitTimesheet({ assignmentId: world.assignmentId, userId: world.practitionerId }),
+    ).rejects.toMatchObject({ code: 'shift_too_long', status: 422 });
+  });
+});
+
 describe('corrections that follow one another (7.6)', () => {
   it('carries on-call minutes through a later recomputation', async () => {
     const world = await buildWorld();

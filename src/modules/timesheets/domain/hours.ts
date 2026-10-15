@@ -1,4 +1,5 @@
 import { WAT_OFFSET_MINUTES } from '@/modules/availability/domain/availability';
+import { MAX_SHIFT_MINUTES } from '@/modules/attendance/domain/recorded-times';
 
 /**
  * Turning a check-in and a check-out into billable minutes, classified into
@@ -21,7 +22,6 @@ import { WAT_OFFSET_MINUTES } from '@/modules/availability/domain/availability';
  */
 
 const MINUTE = 60 * 1000;
-const DAY_MINUTES = 24 * 60;
 
 /** Night runs 20:00 to 06:00 WAT — the window the night rate floor is set for. */
 export const NIGHT_STARTS_MINUTE = 20 * 60;
@@ -144,7 +144,7 @@ export function computeTimesheet(shift: WorkedShift): TimesheetTotals {
       'The break cannot be longer than the shift.',
     );
   }
-  if (workedMinutes > DAY_MINUTES) {
+  if (workedMinutes > MAX_SHIFT_MINUTES) {
     throw new TimesheetError('shift_too_long', 'A recorded shift may not exceed 24 hours.');
   }
 
