@@ -1,5 +1,9 @@
-import { describe, expect, it } from 'vitest';
-import { redact, scrubText } from './audit';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { Tx } from './db';
+import { logger } from './logger';
+import { recordAudit, redact, scrubText } from './audit';
 
 describe('redact', () => {
   it('removes secret-bearing fields before they reach the audit table', () => {
@@ -76,5 +80,102 @@ describe('redact', () => {
     it('passes through values that are not text', () => {
       expect(redact({ n: 3, flag: true, nothing: null })).toEqual({ n: 3, flag: true, nothing: null });
     });
+  });
+});
+
+/**
+ * M17-07: a mandatory record is never lost silently.
+ *
+ * Every audit row is written in the transaction of the act it records, so a write that fails
+ * takes the act with it; that is what stops a record being lost. What was missing was that
+ * it said so: the failure surfaced as whatever the caller's own error handler made of a
+ * rolled-back transaction, with nothing to tell an audit failure from any other. And nothing
+ * stopped a future call being left un-awaited, which would let the act commit and the row fail
+ * after the response had gone.
+ */
+describe('a write that fails', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  const failing = (error: Error) => ({ auditLog: { create: vi.fn().mockRejectedValue(error) } }) as unknown as Tx;
+
+  it('is not swallowed: the act it belongs to fails with it', async () => {
+    vi.spyOn(logger, 'error').mockImplementation(() => {});
+    const failure = new Error('connection terminated');
+
+    await expect(
+      recordAudit(failing(failure), { action: 'user.suspended', entityType: 'identity.users' }),
+    ).rejects.toBe(failure);
+  });
+
+  it('is logged as an audit failure, by action and entity, so an alert can key on it', async () => {
+    const error = vi.spyOn(logger, 'error').mockImplementation(() => {});
+    const failure = Object.assign(new Error('boom'), { name: 'PrismaClientKnownRequestError', code: 'P2028' });
+
+    await expect(
+      recordAudit(failing(failure), {
+        action: 'timesheet.approved',
+        entityType: 'timesheets.timesheets',
+        entityId: '5c0ad8a4-1111-4222-8333-444455556666',
+        actorId: '9a1c0f10-aaaa-4bbb-8ccc-ddddeeeeffff',
+      }),
+    ).rejects.toThrow();
+
+    expect(error).toHaveBeenCalledTimes(1);
+    const [message, context] = error.mock.calls[0]!;
+    expect(message).toMatch(/audit write failed/i);
+    expect(context).toMatchObject({
+      event: 'audit_write_failed',
+      action: 'timesheet.approved',
+      entityType: 'timesheets.timesheets',
+      entityId: '5c0ad8a4-1111-4222-8333-444455556666',
+      errorName: 'PrismaClientKnownRequestError',
+      errorCode: 'P2028',
+    });
+  });
+
+  it('logs nothing of what the row held: a database error can quote the values it was given', async () => {
+    const error = vi.spyOn(logger, 'error').mockImplementation(() => {});
+    const failure = new Error('Invalid `prisma.auditLog.create()` invocation: reason: "Called 0803 123 4567"');
+
+    await expect(
+      recordAudit(failing(failure), {
+        action: 'practitioner.sanctioned',
+        entityType: 'practitioners.sanctions',
+        reason: 'Called 0803 123 4567 about Amina Yusuf',
+        before: { fullName: 'Amina Yusuf' },
+        after: { contactEmail: 'amina@example.com' },
+      }),
+    ).rejects.toThrow();
+
+    const logged = JSON.stringify(error.mock.calls[0]);
+    expect(logged).not.toMatch(/0803|Amina|amina@|Invalid `prisma|invocation/);
+  });
+});
+
+describe('every call to recordAudit', () => {
+  /** All .ts and .tsx sources under src, tests excluded. */
+  function sources(directory: string): string[] {
+    return readdirSync(directory).flatMap((entry) => {
+      const path = join(directory, entry);
+      if (statSync(path).isDirectory()) return sources(path);
+      return /\.tsx?$/.test(entry) && !/\.test\.tsx?$/.test(entry) ? [path] : [];
+    });
+  }
+
+  it('is awaited or returned, so a failed write can never come after the act has committed', () => {
+    const loose: string[] = [];
+
+    for (const file of sources(join(process.cwd(), 'src'))) {
+      readFileSync(file, 'utf8')
+        .split('\n')
+        .forEach((line, index) => {
+          if (!/\brecordAudit\(/.test(line)) return;
+          if (/^\s*(export\s+)?(async\s+)?function\s+recordAudit\b/.test(line)) return;
+          if (/^\s*(\/\/|\*)/.test(line)) return;
+          if (!/(await|return)\s+recordAudit\(/.test(line)) loose.push(`${file}:${index + 1}: ${line.trim()}`);
+        });
+    }
+
+    expect(loose).toEqual([]);
   });
 });
