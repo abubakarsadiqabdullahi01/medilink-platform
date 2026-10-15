@@ -202,14 +202,18 @@ export default function TimesheetsPage() {
     mutationFn: ({
       assignmentId,
       decision,
+      seenRevision,
     }: {
       assignmentId: string;
       decision: 'approve' | 'reject';
+      /** The revision on screen, so an approval is of the figures that were shown. */
+      seenRevision?: number;
     }) =>
       api.post(`/api/v1/assignments/${assignmentId}/timesheet/review`, {
         facilityId,
         decision,
         reviewNotes: notes[assignmentId]?.trim() || undefined,
+        seenRevision,
       }),
     onSuccess: (_data, variables) => {
       toast.success(
@@ -220,7 +224,12 @@ export default function TimesheetsPage() {
       refresh();
       void queryClient.invalidateQueries({ queryKey: ['roster-for-timesheets'] });
     },
-    onError: (error) => toast.error('That did not work', { description: errorMessage(error) }),
+    onError: (error) => {
+      // Whatever went wrong, the figures on screen may no longer be the ones on file (they were
+      // worked out again when the calendar changed): show the ones that are.
+      refresh();
+      toast.error('That did not work', { description: errorMessage(error) });
+    },
   });
 
   const correct = useMutation({
@@ -498,7 +507,11 @@ export default function TimesheetsPage() {
                             review.isPending && review.variables?.assignmentId === assignment.id
                           }
                           onClick={() =>
-                            review.mutate({ assignmentId: assignment.id, decision: 'approve' })
+                            review.mutate({
+                              assignmentId: assignment.id,
+                              decision: 'approve',
+                              seenRevision: sheet.revision,
+                            })
                           }
                         >
                           Approve {formatNaira(sheet.billedKobo)}

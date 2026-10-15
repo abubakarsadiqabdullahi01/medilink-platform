@@ -1,4 +1,5 @@
 import type { Tx } from './db';
+import { logger } from './logger';
 
 /**
  * Every state change writes one audit row, in the same transaction as the
@@ -80,22 +81,47 @@ export function redact(value: unknown): unknown {
   return value;
 }
 
+/**
+ * Writes the row, in the caller's transaction.
+ *
+ * A write that fails is thrown on, never swallowed: the act it belongs to fails with it, which
+ * is what stops a mandatory record being lost. It is also said aloud, under a name an alert can
+ * key on (M17-07), because from outside it is otherwise one more rolled-back transaction.
+ *
+ * What is logged is the action, the entity and the kind of error, and nothing the row held: a
+ * database error can quote the values it was given, and a name or a number in a log is exactly
+ * what the row's own redaction exists to keep out.
+ */
 export async function recordAudit(tx: Tx, input: AuditInput) {
-  return tx.auditLog.create({
-    data: {
+  try {
+    return await tx.auditLog.create({
+      data: {
+        action: input.action,
+        entityType: input.entityType,
+        entityId: input.entityId,
+        actorId: input.actorId,
+        actorType: input.actorType ?? 'user',
+        scopeType: input.scopeType,
+        scopeId: input.scopeId,
+        reason: input.reason === undefined ? undefined : scrubText(input.reason),
+        before: input.before === undefined ? undefined : (redact(input.before) as object),
+        after: input.after === undefined ? undefined : (redact(input.after) as object),
+        correlationId: input.correlationId,
+        requestId: input.requestId,
+        ipAddress: input.ipAddress,
+      },
+    });
+  } catch (error) {
+    logger.error('audit write failed: the act it belongs to is rolled back', {
+      event: 'audit_write_failed',
       action: input.action,
       entityType: input.entityType,
       entityId: input.entityId,
-      actorId: input.actorId,
-      actorType: input.actorType ?? 'user',
-      scopeType: input.scopeType,
-      scopeId: input.scopeId,
-      reason: input.reason === undefined ? undefined : scrubText(input.reason),
-      before: input.before === undefined ? undefined : (redact(input.before) as object),
-      after: input.after === undefined ? undefined : (redact(input.after) as object),
       correlationId: input.correlationId,
       requestId: input.requestId,
-      ipAddress: input.ipAddress,
-    },
-  });
+      errorName: error instanceof Error ? error.name : typeof error,
+      errorCode: (error as { code?: unknown } | null)?.code,
+    });
+    throw error;
+  }
 }

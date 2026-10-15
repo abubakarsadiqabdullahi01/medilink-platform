@@ -27,6 +27,7 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
           actorId: session.userId,
           decision: input.decision,
           reviewNotes: input.reviewNotes,
+          seenRevision: input.seenRevision,
         }),
     },
     params,

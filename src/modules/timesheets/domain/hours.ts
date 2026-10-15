@@ -175,17 +175,22 @@ export function computeTimesheet(shift: WorkedShift): TimesheetTotals {
 
   /**
    * The exclusive split, scaled by the same break deduction and then made to
-   * add up exactly. Rounding three numbers independently can lose or gain a
-   * minute; ordinary absorbs the remainder because it is the largest bucket
-   * in every realistic shift and the cheapest, so any drift favours neither
-   * party by more than a minute's ordinary rate.
+   * add up exactly. Rounding the two premium buckets independently can come
+   * to a minute more than was billable (a night shift that a holiday splits at
+   * midnight, with a one-minute break, rounds 119.5 and 119.5 to 120 and 120
+   * of 239), and a clamp on ordinary alone left that minute counted twice, at
+   * a premium. So the premium buckets are capped by what is billable, the
+   * scarcer first, and ordinary is what is left, which cannot be negative.
    */
-  const exclusiveHoliday = Math.round(classified.holiday * scale);
-  const exclusiveNight = Math.round(classified.nightNotHoliday * scale);
+  const exclusiveHoliday = Math.min(billableMinutes, Math.round(classified.holiday * scale));
+  const exclusiveNight = Math.min(
+    billableMinutes - exclusiveHoliday,
+    Math.round(classified.nightNotHoliday * scale),
+  );
   const exclusive: ExclusiveBands = {
     holidayMinutes: exclusiveHoliday,
     nightMinutes: exclusiveNight,
-    ordinaryMinutes: Math.max(0, billableMinutes - exclusiveHoliday - exclusiveNight),
+    ordinaryMinutes: billableMinutes - exclusiveHoliday - exclusiveNight,
   };
 
   // Integer kobo. Rounded once, at the end, so the stored amount is exactly

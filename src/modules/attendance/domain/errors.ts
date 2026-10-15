@@ -54,6 +54,18 @@ export const AttendanceErrors = {
   correctionReasonRequired: () =>
     new AttendanceError('correction_reason_required', 'Say why this record is being corrected.', 422),
 
+  /**
+   * M10-04. Approval is of the figures the approver saw. When the calendar or the rate
+   * behind a submitted sheet has moved since, the sheet is worked out again and the
+   * approval is refused, so the next one is of the new figures.
+   */
+  figuresChanged: () =>
+    new AttendanceError(
+      'timesheet_figures_changed',
+      'The hours or the rate behind this timesheet changed after it was submitted. The figures have been recalculated: look at the new amount and approve again.',
+      409,
+    ),
+
   noTimesheet: () =>
     new AttendanceError('no_timesheet', 'That shift has no timesheet to submit yet.', 409),
 } as const;

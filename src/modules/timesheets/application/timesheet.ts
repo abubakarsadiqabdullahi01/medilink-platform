@@ -86,16 +86,39 @@ async function loadContext(assignmentId: string) {
 }
 
 /**
- * Computes the timesheet from whatever attendance currently says, creating it
- * or replacing its figures.
- *
- * Recomputed rather than edited: the hours are a function of the check-in,
- * the check-out and the break, so the only way they and the attendance record
- * can disagree is if somebody edited one of them by hand.
+ * States in which the figures are under review or decided. Only a person's act moves
+ * them from here: a correction goes through the machine, a recalculation is refused
+ * with a revision on the way (see `requireFiguresStillHold`), and a late event does nothing.
  */
-export async function computeAndSaveTimesheet(assignmentId: string): Promise<TimesheetView> {
-  const { record, assignment } = await loadContext(assignmentId);
+const LOCKED_STATES: readonly AttendanceState[] = ['SUBMITTED', 'APPROVED', 'DISPUTED'];
 
+/** What a timesheet row keeps of a worked shift, and so what two workings are compared on. */
+const FIGURE_KEYS = [
+  'workedMinutes',
+  'breakMinutes',
+  'billableMinutes',
+  'nightMinutes',
+  'nightOnlyMinutes',
+  'overtimeMinutes',
+  'holidayMinutes',
+  'onCallMinutes',
+  'hourlyRateKobo',
+  'amountKobo',
+] as const;
+
+type Figures = Record<(typeof FIGURE_KEYS)[number], number>;
+
+type Context = Awaited<ReturnType<typeof loadContext>>;
+
+/**
+ * What the shift comes to on the data as it stands now: the check-in and check-out and
+ * the break on the attendance record, the rate on the request, the holiday calendar.
+ * Computed, not saved.
+ */
+async function currentFigures({ record, assignment }: Context): Promise<{
+  figures: Figures;
+  existing: Awaited<ReturnType<typeof prisma.timesheet.findUnique>>;
+}> {
   if (!record.checkedInAt || !record.checkedOutAt) {
     throw AttendanceErrors.notCheckedIn();
   }
@@ -135,18 +158,47 @@ export async function computeAndSaveTimesheet(assignmentId: string): Promise<Tim
     throw error;
   }
 
-  const data = {
-    workedMinutes: totals.workedMinutes,
-    breakMinutes: totals.breakMinutes,
-    billableMinutes: totals.billableMinutes,
-    nightMinutes: totals.nightMinutes,
-    nightOnlyMinutes: totals.exclusive.nightMinutes,
-    overtimeMinutes: totals.overtimeMinutes,
-    holidayMinutes: totals.holidayMinutes,
-    onCallMinutes: totals.onCallMinutes,
-    hourlyRateKobo: request.hourlyRateKobo,
-    amountKobo: totals.amountKobo,
+  return {
+    existing,
+    figures: {
+      workedMinutes: totals.workedMinutes,
+      breakMinutes: totals.breakMinutes,
+      billableMinutes: totals.billableMinutes,
+      nightMinutes: totals.nightMinutes,
+      nightOnlyMinutes: totals.exclusive.nightMinutes,
+      overtimeMinutes: totals.overtimeMinutes,
+      holidayMinutes: totals.holidayMinutes,
+      onCallMinutes: totals.onCallMinutes,
+      hourlyRateKobo: request.hourlyRateKobo,
+      amountKobo: totals.amountKobo,
+    },
   };
+}
+
+/**
+ * Computes the timesheet from whatever attendance currently says, creating it
+ * or replacing its figures.
+ *
+ * Recomputed rather than edited: the hours are a function of the check-in,
+ * the check-out and the break, so the only way they and the attendance record
+ * can disagree is if somebody edited one of them by hand.
+ *
+ * Not once the sheet has been submitted. From then it is being reviewed or has been
+ * decided, and the ShiftCompleted event that calls this is delivered at least once, so
+ * it can arrive again, days later, to a calendar that has changed. It would rewrite a
+ * submitted or an approved sheet from today's data with no revision and no audit row.
+ * The stored figures are returned as they are.
+ */
+export async function computeAndSaveTimesheet(assignmentId: string): Promise<TimesheetView> {
+  const context = await loadContext(assignmentId);
+  const { record } = context;
+
+  if (LOCKED_STATES.includes(record.status)) {
+    const kept = await prisma.timesheet.findUnique({ where: { attendanceRecordId: record.id } });
+    if (kept) return { ...kept, assignmentId, attendanceStatus: record.status };
+  }
+
+  const { figures: data } = await currentFigures(context);
 
   // One statement, not a read and then a write. Two callers reach this for the
   // same shift — the ShiftCompleted handler when it is checked out, and
@@ -161,6 +213,85 @@ export async function computeAndSaveTimesheet(assignmentId: string): Promise<Tim
   });
 
   return { ...saved, assignmentId, attendanceStatus: record.status };
+}
+
+/**
+ * The whole previous state of a sheet, as a revision keeps it: not a diff, because a
+ * diff can only be read against a history nobody kept.
+ */
+function snapshotOf(
+  existing: Figures,
+  record: { checkedInAt: Date | null; checkedOutAt: Date | null },
+): Prisma.InputJsonValue {
+  const figures = Object.fromEntries(FIGURE_KEYS.map((key) => [key, existing[key]]));
+  return {
+    ...figures,
+    checkedInAt: record.checkedInAt?.toISOString() ?? null,
+    checkedOutAt: record.checkedOutAt?.toISOString() ?? null,
+  } as Prisma.InputJsonValue;
+}
+
+/**
+ * M10-04: approval is of the figures the approver saw, worked out on the data as it
+ * stands now. The holiday calendar moves on its own (a holiday is declared, or a
+ * mistaken one removed, after a shift was worked), so a sheet priced before that and
+ * approved after it would pay a practitioner without a holiday that was declared, or bill
+ * a facility for one that was not.
+ *
+ * When the working differs, the sheet takes the new figures, keeping the old ones as a
+ * revision with who asked and why, and the approval is refused: the next one is of what
+ * is now on the screen. A screen says which revision it showed, and an approval of any
+ * other is refused the same way, so a screen that did not reload cannot approve what
+ * it never displayed.
+ */
+async function requireFiguresStillHold(
+  context: Context,
+  actorId: string,
+  seenRevision?: number,
+): Promise<void> {
+  const { record, assignment } = context;
+  const { figures, existing } = await currentFigures(context);
+  if (!existing) throw AttendanceErrors.noTimesheet();
+
+  // Somebody approving from a screen that was drawn before the figures were last worked out
+  // again (or corrected) is approving what they did not see, whatever the figures are now.
+  if (seenRevision !== undefined && seenRevision !== existing.revision) {
+    throw AttendanceErrors.figuresChanged();
+  }
+
+  if (FIGURE_KEYS.every((key) => existing[key] === figures[key])) return;
+
+  await prisma.$transaction(async (tx: Tx) => {
+    await tx.timesheetRevision.create({
+      data: {
+        timesheetId: existing.id,
+        revision: existing.revision,
+        previous: snapshotOf(existing, record),
+        actorId,
+        reason:
+          'Recalculated before approval: the holiday calendar or the rate changed after the hours were submitted.',
+      },
+    });
+
+    await tx.timesheet.update({
+      where: { id: existing.id },
+      data: { ...figures, revision: { increment: 1 } },
+    });
+
+    await recordAudit(tx, {
+      action: 'timesheet.recalculated',
+      entityType: 'timesheets.timesheets',
+      entityId: existing.id,
+      actorId,
+      scopeType: 'SELF',
+      scopeId: assignment.userId,
+      reason: 'Figures differed from the data as it stands at approval.',
+      before: { revision: existing.revision, amountKobo: existing.amountKobo },
+      after: { revision: existing.revision + 1, amountKobo: figures.amountKobo },
+    });
+  });
+
+  throw AttendanceErrors.figuresChanged();
 }
 
 export async function getTimesheet(assignmentId: string): Promise<TimesheetView> {
@@ -244,6 +375,11 @@ export interface ReviewParams {
   actorId: string;
   decision: 'approve' | 'reject';
   reviewNotes?: string;
+  /**
+   * The revision of the sheet the approver was looking at. Optional so a caller that never
+   * showed a sheet is not refused; a screen always sends it, so an approval is of what was seen.
+   */
+  seenRevision?: number;
 }
 
 /**
@@ -261,6 +397,9 @@ export async function reviewTimesheet(input: ReviewParams): Promise<TimesheetVie
   if (!approved && !input.reviewNotes?.trim()) throw AttendanceErrors.reviewNotesRequired();
 
   guardTransition(record.status, approved ? 'APPROVED' : 'REJECTED');
+  if (approved) {
+    await requireFiguresStillHold({ record, assignment }, input.actorId, input.seenRevision);
+  }
   const now = new Date();
 
   const result = await prisma.$transaction(async (tx: Tx) => {
@@ -392,20 +531,7 @@ export async function correctTimesheet(input: CorrectParams): Promise<TimesheetV
       data: {
         timesheetId: existing.id,
         revision: existing.revision,
-        previous: {
-          workedMinutes: existing.workedMinutes,
-          breakMinutes: existing.breakMinutes,
-          billableMinutes: existing.billableMinutes,
-          nightMinutes: existing.nightMinutes,
-          nightOnlyMinutes: existing.nightOnlyMinutes,
-          overtimeMinutes: existing.overtimeMinutes,
-          holidayMinutes: existing.holidayMinutes,
-          onCallMinutes: existing.onCallMinutes,
-          hourlyRateKobo: existing.hourlyRateKobo,
-          amountKobo: existing.amountKobo,
-          checkedInAt: record.checkedInAt?.toISOString() ?? null,
-          checkedOutAt: record.checkedOutAt?.toISOString() ?? null,
-        } as Prisma.InputJsonValue,
+        previous: snapshotOf(existing, record),
         actorId: input.actorId,
         reason: input.reason,
       },

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/modules/practitioners/application/bookable', () => import('./support/always-bookable'));
 
@@ -34,6 +34,8 @@ import {
   timesheetRevisions,
 } from '@/modules/timesheets/application/timesheet';
 import { ROUTES } from '@/modules/timesheets/routes';
+import { POST as reviewRoute } from '@/app/api/v1/assignments/[id]/timesheet/review/route';
+import { issueSession } from '@/modules/auth/application/session-service';
 import { clearCookies } from './support/cookie-jar';
 import {
   createFacilityType,
@@ -611,5 +613,238 @@ describe('two callers pricing the same shift at once', () => {
       where: { assignmentId: world.assignmentId },
     });
     expect(await prisma.timesheet.count({ where: { attendanceRecordId: assignment.id } })).toBe(1);
+  });
+});
+
+/**
+ * M10-04: what a facility approves is what it is then paid for.
+ *
+ * The figures are worked out from the check-in and check-out, the rate on the request and the
+ * holiday calendar, and then stored. The calendar is the one input that moves on its own: a
+ * holiday is declared, or a mistaken one is taken away, after the hours were worked and
+ * submitted. Approving the stored figures then pays a practitioner without a holiday that was
+ * declared, or bills a facility for one that was not. And once a sheet is under review or
+ * decided, a late ShiftCompleted event recomputing it from today's calendar changed it with no
+ * revision and no audit row.
+ */
+describe('figures that change under a submitted timesheet (M10-04)', () => {
+  /** The WAT date of the shift in `buildWorld`. */
+  const WORKED_DATE = '2026-09-09';
+
+  // Reference data survives the reset between tests, so what a test adds is taken away again.
+  afterEach(async () => {
+    await prisma.publicHoliday.deleteMany({ where: { owner: 'test' } });
+  });
+
+  const declareHoliday = (date: string) =>
+    prisma.publicHoliday.create({
+      data: { date: new Date(`${date}T00:00:00.000Z`), name: `Declared ${date}`, year: 2026, owner: 'test' },
+    });
+
+  const approve = (world: World) =>
+    reviewTimesheet({
+      assignmentId: world.assignmentId,
+      facilityId: world.facilityId,
+      actorId: world.reviewerId,
+      decision: 'approve',
+    });
+
+  it('refuses to approve hours priced before a holiday was declared, and shows the recalculated ones', async () => {
+    const world = await buildWorld();
+    await submitTimesheet({ assignmentId: world.assignmentId, userId: world.practitionerId });
+    expect((await getTimesheet(world.assignmentId)).holidayMinutes).toBe(0);
+
+    await declareHoliday(WORKED_DATE);
+
+    await expect(approve(world)).rejects.toMatchObject({ code: 'timesheet_figures_changed', status: 409 });
+
+    // Nothing was approved; the figures now say what the calendar says, and it is still waiting.
+    const after = await getTimesheet(world.assignmentId);
+    expect(after.attendanceStatus).toBe('SUBMITTED');
+    expect(after.holidayMinutes).toBe(480);
+    expect(after.revision).toBe(2);
+    expect((await getAssignment(world.assignmentId))?.status).not.toBe('COMPLETED');
+
+    // What it was is kept, with who asked and why, as every other change to a sheet is.
+    const [kept] = await timesheetRevisions(world.assignmentId);
+    expect(kept!.previous).toMatchObject({ holidayMinutes: 0, amountKobo: 4_000_000 });
+    expect(kept!.actorId).toBe(world.reviewerId);
+    expect(kept!.reason).toMatch(/recalculated/i);
+    expect(await prisma.auditLog.count({ where: { action: 'timesheet.recalculated' } })).toBe(1);
+
+    // Seen again, and approved.
+    const approved = await approve(world);
+    expect(approved.attendanceStatus).toBe('APPROVED');
+    expect(approved.holidayMinutes).toBe(480);
+  });
+
+  it('does the same when a holiday is taken away after the hours were submitted', async () => {
+    await declareHoliday(WORKED_DATE);
+    const world = await buildWorld();
+    await submitTimesheet({ assignmentId: world.assignmentId, userId: world.practitionerId });
+    expect((await getTimesheet(world.assignmentId)).holidayMinutes).toBe(480);
+
+    await prisma.publicHoliday.deleteMany({ where: { owner: 'test' } });
+
+    await expect(approve(world)).rejects.toMatchObject({ code: 'timesheet_figures_changed' });
+    expect((await getTimesheet(world.assignmentId)).holidayMinutes).toBe(0);
+    expect((await approve(world)).attendanceStatus).toBe('APPROVED');
+  });
+
+  it('approves at once, and writes nothing extra, when nothing has changed', async () => {
+    const world = await buildWorld();
+    await submitTimesheet({ assignmentId: world.assignmentId, userId: world.practitionerId });
+
+    const approved = await approve(world);
+
+    expect(approved.attendanceStatus).toBe('APPROVED');
+    expect(approved.revision).toBe(1);
+    expect(await timesheetRevisions(world.assignmentId)).toHaveLength(0);
+    expect(await prisma.auditLog.count({ where: { action: 'timesheet.recalculated' } })).toBe(0);
+  });
+
+  it('rejects, with its reason, whatever the calendar says: only an approval is checked', async () => {
+    const world = await buildWorld();
+    await submitTimesheet({ assignmentId: world.assignmentId, userId: world.practitionerId });
+    await declareHoliday(WORKED_DATE);
+
+    const rejected = await reviewTimesheet({
+      assignmentId: world.assignmentId,
+      facilityId: world.facilityId,
+      actorId: world.reviewerId,
+      decision: 'reject',
+      reviewNotes: 'The break is missing.',
+    });
+
+    expect(rejected.attendanceStatus).toBe('REJECTED');
+  });
+
+  describe('an approval from a screen drawn before the figures moved', () => {
+    it('is refused whatever the figures are now, and an approval of the revision on file goes through', async () => {
+      const world = await buildWorld();
+      await submitTimesheet({ assignmentId: world.assignmentId, userId: world.practitionerId });
+      const seen = (await getTimesheet(world.assignmentId)).revision;
+      await declareHoliday(WORKED_DATE);
+
+      // The first approval, from a screen that showed the old figures, is refused and the
+      // sheet is worked out again.
+      await expect(approve(world)).rejects.toMatchObject({ code: 'timesheet_figures_changed' });
+      const now = (await getTimesheet(world.assignmentId)).revision;
+      expect(now).toBe(seen + 1);
+
+      // A screen that did not reload still says the old revision: the figures are stable now,
+      // and it is still not what that approver saw.
+      await expect(
+        reviewTimesheet({
+          assignmentId: world.assignmentId,
+          facilityId: world.facilityId,
+          actorId: world.reviewerId,
+          decision: 'approve',
+          seenRevision: seen,
+        }),
+      ).rejects.toMatchObject({ code: 'timesheet_figures_changed', status: 409 });
+      expect((await getTimesheet(world.assignmentId)).attendanceStatus).toBe('SUBMITTED');
+
+      const approved = await reviewTimesheet({
+        assignmentId: world.assignmentId,
+        facilityId: world.facilityId,
+        actorId: world.reviewerId,
+        decision: 'approve',
+        seenRevision: now,
+      });
+      expect(approved.attendanceStatus).toBe('APPROVED');
+    });
+
+    it('is carried by the route: a stale revision is a 409 with the code, the one on file is a 200', async () => {
+      const world = await buildWorld();
+      await submitTimesheet({ assignmentId: world.assignmentId, userId: world.practitionerId });
+      await issueSession({ userId: world.reviewerId });
+      const { revision } = await getTimesheet(world.assignmentId);
+
+      const call = async (seenRevision: number) => {
+        const response = await reviewRoute(
+          new Request(`http://localhost/api/v1/assignments/${world.assignmentId}/timesheet/review`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ facilityId: world.facilityId, decision: 'approve', seenRevision }),
+          }),
+          { params: Promise.resolve({ id: world.assignmentId }) },
+        );
+        return { status: response.status, body: (await response.json()) as { error?: { code?: string } } };
+      };
+
+      const stale = await call(revision + 1);
+      expect(stale.status).toBe(409);
+      expect(stale.body.error?.code).toBe('timesheet_figures_changed');
+
+      const fresh = await call(revision);
+      expect(fresh.status).toBe(200);
+    });
+
+    it('does not ask a caller that never showed a sheet to say which one', async () => {
+      const world = await buildWorld();
+      await submitTimesheet({ assignmentId: world.assignmentId, userId: world.practitionerId });
+
+      expect((await approve(world)).attendanceStatus).toBe('APPROVED');
+    });
+  });
+
+  describe('a late recomputation, as a redelivered ShiftCompleted event does', () => {
+    it('leaves a submitted sheet as the practitioner submitted it', async () => {
+      const world = await buildWorld();
+      await submitTimesheet({ assignmentId: world.assignmentId, userId: world.practitionerId });
+      await declareHoliday(WORKED_DATE);
+
+      const view = await computeAndSaveTimesheet(world.assignmentId);
+
+      expect(view.holidayMinutes).toBe(0);
+      const stored = await getTimesheet(world.assignmentId);
+      expect(stored.holidayMinutes).toBe(0);
+      expect(stored.revision).toBe(1);
+    });
+
+    it('leaves an approved sheet as it was approved', async () => {
+      const world = await buildWorld();
+      await submitTimesheet({ assignmentId: world.assignmentId, userId: world.practitionerId });
+      const approved = await approve(world);
+      await declareHoliday(WORKED_DATE);
+
+      const view = await computeAndSaveTimesheet(world.assignmentId);
+
+      expect(view.amountKobo).toBe(approved.amountKobo);
+      const stored = await getTimesheet(world.assignmentId);
+      expect(stored.holidayMinutes).toBe(0);
+      expect(stored.attendanceStatus).toBe('APPROVED');
+    });
+
+    it('still works out a sheet that has not been submitted, which is what the event is for', async () => {
+      const world = await buildWorld();
+      await declareHoliday(WORKED_DATE);
+
+      const view = await computeAndSaveTimesheet(world.assignmentId);
+
+      expect(view.holidayMinutes).toBe(480);
+    });
+
+    it('still works out a rejected sheet again, so it can be resubmitted as it now stands', async () => {
+      const world = await buildWorld();
+      await submitTimesheet({ assignmentId: world.assignmentId, userId: world.practitionerId });
+      await reviewTimesheet({
+        assignmentId: world.assignmentId,
+        facilityId: world.facilityId,
+        actorId: world.reviewerId,
+        decision: 'reject',
+        reviewNotes: 'Please look again.',
+      });
+      await declareHoliday(WORKED_DATE);
+
+      const resubmitted = await submitTimesheet({
+        assignmentId: world.assignmentId,
+        userId: world.practitionerId,
+      });
+
+      expect(resubmitted.attendanceStatus).toBe('SUBMITTED');
+      expect(resubmitted.holidayMinutes).toBe(480);
+    });
   });
 });
