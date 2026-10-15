@@ -38,6 +38,14 @@ export const AttendanceErrors = {
       422,
     ),
 
+  /** ATT-04. A hand-recorded or corrected time is one that has happened. */
+  timeInFuture: () =>
+    new AttendanceError(
+      'time_in_future',
+      'A shift cannot have been worked at a time that has not come yet. Check the date and the time.',
+      422,
+    ),
+
   checkoutBeforeCheckIn: () =>
     new AttendanceError('checkout_before_checkin', 'A shift must end after it starts.', 422),
 

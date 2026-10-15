@@ -391,6 +391,59 @@ describe('corrections (7.6)', () => {
   });
 });
 
+describe('a correction to a time that has not come yet (ATT-04)', () => {
+  it('is refused, and the sheet and its history are as they were', async () => {
+    const world = await buildWorld();
+    await submitTimesheet({ assignmentId: world.assignmentId, userId: world.practitionerId });
+    await reviewTimesheet({
+      assignmentId: world.assignmentId,
+      facilityId: world.facilityId,
+      actorId: world.reviewerId,
+      decision: 'reject',
+      reviewNotes: 'The check-out looks wrong.',
+    });
+    const before = await getTimesheet(world.assignmentId);
+
+    await expect(
+      correctTimesheet({
+        assignmentId: world.assignmentId,
+        facilityId: world.facilityId,
+        actorId: world.reviewerId,
+        checkedOutAt: new Date(Date.now() + 3 * 60 * 60 * 1000),
+        reason: 'The nurse stayed on for the handover, which ran late.',
+      }),
+    ).rejects.toMatchObject({ code: 'time_in_future', status: 422 });
+
+    const after = await getTimesheet(world.assignmentId);
+    expect(after.revision).toBe(before.revision);
+    expect(after.amountKobo).toBe(before.amountKobo);
+    expect(after.attendanceStatus).toBe('REJECTED');
+    expect(await timesheetRevisions(world.assignmentId)).toHaveLength(0);
+  });
+
+  it('still lets a break be corrected, which names no time', async () => {
+    const world = await buildWorld();
+    await submitTimesheet({ assignmentId: world.assignmentId, userId: world.practitionerId });
+    await reviewTimesheet({
+      assignmentId: world.assignmentId,
+      facilityId: world.facilityId,
+      actorId: world.reviewerId,
+      decision: 'reject',
+      reviewNotes: 'An hour of it was a break.',
+    });
+
+    const corrected = await correctTimesheet({
+      assignmentId: world.assignmentId,
+      facilityId: world.facilityId,
+      actorId: world.reviewerId,
+      breakMinutes: 60,
+      reason: 'Ward log records a one hour break that the paper sheet omitted.',
+    });
+
+    expect(corrected.billableMinutes).toBe(420);
+  });
+});
+
 describe('corrections that follow one another (7.6)', () => {
   it('carries on-call minutes through a later recomputation', async () => {
     const world = await buildWorld();

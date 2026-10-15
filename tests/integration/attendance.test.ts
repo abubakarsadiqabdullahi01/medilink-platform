@@ -488,6 +488,89 @@ describe('step 7.3 — recordable when the network fails', () => {
   });
 });
 
+/**
+ * ATT-04: hand-recorded times are times that have happened.
+ *
+ * A hand-recording is written from a paper log after the fact, so what it records is in the
+ * past. It accepted any date at all: a day typed wrong priced a shift that had not been worked.
+ */
+describe('a time that has not come yet (ATT-04)', () => {
+  const minutesFromNow = (minutes: number) => new Date(Date.now() + minutes * 60_000);
+  const reason = 'The ward network was down; recorded from the paper log.';
+
+  async function record(world: World, checkedInAt: Date, checkedOutAt: Date) {
+    return recordManualAttendance({
+      assignmentId: world.assignmentId,
+      actorId: world.schedulerId,
+      checkedInAt,
+      checkedOutAt,
+      reason,
+    });
+  }
+
+  it('refuses a check-out that has not happened, and writes nothing', async () => {
+    const world = await buildWorld();
+
+    await expect(record(world, PAST_START, minutesFromNow(10))).rejects.toMatchObject({
+      code: 'time_in_future',
+      status: 422,
+    });
+
+    // Refused before anything is made: there is not even an empty attendance record.
+    expect(
+      await prisma.attendanceRecord.findUnique({ where: { assignmentId: world.assignmentId } }),
+    ).toBeNull();
+    expect(await prisma.checkInEvent.count()).toBe(0);
+    expect(await prisma.auditLog.count({ where: { action: 'attendance.recorded_manually' } })).toBe(0);
+  });
+
+  it('refuses a check-in that has not happened, a day ahead, as a wrong date does', async () => {
+    const world = await buildWorld();
+
+    await expect(
+      record(world, minutesFromNow(24 * 60), minutesFromNow(24 * 60 + 8 * 60)),
+    ).rejects.toMatchObject({ code: 'time_in_future' });
+  });
+
+  it('refuses it over the route, as a 422 with the code', async () => {
+    const world = await buildWorld();
+    await issueSession({ userId: world.schedulerId });
+
+    const response = await manualRoute(
+      new Request(`http://localhost/api/v1/assignments/${world.assignmentId}/attendance/manual`, {
+        method: 'POST',
+        body: JSON.stringify({
+          facilityId: world.facilityId,
+          checkedInAt: PAST_START.toISOString(),
+          checkedOutAt: minutesFromNow(90).toISOString(),
+          reason,
+        }),
+      }),
+      { params: Promise.resolve({ id: world.assignmentId }) },
+    );
+
+    expect(response.status).toBe(422);
+    expect((await response.json()).error.code).toBe('time_in_future');
+  });
+
+  it('accepts a time a couple of minutes ahead of the server, which is a watch running fast', async () => {
+    const world = await buildWorld();
+
+    const result = await record(world, PAST_START, minutesFromNow(2));
+
+    expect(result.status).toBe('MANUALLY_CORRECTED');
+  });
+
+  it('accepts a time that has happened, however long ago', async () => {
+    const world = await buildWorld();
+    const longAgo = new Date(Date.now() - 400 * 24 * 60 * 60 * 1000);
+
+    const result = await record(world, longAgo, new Date(longAgo.getTime() + 8 * 60 * 60 * 1000));
+
+    expect(result.status).toBe('MANUALLY_CORRECTED');
+  });
+});
+
 describe('the state machine is the only way through', () => {
   it('audits every move with before and after', async () => {
     const world = await buildWorld();

@@ -13,6 +13,7 @@ import { termsOfBooking } from '@/modules/rates-contracts/application/rate-card'
 import { priceStoredTimesheet } from '@/modules/rates-contracts/domain/pricing';
 import { getServiceRequest } from '@/modules/service-requests/application/request';
 import { AttendanceErrors } from '@/modules/attendance/domain/errors';
+import { isInFuture } from '@/modules/attendance/domain/recorded-times';
 import {
   assertTransition,
   IllegalAttendanceTransition,
@@ -523,6 +524,14 @@ export async function correctTimesheet(input: CorrectParams): Promise<TimesheetV
   if (!checkedInAt || !checkedOutAt) throw AttendanceErrors.notCheckedIn();
   if (checkedOutAt.getTime() <= checkedInAt.getTime()) {
     throw AttendanceErrors.checkoutBeforeCheckIn();
+  }
+  // A correction names times that have happened (ATT-04). Only the ones it supplies are
+  // asked: the times already on the record were written when they were.
+  if (
+    (input.checkedInAt && isInFuture(input.checkedInAt)) ||
+    (input.checkedOutAt && isInFuture(input.checkedOutAt))
+  ) {
+    throw AttendanceErrors.timeInFuture();
   }
 
   await prisma.$transaction(async (tx: Tx) => {
