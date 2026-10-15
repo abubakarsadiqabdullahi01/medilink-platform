@@ -205,6 +205,20 @@ describe('pricing a stored timesheet', () => {
     expect(exclusiveBands({ ...stored, billableMinutes: 100 }).ordinaryMinutes).toBe(0);
   });
 
+  it('prices no more minutes than were billable when the bands claim more than the shift', () => {
+    // A row written when the timesheet could round both premium buckets up: 240 holiday and 240
+    // night of 479 billable. The holiday is the scarcer, so it keeps its minutes and the night
+    // gives up the one that was counted twice.
+    const over = { ...stored, billableMinutes: 479, nightOnlyMinutes: 240, holidayMinutes: 240 };
+    const bands = exclusiveBands(over);
+
+    expect(bands).toEqual({ ordinaryMinutes: 0, nightMinutes: 239, holidayMinutes: 240 });
+    expect(bands.ordinaryMinutes + bands.nightMinutes + bands.holidayMinutes).toBe(479);
+
+    const claimsMore = exclusiveBands({ ...stored, billableMinutes: 100 });
+    expect(claimsMore.ordinaryMinutes + claimsMore.nightMinutes + claimsMore.holidayMinutes).toBe(100);
+  });
+
   it('prices the same as pricing the bands by hand', () => {
     const card = { ...DEFAULT_RATE_CARD, nightMultiplierBp: 15_000, holidayMultiplierBp: 20_000 };
     const { bands, priced } = priceStoredTimesheet(stored, card);

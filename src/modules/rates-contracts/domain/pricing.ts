@@ -162,17 +162,21 @@ export interface StoredTimesheet {
  *
  * Holiday takes precedence over night, so `holidayMinutes` is the holiday
  * bucket as it stands; ordinary is what is left.
+ *
+ * The buckets are capped by the billable minutes, the holiday first. A row
+ * the timesheet wrote before it did the same could hold a premium bucket
+ * pair one minute over, and ordinary clamped at zero then priced that minute
+ * twice; read here, it is priced once.
  */
 export function exclusiveBands(
   sheet: Pick<StoredTimesheet, 'billableMinutes' | 'nightOnlyMinutes' | 'holidayMinutes'>,
 ) {
+  const holidayMinutes = Math.min(sheet.billableMinutes, sheet.holidayMinutes);
+  const nightMinutes = Math.min(sheet.billableMinutes - holidayMinutes, sheet.nightOnlyMinutes);
   return {
-    ordinaryMinutes: Math.max(
-      0,
-      sheet.billableMinutes - sheet.nightOnlyMinutes - sheet.holidayMinutes,
-    ),
-    nightMinutes: sheet.nightOnlyMinutes,
-    holidayMinutes: sheet.holidayMinutes,
+    ordinaryMinutes: sheet.billableMinutes - holidayMinutes - nightMinutes,
+    nightMinutes,
+    holidayMinutes,
   };
 }
 
