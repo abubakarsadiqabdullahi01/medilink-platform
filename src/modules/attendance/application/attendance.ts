@@ -9,6 +9,7 @@ import {
   type AttendanceState,
 } from '../domain/state-machine';
 import {
+  CHECK_IN_MAX_ATTEMPTS,
   checkInTokenExpiry,
   evaluateCheckInToken,
   generateCheckInCode,
@@ -266,6 +267,23 @@ export async function presentCheckInToken(
     orderBy: { createdAt: 'desc' },
   });
 
+  // The attempt is taken *before* the guess is judged, in one conditional statement (ATT-06), as a
+  // login code's is. It used to be read, judged and then incremented on a mismatch, so guesses
+  // arriving together all read the old count and all were compared: the five-try limit could be
+  // exceeded by as many requests as fit in one round trip. Here the database hands out at most five
+  // attempts per code, and a request that does not get one is refused without its guess being
+  // looked at. A guess abandoned mid-flight has still been counted.
+  if (token) {
+    const taken = await prisma.checkInToken.updateMany({
+      where: { id: token.id, consumedAt: null, attempts: { lt: CHECK_IN_MAX_ATTEMPTS } },
+      data: { attempts: { increment: 1 } },
+    });
+    if (taken.count === 0) {
+      throw AttendanceErrors.tokenInvalid(token.consumedAt ? 'already used' : 'too many attempts');
+    }
+  }
+
+  // Judged against the row as read, which is the count before this attempt.
   const verdict = evaluateCheckInToken(
     token,
     hashCheckInCode(code, input.assignmentId, input.purpose, env.SESSION_SECRET),
@@ -273,31 +291,29 @@ export async function presentCheckInToken(
   );
 
   if (!verdict.ok) {
-    // The attempt is counted before the caller learns the result, so
-    // abandoning the request mid-flight does not buy a free guess — the same
-    // reasoning consumeOtp already follows.
-    if (token && verdict.reason === 'mismatch') {
-      await prisma.checkInToken.update({
-        where: { id: token.id },
-        data: { attempts: { increment: 1 } },
-      });
-    }
     throw AttendanceErrors.tokenInvalid(verdict.reason.replace(/_/g, ' '));
   }
 
   return prisma.$transaction(async (tx: Tx) => {
-    await tx.checkInToken.updateMany({
+    // Both writes are conditional on the state they were judged against (ATT-05). Two presentations
+    // of one right code at the same moment both pass the judgement above; only one may spend the
+    // code and move the record, and the other is refused with nothing written, where both used to
+    // check in, each writing its own event, audit row and shift.started.
+    const spent = await tx.checkInToken.updateMany({
       where: { id: token!.id, consumedAt: null },
       data: { consumedAt: now },
     });
+    if (spent.count !== 1) throw AttendanceErrors.tokenInvalid('already used');
 
-    const updated = await tx.attendanceRecord.update({
-      where: { id: record.id },
+    const moved = await tx.attendanceRecord.updateMany({
+      where: { id: record.id, status: record.status },
       data: {
         status: nextStatus,
         ...(input.purpose === 'CHECK_IN' ? { checkedInAt: now } : { checkedOutAt: now }),
       },
     });
+    if (moved.count !== 1) throw AttendanceErrors.illegalTransition(record.status, nextStatus);
+    const updated = await tx.attendanceRecord.findUniqueOrThrow({ where: { id: record.id } });
 
     await tx.checkInEvent.create({
       data: {
