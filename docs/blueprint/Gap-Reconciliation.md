@@ -22,9 +22,9 @@ The Blueprint’s gap register holds **410 gaps**: 119 P0, 225 P1, 66 P2. Since 
 | Priority | Total | Closed | Partial | Open | Not yet reviewed |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | P0 | 119 | 87 | 18 | 14 | 0 |
-| P1 | 225 | 10 | 57 | 158 | 0 |
+| P1 | 225 | 14 | 58 | 153 | 0 |
 | P2 | 66 | 0 | 6 | 60 | 0 |
-| **All** | **410** | **97** | **81** | **232** | **0** |
+| **All** | **410** | **101** | **82** | **227** | **0** |
 
 By area:
 
@@ -38,8 +38,8 @@ By area:
 | Service requests (`REQ`) | 3 | 8 | 1 | 12 | 3 | 4 | 5 |
 | Matching (`MAT`) | 5 | 9 | 2 | 16 | 6 | 2 | 8 |
 | Scheduling (`SCH`) | 2 | 1 | 0 | 3 | 2 | 1 | 0 |
-| Attendance (`ATT`) | 2 | 8 | 2 | 12 | 2 | 2 | 8 |
-| Timesheets (`TIM`) | 3 | 9 | 0 | 12 | 2 | 4 | 6 |
+| Attendance (`ATT`) | 2 | 8 | 2 | 12 | 3 | 3 | 6 |
+| Timesheets (`TIM`) | 3 | 9 | 0 | 12 | 5 | 4 | 3 |
 | Rates (`RAT`) | 3 | 13 | 3 | 19 | 4 | 4 | 11 |
 | Billing (`BIL`) | 13 | 20 | 6 | 39 | 9 | 9 | 21 |
 | Sanctions (`SAN`) | 2 | 12 | 2 | 16 | 2 | 1 | 13 |
@@ -57,7 +57,7 @@ By area:
 | Accessibility and low bandwidth (`UXA`) | 6 | 7 | 4 | 17 | 6 | 1 | 10 |
 | Quality and delivery (`QAL`) | 3 | 8 | 1 | 12 | 1 | 2 | 9 |
 
-**Reading the numbers.** About three quarters of the P1 and P2 gaps (218 of 291) are still open, which is what one would expect: Phase 0 went after the pilot blockers. Of the 10 P1 gaps that closed, seven were closed by a P0 fix to the same root cause (the roster’s cancel action, the in-app inbox, the shift type derived from the hours, the roster’s contact window, the payout account reuse check) and three by later work on suggestions (SUG-01, SUG-02, UXO-11). No P2 gap closed.
+**Reading the numbers.** About three quarters of the P1 and P2 gaps (213 of 291) are still open, which is what one would expect: Phase 0 went after the pilot blockers. Of the 14 P1 gaps that closed, seven were closed by a P0 fix to the same root cause (the roster’s cancel action, the in-app inbox, the shift type derived from the hours, the roster’s contact window, the payout account reuse check), three by later work on suggestions (SUG-01, SUG-02, UXO-11) and four by the retry-safety work after that (TIM-04, TIM-07, TIM-08, ATT-06). No P2 gap closed.
 
 ## Changed since `9a93861`
 
@@ -70,6 +70,11 @@ Four commits on this branch after the merge changed the status of these gaps. Th
 | FAC-06 | P1 | PARTIAL | PARTIAL | `0040f00` |
 | SCH-01 | P1 | OPEN | PARTIAL | `064b1b7` |
 | ATT-04 | P1 | OPEN | PARTIAL | `ae317e4` |
+| ATT-05 | P1 | OPEN | PARTIAL | `c5959a2` |
+| ATT-06 | P1 | OPEN | CLOSED | `c5959a2` |
+| TIM-04 | P1 | OPEN | CLOSED | `e140478` |
+| TIM-07 | P1 | OPEN | CLOSED | `6d81631` |
+| TIM-08 | P1 | OPEN | CLOSED | `6d81631` |
 | SUG-01 | P1 | OPEN | CLOSED | `cdabc54` |
 | SUG-02 | P1 | OPEN | CLOSED | `cdabc54` |
 | UXO-11 | P1 | OPEN | CLOSED | `cdabc54` |
@@ -255,8 +260,8 @@ Gap text is shortened; the full text and the evidence at `5c199c1` are in the Bl
 | ATT-02 | P0 | CLOSED | The facility-side "issue a code" and "record by hand" functions never check that the shift belongs to the facility named in the request. Staff of… | `52a0456` |
 | ATT-03 | P1 | OPEN | There is no server-side check-in window. | src/modules/attendance/application/attendance.ts:142-205,221-322 — Still no server-side check-in window; code issue and presentation work at any time. Only ownership and CONFIRMED-status checks were added (52a0456). |
 | ATT-04 | P1 | PARTIAL | Hand-recorded and corrected times can be any date, including the future or days from the shift. | (after 9a93861, `ae317e4`) A hand-recorded or corrected time more than five minutes ahead of the server's clock is refused (ae317e4). Times days from the shift, or from any shift, are still accepted: a window needs a number from operations, as the check-in window does (ATT-03). The practitioner is still never asked to agree |
-| ATT-05 | P1 | OPEN | No idempotency. | src/modules/attendance/application/attendance.ts:251,282-290 — Retry after success hits an illegal transition; token update result is unchecked and the record update unconditional, so parallel presents can both pass. |
-| ATT-06 | P1 | OPEN | The wrong-try limit reads a count and then increments it, so a burst of parallel guesses can exceed five. | src/modules/attendance/application/attendance.ts:257-276;… — Attempts are read, judged, then incremented afterwards, so parallel wrong guesses can exceed the limit; the conditional-update fix used for login codes is… |
+| ATT-05 | P1 | PARTIAL | No idempotency. | (after 9a93861, `c5959a2`) Parallel presentations of one right code check in once: spending the code and moving the record are conditional (c5959a2). Presenting a code again after it worked is still refused, by design: M09-03 pins that a used code is refused |
+| ATT-06 | P1 | CLOSED | The wrong-try limit reads a count and then increments it, so a burst of parallel guesses can exceed five. | (after 9a93861, `c5959a2`) The attempt is taken before the guess is judged, in one conditional statement; fourteen parallel guesses are five attempts (c5959a2) |
 | ATT-07 | P1 | PARTIAL | Stuck states have no sweep or alert. "Check-in pending" never lapses (the move back to "not started" is in the table and no code uses it), "checked… | src/worker/jobs.ts:86; src/modules/notifications/application/shift-alerts.ts:86-118 (ed67c35);… — Alert now fires 30 minutes after start with no check-in. Pending never lapses to NOT_STARTED; checked-in never auto-closed; checked-out-never-submitted not… |
 | ATT-08 | P1 | OPEN † | The QR exists only as an API string. | src/app/facility/roster/attendance-panel.tsx:36; src/app/practitioner/shifts/check-in-panel.tsx:98;… — No QR drawing or scanning anywhere; the QR is still only an API string and practitioners type digits. |
 | ATT-09 | P1 | OPEN † | A practitioner cannot record or declare a break; it exists only if the facility enters it by hand or in a correction. v2.9 lists breaks, overtime… | src/app/practitioner/shifts/check-in-panel.tsx (no break input);… — Practitioner still cannot declare a break; breakMinutes is set only by facility manual entry or timesheet correction. |
@@ -271,11 +276,11 @@ Gap text is shortened; the full text and the evidence at `5c199c1` are in the Bl
 | TIM-01 | P0 | PARTIAL | No deadline, reminder or auto-approval. A facility that never approves stalls the practitioner's pay; nothing reminds either side. The facility… | Not done: A deadline after which hours are approved for the facility is a commercial decision and is not made. |
 | TIM-02 | P0 | CLOSED | The sheet is at base rate; the invoice adds night, holiday, overtime and on-call premiums from the facility's rate card. The facility approves a… | `48b1501` |
 | TIM-03 | P0 | CLOSED | The correct non-overlapping split of minutes is computed and then discarded. Billing re-derives it by subtracting all holiday minutes from night, so… | `9cf2997` |
-| TIM-04 | P1 | OPEN | Approval and "assignment completed" are two steps. | src/modules/timesheets/application/timesheet.ts:263-275 (approval commits), :330 (markAssignmentCompleted… — Approval still commits before the assignment is completed in a separate step; a failure strands attendance APPROVED, assignment CONFIRMED, and retry is refused. |
+| TIM-04 | P1 | CLOSED | Approval and "assignment completed" are two steps. | (after 9a93861, `e140478`) Approval no longer fails when completing the assignment fails; the approved event completes the assignment idempotently; approving again finishes a stranded approval (e140478) |
 | TIM-05 | P1 | PARTIAL | The holiday list is six fixed 2026 dates (no Easter, no Eid al-Fitr or al-Adha, no Maulud, nothing after 2026) and has no state or region. | 20fb06d; src/modules/rates-contracts/domain/holidays.ts:50-65; prisma/seed.ts:254-258;… — Holidays generated to 2030 with Good Friday, Easter Monday and an admin route for declared Eids; still no state/region and night window is constant. |
 | TIM-06 | P1 | OPEN | A facility correction puts a submitted sheet back to "manually corrected" and the facility has no Approve button until the practitioner submits again. | src/modules/timesheets/application/timesheet.ts:373-374,417 (correction sets MANUALLY_CORRECTED, publishes no… — Correction still leaves the sheet MANUALLY_CORRECTED; Approve renders only for SUBMITTED, and nobody is notified of the correction. |
-| TIM-07 | P1 | OPEN | A correction is not atomic. | src/modules/timesheets/application/timesheet.ts:389-439 (transaction commits), :441 (recompute outside it),… — Correction still commits revision and record change, then recomputes outside the transaction; a domain refusal still surfaces as a same-state transition error. |
-| TIM-08 | P1 | OPEN | A check-in or check-out that makes a shift longer than 24 hours raises an error inside the shift.completed handler. | src/modules/timesheets/domain/hours.ts:147-148; src/worker/handlers.ts:79-81; src/worker/processor.ts:131-146… — Over-24h shift still throws inside the shift.completed handler, retries and dead-letters; no check at check-in or check-out prevents it. |
+| TIM-07 | P1 | CLOSED | A correction is not atomic. | (after 9a93861, `6d81631`) A correction works out its figures before anything is written and commits the record, the revision, the figures and the audit row as one transaction; a refusal is a 422 with the domain's own code and commits nothing (6d81631) |
+| TIM-08 | P1 | CLOSED | A check-in or check-out that makes a shift longer than 24 hours raises an error inside the shift.completed handler. | (after 9a93861, `6d81631`) A shift over 24 hours is refused at check-out, in a hand-recording and in a correction (6d81631). A record from before the check still retries and dead-letters in the handler, now with a 422 that says why |
 | TIM-09 | P1 | OPEN | History is thinner than v2.9 asks. | prisma/schema.prisma:1291-1296 (review fields on attendance record);… — Review fields are still overwritten on each review, correction still overwrites check-in/out times with no check-in event, and no approvals or per-line entries… |
 | TIM-10 | P1 | OPEN | No weekend band exists in the classifier or the rate card, although v2.9 lists weekend allowances. | src/modules/timesheets/domain/hours.ts:103-206 (night and holiday bands only); prisma/schema.prisma:1906-1909… — No weekend band in classifier or rate card; overtime still needs no approval and on-call is still typed by the facility. |
 | TIM-11 | P1 | PARTIAL | Nobody is told when a sheet is submitted, approved, rejected or corrected. | src/worker/handlers.ts:61-62,95 (submitted, approved, rejected handlers);… — Submitted, approved and rejected now notify (fd31453); a facility correction still publishes no event and tells nobody. |
