@@ -14,12 +14,12 @@ import {
 } from '../domain/consent';
 
 /**
- * Data-subject rights, and the export that satisfies most of them.
+ * Data-subject rights: the requests a person raises and the people who answer them.
  *
  * A right that exists only in a privacy notice is not a right. Access and
- * portability are answered by one function here rather than by somebody
- * assembling a spreadsheet from six tables, because the version assembled by
- * hand is the one that quietly omits something.
+ * portability are answered by `exportSubjectData` (data-export.ts) rather than by
+ * somebody assembling a spreadsheet from a dozen tables, because the version
+ * assembled by hand is the one that quietly omits something.
  */
 
 export const DataSubjectErrors = {
@@ -312,123 +312,6 @@ export async function listOwnRequests(userId: string): Promise<RequestView[]> {
     orderBy: { receivedAt: 'desc' },
   });
   return rows.map(toView);
-}
-
-/**
- * Everything the platform holds about one person, in one response.
- *
- * Assembled here rather than by hand, so it cannot quietly omit a table
- * somebody forgot. When a module gains a table holding personal data, it
- * belongs in this function — and the test asserts the shape so a silent
- * omission shows up.
- *
- * Deliberately absent: the audit trail and the ledger. Both mention this
- * person and neither is *about* them — an audit row is the platform's record
- * of its own conduct, and a ledger entry has another party on the other side.
- * Returning them would disclose somebody else's data in answer to a subject
- * access request, which is the commonest way such a request goes wrong.
- */
-export async function exportSubjectData(userId: string) {
-  const [
-    user,
-    profile,
-    identity,
-    registrations,
-    credentials,
-    availability,
-    blocks,
-    invitations,
-    assignments,
-    consents,
-    acceptances,
-    requests,
-    payouts,
-    payoutAccounts,
-  ] = await Promise.all([
-    prisma.user.findUnique({
-      where: { id: userId },
-      select: {
-        id: true,
-        fullName: true,
-        email: true,
-        phone: true,
-        status: true,
-        createdAt: true,
-        emailVerifiedAt: true,
-        phoneVerifiedAt: true,
-        lastLoginAt: true,
-      },
-    }),
-    prisma.practitionerProfile.findUnique({ where: { userId } }),
-    // The NIN itself is never returned: only a keyed digest and the last four
-    // are stored, and the digest is not the subject's to receive.
-    prisma.identityVerification.findUnique({
-      where: { userId },
-      select: { ninLast4: true, nameMatch: true, method: true, verifiedAt: true },
-    }),
-    prisma.professionalRegistration.findMany({ where: { userId } }),
-    prisma.credentialSubmission.findMany({ where: { userId } }),
-    prisma.availabilitySlot.findMany({ where: { userId } }),
-    prisma.blockedPeriod.findMany({ where: { userId } }),
-    prisma.invitation.findMany({ where: { userId } }),
-    prisma.assignment.findMany({ where: { userId } }),
-    prisma.consentRecord.findMany({ where: { userId } }),
-    prisma.agreementAcceptance.findMany({
-      where: { userId },
-      include: { version: { select: { identifier: true, title: true } } },
-    }),
-    prisma.dataSubjectRequest.findMany({ where: { userId } }),
-    prisma.payout.findMany({ where: { practitionerId: userId } }),
-    // Never the sealed number or the hash of it: the last four digits, which is what
-    // the person sees of their own account anywhere in the product.
-    prisma.payoutAccount.findMany({
-      where: { userId },
-      select: {
-        bankName: true,
-        accountName: true,
-        accountLast4: true,
-        status: true,
-        createdAt: true,
-        reviewedAt: true,
-        reviewNote: true,
-      },
-      orderBy: { createdAt: 'asc' },
-    }),
-  ]);
-
-  if (!user) throw DataSubjectErrors.notFound();
-
-  return {
-    generatedAt: new Date(),
-    // Said in the export itself, because somebody reading it will wonder
-    // where the rest is.
-    notIncluded: {
-      auditTrail:
-        'The audit trail records what the platform did, not what it holds about you, and it names other people. It is retained under a legal obligation.',
-      ledger:
-        'Financial entries have another party on the other side of them. Your own payments appear under "payouts".',
-      nin: 'Your NIN is not stored — only a keyed digest of it and the last four digits, which are shown.',
-      bankAccountNumbers:
-        'Your bank account numbers are stored sealed and are opened only to make a transfer to you. Only the last four digits are shown here, as they are everywhere else.',
-    },
-    account: user,
-    profile,
-    identityVerification: identity,
-    professionalRegistrations: registrations,
-    credentials,
-    availability: { slots: availability, blocks },
-    invitations,
-    assignments,
-    consent: consents,
-    agreementsAccepted: acceptances.map((row: (typeof acceptances)[number]) => ({
-      identifier: row.version.identifier,
-      title: row.version.title,
-      acceptedAt: row.acceptedAt,
-    })),
-    dataSubjectRequests: requests,
-    payouts,
-    payoutAccounts,
-  };
 }
 
 /**

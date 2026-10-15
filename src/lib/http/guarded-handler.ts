@@ -4,6 +4,7 @@ import { contextLogger, requestContextFrom, type RequestContext } from './reques
 import { AuthorizationError, requirePermission, type RequestedScope } from '../authz/guard';
 import { requiresStepUp, type Permission } from '../authz/permissions';
 import { HttpError } from './errors';
+import { requireFreshStepUp } from './session-handler';
 import { logger } from '../logger';
 import { env } from '../env';
 import { recordRequest, routeKey, serverTimingHeader, withTiming } from './timing';
@@ -99,13 +100,7 @@ async function handle<TInput, TOutput>(
     // response would tell the caller they hold the permission — which is
     // precisely what the 403 below refuses to disclose. Before it, everybody
     // asking gets the same answer whatever they hold.
-    if (requiresStepUp(options.permission) && !session.stepUpFresh) {
-      throw new HttpError(
-        'step_up_required',
-        'Confirm your password to continue.',
-        401,
-      );
-    }
+    if (requiresStepUp(options.permission)) requireFreshStepUp(session);
 
     await requirePermission(session.userId, options.permission, options.scope(input, session));
 

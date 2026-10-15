@@ -375,12 +375,14 @@ describe('the route table', () => {
 
   it('keeps a subject their own data and nobody else theirs', () => {
     /**
-     * The export, the erasure check and consent are SELF and only SELF. An
-     * officer who could call them for anybody would hold a one-request
-     * dossier on every practitioner on the platform, which is precisely what
-     * a data-protection module must not build.
+     * The erasure check and consent are SELF and only SELF. An officer who could
+     * call them for anybody would hold a one-request dossier on every practitioner
+     * on the platform, which is precisely what a data-protection module must not
+     * build. The export is the same, and stronger: it takes no permission and no
+     * input at all, so it is whoever is signed in and nobody else (see
+     * data-export.test.ts, which asks it for somebody else and gets the caller).
      */
-    for (const path of ['/api/v1/me/export', '/api/v1/me/erasure', '/api/v1/consent']) {
+    for (const path of ['/api/v1/me/erasure', '/api/v1/consent']) {
       const forPath = ROUTES.filter((route) => route.path === path);
       expect(forPath.length, path).toBeGreaterThan(0);
       expect(

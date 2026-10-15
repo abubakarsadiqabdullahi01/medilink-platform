@@ -19,10 +19,10 @@ import {
   assessErasure,
   closeRequest,
   startRequest,
-  exportSubjectData,
   listRequests,
   raiseRequest,
 } from '@/modules/audit-compliance/application/data-subject';
+import { exportSubjectData } from '@/modules/audit-compliance/application/data-export';
 import { submitPayoutAccount } from '@/modules/billing-settlement/application/payout-account';
 import { clearCookies } from './support/cookie-jar';
 import { createUser } from './support/fixtures';

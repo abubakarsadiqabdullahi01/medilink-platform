@@ -4,6 +4,21 @@ import { HttpError } from './errors';
 import { requireSession, type CurrentSession } from '@/modules/auth/application/session-service';
 
 /**
+ * Refuses a session that has not confirmed its password within the step-up window
+ * (step 4.8). For an endpoint that releases a great deal at once, or moves money, and
+ * so should not be answered to a session cookie alone: a cookie left on a shared
+ * phone, or taken from a stolen one, is not the password.
+ *
+ * `handleGuardedRequest` applies this itself for the permissions that require it. A
+ * session-only route, which has no permission to key it on, calls it by name.
+ */
+export function requireFreshStepUp(session: CurrentSession): void {
+  if (!session.stepUpFresh) {
+    throw new HttpError('step_up_required', 'Confirm your password to continue.', 401);
+  }
+}
+
+/**
  * The plumbing for an endpoint that any signed-in person may call, about
  * themselves and nobody else.
  *
