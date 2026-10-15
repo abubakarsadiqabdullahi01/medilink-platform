@@ -7,6 +7,17 @@ vi.mock('next/headers', async () => {
   return { cookies: () => cookieJar };
 });
 
+// TIM-04: the step after approval, which can be made to fail.
+const completion = vi.hoisted(() => ({ fail: false }));
+vi.mock('@/modules/matching/application/assignment', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/modules/matching/application/assignment')>();
+  return {
+    ...actual,
+    markAssignmentCompleted: (input: Parameters<typeof actual.markAssignmentCompleted>[0]) =>
+      completion.fail ? Promise.reject(new Error('database blip')) : actual.markAssignmentCompleted(input),
+  };
+});
+
 const sms = vi.hoisted(() => ({ send: vi.fn() }));
 vi.mock('@/lib/sms', async () => (await import('./support/sms-double')).gatewayDouble(sms.send));
 
@@ -561,6 +572,121 @@ describe('a correction that cannot be priced (TIM-07, TIM-08)', () => {
     await expect(
       submitTimesheet({ assignmentId: world.assignmentId, userId: world.practitionerId }),
     ).rejects.toMatchObject({ code: 'shift_too_long', status: 422 });
+  });
+});
+
+/**
+ * TIM-04: approving a sheet and completing the assignment are not two things that can come apart.
+ *
+ * Approval committed, and then the assignment was completed in a separate step. A failure
+ * between them left the attendance APPROVED and the assignment still CONFIRMED, the facility's
+ * Approve button gone (it shows only for a submitted sheet) and a retry refused as an illegal
+ * move from APPROVED to APPROVED: a shift worked and approved that never counted as completed.
+ */
+describe('approval and completing the assignment (TIM-04)', () => {
+  beforeEach(() => {
+    completion.fail = false;
+    sms.send.mockReset();
+    sms.send.mockResolvedValue({ accepted: true, provider: 'test', providerMessageId: null });
+  });
+
+  afterEach(() => {
+    completion.fail = false;
+  });
+
+  async function deliver() {
+    await prisma.outboxEvent.updateMany({
+      where: { status: 'FAILED' },
+      data: { availableAt: new Date(Date.now() - 1000) },
+    });
+    return runOnce({ handlers });
+  }
+
+  const approve = (world: World) =>
+    reviewTimesheet({
+      assignmentId: world.assignmentId,
+      facilityId: world.facilityId,
+      actorId: world.reviewerId,
+      decision: 'approve',
+    });
+
+  /** The state a failure used to leave: approved, with the assignment still confirmed. */
+  async function strandedApproval() {
+    const world = await buildWorld();
+    await submitTimesheet({ assignmentId: world.assignmentId, userId: world.practitionerId });
+    completion.fail = true;
+    const approved = await approve(world);
+    completion.fail = false;
+    return { world, approved };
+  }
+
+  it('does not turn a committed approval into an error when completing the assignment fails', async () => {
+    const { world, approved } = await strandedApproval();
+
+    expect(approved.attendanceStatus).toBe('APPROVED');
+    expect((await getTimesheet(world.assignmentId)).attendanceStatus).toBe('APPROVED');
+    expect((await getAssignment(world.assignmentId))?.status).toBe('CONFIRMED');
+  });
+
+  it('completes the assignment from the approved event, so it comes right without anybody retrying', async () => {
+    const { world } = await strandedApproval();
+
+    await deliver();
+
+    expect((await getAssignment(world.assignmentId))?.status).toBe('COMPLETED');
+    expect((await getTimesheet(world.assignmentId)).attendanceStatus).toBe('APPROVED');
+  });
+
+  it('finishes the job when the facility approves again, without a second approval', async () => {
+    const { world } = await strandedApproval();
+
+    const again = await approve(world);
+
+    expect(again.attendanceStatus).toBe('APPROVED');
+    expect((await getAssignment(world.assignmentId))?.status).toBe('COMPLETED');
+    // One approval: one event, one audit row, one entry in the assignment's history.
+    expect(await prisma.outboxEvent.count({ where: { eventType: EVENTS.TimesheetApproved } })).toBe(1);
+    expect(await prisma.auditLog.count({ where: { action: 'timesheet.approved' } })).toBe(1);
+    expect(
+      await prisma.assignmentStatusHistory.count({
+        where: { assignmentId: world.assignmentId, toStatus: 'COMPLETED' },
+      }),
+    ).toBe(1);
+  });
+
+  it('still refuses to approve a sheet that is approved and whose assignment is complete', async () => {
+    const world = await buildWorld();
+    await submitTimesheet({ assignmentId: world.assignmentId, userId: world.practitionerId });
+    await approve(world);
+
+    await expect(approve(world)).rejects.toMatchObject({ code: 'illegal_attendance_transition' });
+  });
+
+  it('completes the assignment once however often the approved event is delivered', async () => {
+    const { world } = await strandedApproval();
+
+    await deliver();
+    await prisma.outboxEvent.updateMany({
+      where: { eventType: EVENTS.TimesheetApproved },
+      data: { status: 'PENDING', processedAt: null, availableAt: new Date(Date.now() - 1000) },
+    });
+    await deliver();
+
+    expect(
+      await prisma.assignmentStatusHistory.count({
+        where: { assignmentId: world.assignmentId, toStatus: 'COMPLETED' },
+      }),
+    ).toBe(1);
+  });
+
+  it('carries who approved it on the event, which is who the completion is recorded against', async () => {
+    const world = await buildWorld();
+    await submitTimesheet({ assignmentId: world.assignmentId, userId: world.practitionerId });
+    await approve(world);
+
+    const event = await prisma.outboxEvent.findFirstOrThrow({ where: { eventType: EVENTS.TimesheetApproved } });
+
+    expect(event.payload).toMatchObject({ assignmentId: world.assignmentId, actorId: world.reviewerId });
   });
 });
 

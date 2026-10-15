@@ -2,6 +2,8 @@ import { Prisma } from '@prisma/client';
 import { prisma, type Tx } from '@/lib/db';
 import { recordAudit } from '@/lib/audit';
 import { randomUUID } from 'node:crypto';
+import { logger } from '@/lib/logger';
+import { HttpError } from '@/lib/http/errors';
 import { publishEvent } from '@/lib/outbox';
 import { EVENTS } from '@/lib/events';
 import {
@@ -434,6 +436,19 @@ export async function reviewTimesheet(input: ReviewParams): Promise<TimesheetVie
   // practitioner has to know what to correct.
   if (!approved && !input.reviewNotes?.trim()) throw AttendanceErrors.reviewNotesRequired();
 
+  // Approved already, with the assignment not completed (TIM-04): an approval that was committed
+  // and then could not complete the assignment. Approving again finishes it, and approves nothing
+  // twice: no second event, audit row or history entry. Approved and completed is still a refusal.
+  if (approved && record.status === 'APPROVED' && assignment.status !== 'COMPLETED') {
+    await markAssignmentCompleted({
+      assignmentId: input.assignmentId,
+      actorId: input.actorId,
+      reason: 'Timesheet approved',
+    });
+    const kept = await prisma.timesheet.findUniqueOrThrow({ where: { attendanceRecordId: record.id } });
+    return { ...kept, assignmentId: input.assignmentId, attendanceStatus: 'APPROVED' };
+  }
+
   guardTransition(record.status, approved ? 'APPROVED' : 'REJECTED');
   if (approved) {
     await requireFiguresStillHold({ record, assignment }, input.actorId, input.seenRevision);
@@ -490,6 +505,8 @@ export async function reviewTimesheet(input: ReviewParams): Promise<TimesheetVie
           userId: assignment.userId,
           facilityId: assignment.facilityId,
           amountKobo: timesheet.amountKobo,
+          // Whom the assignment's completion is recorded against, when the event does it.
+          actorId: input.actorId,
         },
       });
     }
@@ -503,15 +520,56 @@ export async function reviewTimesheet(input: ReviewParams): Promise<TimesheetVie
 
   // Outside the transaction above because it is the matching module's write,
   // through its own application layer.
+  //
+  // The approval is committed by now, so a failure here is not the approval failing (TIM-04): it
+  // used to throw, leave the attendance APPROVED and the assignment CONFIRMED, and refuse a retry.
+  // The approved event completes the assignment as well, idempotently, so a failure here is
+  // said and left to that.
   if (approved) {
-    await markAssignmentCompleted({
-      assignmentId: input.assignmentId,
-      actorId: input.actorId,
-      reason: 'Timesheet approved',
-    });
+    try {
+      await markAssignmentCompleted({
+        assignmentId: input.assignmentId,
+        actorId: input.actorId,
+        reason: 'Timesheet approved',
+      });
+    } catch (error) {
+      logger.error('assignment not completed after approval; the approved event will complete it', {
+        event: 'assignment_completion_deferred',
+        assignmentId: input.assignmentId,
+        errorName: error instanceof Error ? error.name : typeof error,
+      });
+    }
   }
 
   return result;
+}
+
+/**
+ * The approved event's half of TIM-04: the assignment of an approved sheet is completed.
+ *
+ * Idempotent (`markAssignmentCompleted` returns at once for one already completed), so it is
+ * safe however often the outbox delivers the event, and it comes right a stranded approval
+ * without anybody retrying. An assignment that cannot be completed from where it is (cancelled
+ * since) is said and left, not retried for ever.
+ */
+export async function completeAssignmentOfApprovedSheet(payload: Record<string, unknown>): Promise<void> {
+  const assignmentId = typeof payload.assignmentId === 'string' ? payload.assignmentId : '';
+  const actorId = typeof payload.actorId === 'string' ? payload.actorId : '';
+  if (!assignmentId || !actorId) {
+    // An event from before it carried who approved: those were completed in the approval itself.
+    logger.warn('timesheet.approved event without an approver; not completing the assignment');
+    return;
+  }
+
+  try {
+    await markAssignmentCompleted({ assignmentId, actorId, reason: 'Timesheet approved' });
+  } catch (error) {
+    if (error instanceof HttpError && error.status === 409) {
+      logger.warn('assignment cannot be completed from where it is; leaving it', { assignmentId });
+      return;
+    }
+    throw error;
+  }
 }
 
 export interface CorrectParams {

@@ -27,7 +27,10 @@ import {
   notifyTimesheetRecalculated,
   notifyTimesheetSubmitted,
 } from '../modules/notifications/application/event-handlers';
-import { computeAndSaveTimesheet } from '../modules/timesheets/application/timesheet';
+import {
+  completeAssignmentOfApprovedSheet,
+  computeAndSaveTimesheet,
+} from '../modules/timesheets/application/timesheet';
 import type { EventHandler } from './processor';
 
 /**
@@ -62,7 +65,12 @@ export const handlers: Record<string, EventHandler> = {
   [EVENTS.FacilityVerified]: async (payload) => notifyFacilityVerified(payload),
   [EVENTS.SuggestionAnswered]: async (payload) => notifySuggestionAnswered(payload),
   [EVENTS.TimesheetSubmitted]: async (payload) => notifyTimesheetSubmitted(payload),
-  [EVENTS.TimesheetApproved]: async (payload) => notifyTimesheetApproved(payload),
+  [EVENTS.TimesheetApproved]: async (payload) => {
+    // The assignment first, so a failure to tell anyone cannot leave an approved shift not completed
+    // (TIM-04); both are safe to repeat.
+    await completeAssignmentOfApprovedSheet(payload);
+    await notifyTimesheetApproved(payload);
+  },
   [EVENTS.TimesheetRecalculated]: async (payload) => notifyTimesheetRecalculated(payload),
   [EVENTS.DisputeOpened]: async (payload) => notifyDisputeOpened(payload),
 
