@@ -233,7 +233,8 @@ model LoginAttempt {
 
 // ---------------------------------------------------------------- audit
 
-// Append-only. No update or delete path exists in application code, and the
+// Append-only. No update or delete path exists in application code, the database
+// refuses one (migration 20261016130000_audit_log_append_only, AUD-06), and the
 // test harness fails the suite if a state change leaves no row here.
 model AuditLog {
   id            String   @id @default(uuid()) @db.Uuid
