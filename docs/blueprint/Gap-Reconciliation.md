@@ -22,9 +22,9 @@ The Blueprint’s gap register holds **410 gaps**: 119 P0, 225 P1, 66 P2. Since 
 | Priority | Total | Closed | Partial | Open | Not yet reviewed |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | P0 | 119 | 87 | 18 | 14 | 0 |
-| P1 | 225 | 14 | 61 | 150 | 0 |
+| P1 | 225 | 15 | 61 | 149 | 0 |
 | P2 | 66 | 0 | 6 | 60 | 0 |
-| **All** | **410** | **101** | **85** | **224** | **0** |
+| **All** | **410** | **102** | **85** | **223** | **0** |
 
 By area:
 
@@ -46,7 +46,7 @@ By area:
 | Disputes (`DSP`) | 5 | 6 | 1 | 12 | 4 | 2 | 6 |
 | Incidents (`INC`) | 4 | 7 | 2 | 13 | 3 | 0 | 10 |
 | Notifications (`NOT`) | 6 | 6 | 0 | 12 | 5 | 4 | 3 |
-| Audit and compliance (`AUD`) | 5 | 9 | 5 | 19 | 2 | 7 | 10 |
+| Audit and compliance (`AUD`) | 5 | 9 | 5 | 19 | 3 | 7 | 9 |
 | Suggestions (`SUG`) | 0 | 2 | 6 | 8 | 2 | 1 | 5 |
 | Reference data (`CFG`) | 4 | 8 | 3 | 15 | 0 | 6 | 9 |
 | Platform and operations (`PLT`) | 5 | 11 | 5 | 21 | 1 | 8 | 12 |
@@ -57,7 +57,7 @@ By area:
 | Accessibility and low bandwidth (`UXA`) | 6 | 7 | 4 | 17 | 6 | 1 | 10 |
 | Quality and delivery (`QAL`) | 3 | 8 | 1 | 12 | 1 | 2 | 9 |
 
-**Reading the numbers.** About three quarters of the P1 and P2 gaps (210 of 291) are still open, which is what one would expect: Phase 0 went after the pilot blockers. Of the 14 P1 gaps that closed, seven were closed by a P0 fix to the same root cause (the roster’s cancel action, the in-app inbox, the shift type derived from the hours, the roster’s contact window, the payout account reuse check), three by later work on suggestions (SUG-01, SUG-02, UXO-11) and four by the retry-safety work after that (TIM-04, TIM-07, TIM-08, ATT-06). No P2 gap closed.
+**Reading the numbers.** About three quarters of the P1 and P2 gaps (209 of 291) are still open, which is what one would expect: Phase 0 went after the pilot blockers. Of the 15 P1 gaps that closed, seven were closed by a P0 fix to the same root cause (the roster’s cancel action, the in-app inbox, the shift type derived from the hours, the roster’s contact window, the payout account reuse check), three by later work on suggestions (SUG-01, SUG-02, UXO-11), four by the retry-safety work after that (TIM-04, TIM-07, TIM-08, ATT-06) and one by the audit work (AUD-13). No P2 gap closed.
 
 ## Changed since `9a93861`
 
@@ -78,6 +78,7 @@ Four commits on this branch after the merge changed the status of these gaps. Th
 | AUD-06 | P1 | OPEN | PARTIAL | `60e030b` |
 | AUD-07 | P1 | OPEN | PARTIAL | `e42b766` |
 | AUD-08 | P1 | OPEN | PARTIAL | `e42b766` |
+| AUD-13 | P1 | OPEN | CLOSED | `0c39863` |
 | SUG-01 | P1 | OPEN | CLOSED | `cdabc54` |
 | SUG-02 | P1 | OPEN | CLOSED | `cdabc54` |
 | UXO-11 | P1 | OPEN | CLOSED | `cdabc54` |
@@ -446,7 +447,7 @@ Gap text is shortened; the full text and the evidence at `5c199c1` are in the Bl
 | AUD-10 | P1 | PARTIAL | Picking up and closing a rights request needs only audit.read, a read permission. | src/app/api/v1/data-requests/[id]/close/route.ts:19; .../start/route.ts:22; .../erase/route.ts:20;… — Start and close still need only audit.read. Erasure now needs data.erase with step-up and cannot be closed by hand; rectification and restriction remain words. |
 | AUD-11 | P1 | OPEN | No lawful-disclosure route for a regulator, court or police request (the request, legal basis, authorising officer and what was released recorded). | prisma/schema.prisma (no disclosure model); git grep found no lawful-disclosure route in src/ — No lawful-disclosure model or route exists for regulator, court or police requests. |
 | AUD-12 | P1 | OPEN | No data-breach workflow or incident table. | src/modules/audit-compliance/application/read-audit-trail.ts:146;… — No breach workflow or incident table; security events still written from the same three read paths and nothing monitors them. |
-| AUD-13 | P1 | OPEN | The correlation id is made for every request and logged, but never saved in an audit row or an event, so one business action cannot be followed… | src/lib/audit.ts:96 and src/lib/outbox.ts:26 accept correlationId; only src/app/api/v1/audit/route.ts:40… — Correlation id still not stored on ordinary audit rows or published events; no business-action caller sets it. |
+| AUD-13 | P1 | CLOSED | The correlation id is made for every request and logged, but never saved in an audit row or an event, so one business action cannot be followed… | (after 9a93861, `0c39863`) The correlation id is ambient (src/lib/trace.ts) and saved: recordAudit and publishEvent take it from the request wrappers, the hand-written writing routes, the event processor and the job runner, so a request, its rows, its events and the worker run that finished it share one id; a caller-supplied id is accepted only if it looks like an identifier (0c39863) |
 | AUD-14 | P1 | OPEN | Consent has four purposes. | prisma/schema.prisma:2252-2260 — ConsentPurpose still has four values; no listing, contact-reveal or profile-viewing opt-ins and no view log. |
 | AUD-15 | P2 | OPEN | Coverage is by table, so a write can pass because an unrelated write to the same table was audited in the same window. | src/lib/audit-coverage.ts:229-234 (auditedTables set by entityType) — Coverage still matches by table, so an unrelated audited write to the same table can mask an unaudited one. |
 | AUD-16 | P2 | OPEN | Publishing an agreement with a future start date retires the old one at once and refuses to accept it, leaving nothing in force until the date. | src/modules/audit-compliance/application/consent.ts:229-240,395,486 — Publishing sets old version retiredAt to the future date, so listings and acceptance exclude it now while the new one is not yet effective. |
