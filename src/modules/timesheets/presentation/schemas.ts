@@ -16,6 +16,9 @@ export const reviewTimesheetSchema = z
     facilityId: uuid,
     decision: z.enum(['approve', 'reject']),
     reviewNotes: z.string().trim().max(1000).optional(),
+    // The revision of the sheet the approver was looking at (M10-04). When it is not the
+    // revision now on file, the figures moved under them and the approval is refused.
+    seenRevision: z.coerce.number().int().positive().optional(),
   })
   .refine((value) => value.decision === 'approve' || Boolean(value.reviewNotes?.length), {
     // Step 7.5's stated test: a rejection without a reason is refused. The
