@@ -102,7 +102,11 @@ test('finance pays her, and her earnings say so', async ({ page }) => {
   await page.getByRole('button', { name: 'Search' }).click();
   await page.getByRole('button').filter({ hasText: world().practitioner.fullName }).first().click();
 
-  await page.getByRole('button', { name: 'Prepare', exact: true }).click();
+  // The button says "Prepare" until the page has what is payable and "Prepare ₦…" after, so a
+  // locator for the bare word passes only if it is found in the moment before the data arrives and
+  // waits two minutes for a name that never comes if the data wins. The amount is what the nurse
+  // earned: waiting for it also checks that the page agrees with the invoice.
+  await page.getByRole('button', { name: `Prepare ${gross}`, exact: true }).click();
   await expectToast(page, 'Prepared');
   await page.getByRole('button', { name: `Release ${gross}` }).click();
   await expectToast(page, 'Released to the gateway');
