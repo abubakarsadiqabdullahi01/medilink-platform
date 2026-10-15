@@ -111,7 +111,8 @@ export const handlers: Record<string, EventHandler> = {
   [EVENTS.PayoutAccountReviewed]: (payload) => notifyPayoutAccountReviewed(payload),
 
   [EVENTS.PractitionerRegistered]: async (payload) => {
-    // Stage 4.7: send the welcome message through the notification adapter.
+    // No welcome text is sent: the sign-up request sent the one-time code already (see
+    // docs/notification-matrix.md for what each event tells, and what it does not).
     logger.info('practitioner registered', { userId: String(payload.userId ?? '') });
     await grantPractitionerRoleOnRegistration(String(payload.userId ?? ''));
 
