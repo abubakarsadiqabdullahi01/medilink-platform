@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { env } from '../env';
 import { logger } from '../logger';
+import type { Trace } from '../trace';
 
 /**
  * Request and correlation identifiers. The request id identifies one HTTP
@@ -33,14 +34,34 @@ function clientAddress(headers: Headers): string | undefined {
   return raw?.split(',')[0]?.trim() || undefined;
 }
 
+/**
+ * An identifier a caller supplied, if it is the kind a tracing tool produces.
+ *
+ * The correlation id is saved on every audit row and event, and a row in the trail is kept for
+ * good. A header is the caller's to write, so taken as it came it would be a way to put an
+ * address, a number or a page of text where nothing can remove it, or to forge a link to
+ * somebody else's action. Letters, digits and `._-`, eight to sixty-four of them, covers a UUID,
+ * a W3C trace id and the ids the common tools make; anything else is replaced with a fresh one.
+ */
+const SAFE_IDENTIFIER = /^[A-Za-z0-9._-]{8,64}$/;
+
+function suppliedOrNew(value: string | null): string {
+  return value !== null && SAFE_IDENTIFIER.test(value) ? value : randomUUID();
+}
+
 export function requestContextFrom(request: Request, userId?: string): RequestContext {
   const headers = request.headers;
   return {
-    requestId: headers.get('x-request-id') ?? randomUUID(),
-    correlationId: headers.get('x-correlation-id') ?? randomUUID(),
+    requestId: suppliedOrNew(headers.get('x-request-id')),
+    correlationId: suppliedOrNew(headers.get('x-correlation-id')),
     userId,
     ipAddress: clientAddress(headers),
   };
+}
+
+/** The trace a request's work runs under, so what it writes can be tied back to it. */
+export function traceOf(context: RequestContext): Trace {
+  return { correlationId: context.correlationId, requestId: context.requestId };
 }
 
 export function contextLogger(context: RequestContext) {

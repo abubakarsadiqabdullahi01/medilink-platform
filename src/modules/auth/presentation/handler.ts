@@ -1,6 +1,7 @@
 import { ZodError, type ZodSchema } from 'zod';
 import { fail, handleError, ok } from '@/lib/http/responses';
-import { contextLogger, requestContextFrom, type RequestContext } from '@/lib/http/request-context';
+import { contextLogger, requestContextFrom, traceOf, type RequestContext } from '@/lib/http/request-context';
+import { withTrace } from '@/lib/trace';
 import { PhoneFormatError } from '@/lib/phone';
 import { AuthError } from '../domain/errors';
 
@@ -21,7 +22,8 @@ export async function handleAuthRequest<TInput, TOutput>(
   try {
     const body: unknown = await request.json().catch(() => ({}));
     const input = schema.parse(body);
-    const result = await action(input, context);
+    // Under the request's trace, so the rows and events the action writes carry its correlation id (AUD-13).
+    const result = await withTrace(traceOf(context), () => action(input, context));
     return ok(result, context, successStatus);
   } catch (error) {
     if (error instanceof AuthError) {

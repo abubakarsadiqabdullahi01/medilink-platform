@@ -1,4 +1,5 @@
 import type { Tx } from './db';
+import { currentTrace } from './trace';
 
 /**
  * Transactional outbox. Publishing an event means writing a row in the same
@@ -23,7 +24,8 @@ export async function publishEvent(tx: Tx, event: DomainEventInput) {
       aggregateType: event.aggregateType,
       aggregateId: event.aggregateId,
       payload: event.payload as object,
-      correlationId: event.correlationId,
+      // The action that published it, so the worker's part of the story carries the same id (AUD-13).
+      correlationId: event.correlationId ?? currentTrace()?.correlationId,
       idempotencyKey: event.idempotencyKey,
     },
   });

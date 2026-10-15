@@ -46,11 +46,13 @@ const HAND_WRITTEN: Record<string, string> = {
     'Authenticated but not permission-guarded: a hospital that has never used Medilink holds no grant; it is created PENDING and cannot publish until verified.',
 };
 
-/** The code without its comments: a wrapper named in a comment is not one that is used. */
+/** Source without its comments: a wrapper named in a comment is not one that is used. */
+function stripped(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+}
+
 function code(file: string): string {
-  return readFileSync(join(API, file), 'utf8')
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/^\s*\/\/.*$/gm, '');
+  return stripped(readFileSync(join(API, file), 'utf8'));
 }
 
 function routeFiles(): string[] {
@@ -105,6 +107,25 @@ describe('every API route', () => {
       (name) => !PUBLIC.includes(name) && !SECRET_AUTHENTICATED.includes(name),
     )) {
       expect(/requireSession|currentSession|sessionState/.test(code(file)), file).toBe(true);
+    }
+  });
+
+  it('writes under the request\u2019s trace, so its audit rows and events carry the correlation id (AUD-13)', () => {
+    // The three wrappers open one around the action; the hand-written routes that write open their own.
+    const source = (path: string) => stripped(readFileSync(join(ROOT, path), 'utf8'));
+    for (const wrapper of [
+      'src/lib/http/guarded-handler.ts',
+      'src/lib/http/session-handler.ts',
+      'src/modules/auth/presentation/handler.ts',
+    ]) {
+      expect(source(wrapper), wrapper).toContain('withTrace(traceOf(context)');
+    }
+    for (const file of [
+      'v1/auth/logout/route.ts',
+      'v1/auth/step-up/route.ts',
+      'v1/facilities/register/route.ts',
+    ]) {
+      expect(code(file), file).toContain('withTrace(traceOf(context)');
     }
   });
 

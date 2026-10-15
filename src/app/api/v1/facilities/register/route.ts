@@ -1,4 +1,5 @@
-import { requestContextFrom } from '@/lib/http/request-context';
+import { requestContextFrom, traceOf } from '@/lib/http/request-context';
+import { withTrace } from '@/lib/trace';
 import { fail, handleError, ok } from '@/lib/http/responses';
 import { HttpError } from '@/lib/http/errors';
 import { prisma } from '@/lib/db';
@@ -45,14 +46,16 @@ export async function POST(request: Request) {
       );
     }
 
-    const facility = await createFacility({
-      ...input,
-      // The registrant is both the representative and the actor: they are
-      // doing this for themselves, which is exactly what distinguishes it
-      // from operations onboarding somebody.
-      representativeUserId: session.userId,
-      actorId: session.userId,
-    });
+    const facility = await withTrace(traceOf(context), () =>
+      createFacility({
+        ...input,
+        // The registrant is both the representative and the actor: they are
+        // doing this for themselves, which is exactly what distinguishes it
+        // from operations onboarding somebody.
+        representativeUserId: session.userId,
+        actorId: session.userId,
+      }),
+    );
 
     return ok(facility, context, 201);
   } catch (error) {

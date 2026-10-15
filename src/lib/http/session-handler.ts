@@ -1,5 +1,6 @@
 import { fail, handleError, ok } from './responses';
-import { requestContextFrom, type RequestContext } from './request-context';
+import { requestContextFrom, traceOf, type RequestContext } from './request-context';
+import { withTrace } from '../trace';
 import { HttpError } from './errors';
 import { requireSession, type CurrentSession } from '@/modules/auth/application/session-service';
 
@@ -35,11 +36,13 @@ export async function handleSessionRequest<T>(
   successStatus = 200,
 ) {
   const context = requestContextFrom(request);
-  try {
-    const session = await requireSession();
-    return ok(await action(session, context), context, successStatus);
-  } catch (error) {
-    if (error instanceof HttpError) return fail(error.code, error.message, context, error.status);
-    return handleError(error, context);
-  }
+  return withTrace(traceOf(context), async () => {
+    try {
+      const session = await requireSession();
+      return ok(await action(session, context), context, successStatus);
+    } catch (error) {
+      if (error instanceof HttpError) return fail(error.code, error.message, context, error.status);
+      return handleError(error, context);
+    }
+  });
 }

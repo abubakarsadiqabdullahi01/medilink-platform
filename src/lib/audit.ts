@@ -1,5 +1,6 @@
 import type { Tx } from './db';
 import { logger } from './logger';
+import { currentTrace } from './trace';
 
 /**
  * Every state change writes one audit row, in the same transaction as the
@@ -93,6 +94,12 @@ export function redact(value: unknown): unknown {
  * what the row's own redaction exists to keep out.
  */
 export async function recordAudit(tx: Tx, input: AuditInput) {
+  // Taken from the action being run unless a caller said otherwise, so one business action's rows
+  // share an id without any of the hundred call sites passing it (AUD-13). The network address is
+  // not taken the same way: it identifies a person, and the trail is kept for good.
+  const trace = currentTrace();
+  const correlationId = input.correlationId ?? trace?.correlationId;
+  const requestId = input.requestId ?? trace?.requestId;
   try {
     return await tx.auditLog.create({
       data: {
@@ -106,8 +113,8 @@ export async function recordAudit(tx: Tx, input: AuditInput) {
         reason: input.reason === undefined ? undefined : scrubText(input.reason),
         before: input.before === undefined ? undefined : (redact(input.before) as object),
         after: input.after === undefined ? undefined : (redact(input.after) as object),
-        correlationId: input.correlationId,
-        requestId: input.requestId,
+        correlationId,
+        requestId,
         ipAddress: input.ipAddress,
       },
     });
@@ -117,8 +124,8 @@ export async function recordAudit(tx: Tx, input: AuditInput) {
       action: input.action,
       entityType: input.entityType,
       entityId: input.entityId,
-      correlationId: input.correlationId,
-      requestId: input.requestId,
+      correlationId,
+      requestId,
       errorName: error instanceof Error ? error.name : typeof error,
       errorCode: (error as { code?: unknown } | null)?.code,
     });
