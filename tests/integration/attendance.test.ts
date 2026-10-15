@@ -525,6 +525,187 @@ describe('the state machine is the only way through', () => {
   });
 });
 
+/**
+ * M09-03: what a code is good for. It proves presence at one shift, for one purpose, once, now.
+ *
+ * The digest binds the assignment and the purpose; the token is spent when used; and the time
+ * that counts is the server's, never the caller's. Each of those was true and none was pinned
+ * beside the others, so a change that loosened one would have passed.
+ */
+describe('what a code is good for (M09-03)', () => {
+  /** A second confirmed shift for the same practitioner, at the same facility, three days on. */
+  async function bookAnotherShift(world: World): Promise<string> {
+    const category = await createProfessionalCategory();
+    const later = new Date(SHIFT_START.getTime() + 3 * 24 * 60 * 60 * 1000);
+    const request = await createServiceRequest({
+      facilityId: world.facilityId,
+      professionalCategoryId: category.id,
+      shiftType: 'DAY',
+      startsAt: later,
+      endsAt: new Date(later.getTime() + 8 * 60 * 60 * 1000),
+      headcount: 1,
+      hourlyRateKobo: 500_000,
+      urgency: 'ROUTINE',
+      cancellationTerms: 'Either party may cancel up to 24 hours before the shift.',
+      actorId: world.schedulerId,
+    });
+    await publishServiceRequest({
+      requestId: request.id,
+      facilityId: world.facilityId,
+      actorId: world.schedulerId,
+    });
+    const [invitation] = await invitePractitioners({
+      requestId: request.id,
+      facilityId: world.facilityId,
+      userIds: [world.practitionerId],
+      actorId: world.schedulerId,
+    });
+    await respondToInvitation({
+      invitationId: invitation!.id,
+      userId: world.practitionerId,
+      decision: 'accept',
+    });
+    const assignment = await confirmAssignment({
+      requestId: request.id,
+      facilityId: world.facilityId,
+      userId: world.practitionerId,
+      actorId: world.schedulerId,
+    });
+    return assignment.id;
+  }
+
+  it("will not take the code of one of the practitioner's shifts as the code of another", async () => {
+    const world = await buildWorld();
+    const otherShift = await bookAnotherShift(world);
+    const first = await issueCheckInToken({
+      assignmentId: world.assignmentId,
+      purpose: 'CHECK_IN',
+      actorId: world.schedulerId,
+    });
+    const second = await issueCheckInToken({
+      assignmentId: otherShift,
+      purpose: 'CHECK_IN',
+      actorId: world.schedulerId,
+    });
+
+    // The second shift's six digits, typed against the first shift: nothing there names the
+    // other shift, so it is the digest that has to refuse it.
+    await expect(
+      presentCheckInToken({
+        assignmentId: world.assignmentId,
+        purpose: 'CHECK_IN',
+        code: second.code,
+        userId: world.practitionerId,
+      }),
+    ).rejects.toMatchObject({ code: 'check_in_token_invalid' });
+    const untouched = await prisma.attendanceRecord.findUniqueOrThrow({
+      where: { assignmentId: world.assignmentId },
+    });
+    expect(untouched.status).toBe('CHECK_IN_PENDING');
+
+    // And each shift's own code still works for it.
+    await expect(
+      presentCheckInToken({
+        assignmentId: world.assignmentId,
+        purpose: 'CHECK_IN',
+        code: first.code,
+        userId: world.practitionerId,
+      }),
+    ).resolves.toMatchObject({ status: 'CHECKED_IN' });
+  });
+
+  it('will not take a check-in code as the check-out code of the same shift', async () => {
+    const world = await buildWorld();
+    const inCode = await issueCheckInToken({
+      assignmentId: world.assignmentId,
+      purpose: 'CHECK_IN',
+      actorId: world.schedulerId,
+    });
+    await presentCheckInToken({
+      assignmentId: world.assignmentId,
+      purpose: 'CHECK_IN',
+      code: inCode.code,
+      userId: world.practitionerId,
+    });
+    await issueCheckInToken({
+      assignmentId: world.assignmentId,
+      purpose: 'CHECK_OUT',
+      actorId: world.schedulerId,
+    });
+
+    await expect(
+      presentCheckInToken({
+        assignmentId: world.assignmentId,
+        purpose: 'CHECK_OUT',
+        code: inCode.code,
+        userId: world.practitionerId,
+      }),
+    ).rejects.toMatchObject({ code: 'check_in_token_invalid' });
+    expect((await getAttendance(world.assignmentId)).status).toBe('CHECKED_IN');
+  });
+
+  it('spends a code when it is used, so a second presentation cannot reuse it', async () => {
+    const world = await buildWorld();
+    const token = await issueCheckInToken({
+      assignmentId: world.assignmentId,
+      purpose: 'CHECK_IN',
+      actorId: world.schedulerId,
+    });
+    await presentCheckInToken({
+      assignmentId: world.assignmentId,
+      purpose: 'CHECK_IN',
+      code: token.code,
+      userId: world.practitionerId,
+    });
+
+    // The state machine stops a second check-in first; what matters is that the token is
+    // spent in its own right, which is what holds if a record is ever moved back.
+    const spent = await prisma.checkInToken.findFirstOrThrow({
+      where: { attendanceRecord: { assignmentId: world.assignmentId }, purpose: 'CHECK_IN' },
+    });
+    expect(spent.consumedAt).not.toBeNull();
+  });
+
+  it('counts the time on the server, whatever time the caller says it is', async () => {
+    const world = await buildWorld();
+    const token = await issueCheckInToken({
+      assignmentId: world.assignmentId,
+      purpose: 'CHECK_IN',
+      actorId: world.schedulerId,
+    });
+    await prisma.checkInToken.updateMany({ data: { expiresAt: new Date(Date.now() - 60_000) } });
+    await grant({
+      userId: world.practitionerId,
+      roleKey: `practitioner_self_${world.practitionerId}`,
+      permissions: ['attendance.record'],
+      scopeType: 'SELF',
+      scopeId: world.practitionerId,
+    });
+    await issueSession({ userId: world.practitionerId });
+
+    // An expired code, with a claim that it is presented a quarter of an hour ago: before it
+    // expired. The route does not read a time from the body, so the claim changes nothing.
+    const claimed = new Date(Date.now() - 15 * 60_000).toISOString();
+    const response = await presentRoute(
+      new Request(`http://localhost/api/v1/assignments/${world.assignmentId}/attendance/present`, {
+        method: 'POST',
+        body: JSON.stringify({
+          purpose: 'CHECK_IN',
+          code: token.code,
+          occurredAt: claimed,
+          presentedAt: claimed,
+          now: claimed,
+        }),
+      }),
+      { params: Promise.resolve({ id: world.assignmentId }) },
+    );
+
+    expect(response.status).toBe(422);
+    expect((await response.json()).error.message).toMatch(/expired/);
+    expect((await getAttendance(world.assignmentId)).status).toBe('CHECK_IN_PENDING');
+  });
+});
+
 describe('the route table', () => {
   it('issues at facility scope and presents at self scope', () => {
     const issue = ROUTES.find((route) => route.path.endsWith('/attendance/token'));
