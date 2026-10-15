@@ -9,7 +9,7 @@
 | Version | What changed |
 | --- | --- |
 | v1.0 | The plan as first written, against `main` at `6a2ce43`. |
-| v1.1 | Re-baselined to `9a93861`, which carries the Phase 0 work (87 of the 119 P0 gaps fixed, 18 fixed in part, 14 not done). Section 5 lists what that closed; Section 7 carries an evidence column; task marks in Sections 8 and 9 say what is done, partly done or open; G0 in Section 12 records the evidence. **No module status was promoted**: promotion needs the sign-offs in Section 3, and none has been given. The full gap-by-gap reconciliation of all 410 gaps is in [Gap-Reconciliation.md](Gap-Reconciliation.md): **101 closed, 82 partly closed, 227 open** (P0: 87, 18 and 14; P1: 14, 58 and 153; P2: 0, 6 and 60; the P1 changes after `9a93861` are listed in that file). The P1 and P2 marks are one reading of the code and were not tested. |
+| v1.1 | Re-baselined to `9a93861`, which carries the Phase 0 work (87 of the 119 P0 gaps fixed, 18 fixed in part, 14 not done). Section 5 lists what that closed; Section 7 carries an evidence column; task marks in Sections 8 and 9 say what is done, partly done or open; G0 in Section 12 records the evidence. **No module status was promoted**: promotion needs the sign-offs in Section 3, and none has been given. The full gap-by-gap reconciliation of all 410 gaps is in [Gap-Reconciliation.md](Gap-Reconciliation.md): **101 closed, 84 partly closed, 225 open** (P0: 87, 18 and 14; P1: 14, 60 and 151; P2: 0, 6 and 60; the P1 changes after `9a93861` are listed in that file). The P1 and P2 marks are one reading of the code and were not tested. |
 
 ---
 
@@ -178,7 +178,7 @@ Pull request 1 merged 71 commits. Each fix was written test-first; the record of
 | Platform | `PLT-03` stranded events reclaimed; `PLT-01`, `PLT-04` in part | `434d1ea` |
 | Readability | `UXA-01`, `UXA-02`, `UXA-03`, `UXA-04`, `UXA-06`, `UXA-08` | `6708bb6`, `3dfbfbb`, `7f83e8e` |
 
-**The register as a whole** (410 gaps, in [Gap-Reconciliation.md](Gap-Reconciliation.md)): 101 closed, 82 partly closed, 227 open. The P1 and P2 gaps (291) were not tracked during Phase 0 and were judged afterwards by reading the code; 213 of them are still open.
+**The register as a whole** (410 gaps, in [Gap-Reconciliation.md](Gap-Reconciliation.md)): 101 closed, 84 partly closed, 225 open. The P1 and P2 gaps (291) were not tracked during Phase 0 and were judged afterwards by reading the code; 211 of them are still open.
 
 **Not closed, and why.** Fourteen P0 gaps remain open and each needs something from outside engineering: `BIL-13` and `BIL-09` (the legal role, the provider, the fee and credit-note decisions), `AUD-05` (counsel and the regulator), `CRE-01`, `CRE-02`, `CFG-01`, `CFG-03`, `UXP-03`, `QAL-06` (the regulators’ requirements for each profession), `UXW-06` (a commercial statement), `INC-02` (a policy), `PLT-02`, `PLT-05`, `QAL-02` (an environment to deploy to, a restored backup, a staging site). Eighteen more are fixed in part.
 
@@ -242,7 +242,7 @@ The **Status** column is v1.0’s, unchanged: no module has been promoted, becau
 | M14 | Disputes | PARTIAL | Facility screen, party isolation, notices, hold on the disputed amount. Escalation, appeal and credit-note effect open. | PILOT READY | G1; money integration at G4 |
 | M15 | Clinical incidents | PARTIAL | Severe-incident alert; no patient identity in a summary. Interim restriction and clinical-governance process open. | PILOT READY | G1 |
 | M16 | Notifications | PARTIAL | Texts for the main transitions, retry, in-app inbox, Termii and Africa’s Talking adapters (never run live). No provider account, receipts or failover. | PILOT READY with real provider | G1 |
-| M17 | Audit, consent and compliance | PARTIAL | Erasure that deletes, audit trail free of personal data, data inventory, purge job; a failed audit write is logged as `audit_write_failed`. Retention and bases unsigned by counsel; no alert channel. | PILOT READY | G1 |
+| M17 | Audit, consent and compliance | PARTIAL | Erasure that deletes, audit trail free of personal data, data inventory, purge job; an export of everything held, open to every signed-in person on a fresh password; a failed audit write is logged as `audit_write_failed`. Retention and bases unsigned by counsel; no alert channel. | PILOT READY | G1 |
 | M18 | Suggestions and feedback | BASIC | The author can see where each suggestion stands and read the answer, and is texted when it is planned, done or declined. Categories, duplicate linking and measurement open. | Closed feedback loop | G1 |
 | X01 | Reference data and configuration | PARTIAL | Screens for levels and registration categories, pay floors, holidays, sanctions. Credential requirements and fee policy not built; no maker-checker. | PILOT READY for selected scope | G1–G2 |
 | X02 | Platform and operations | PARTIAL | CI runs every suite; image carries the worker; health screen; stranded events reclaimed. Nothing deploys; no alert channel; no restored backup; no staging. | PILOT READY | G0–G1 |
@@ -667,7 +667,7 @@ The **Status** column is v1.0’s, unchanged: no module has been promoted, becau
 
 - [ ] `M17-01` Complete the audit-event catalogue for security, verification, booking, money, sanctions and admin actions.
 - [ ] `M17-02` Make consent purpose-specific and versioned; record withdrawal effects.
-- [ ] `M17-03` Implement authenticated data export with secure expiry and delivery.
+- [~] `M17-03` Implement authenticated data export with secure expiry and delivery. *`e42b766`: every table the data inventory lists as about a person is a section of the export or a written reason for leaving it out, and a test fails when the two disagree. Columns are named, never whole rows, and a test scans the export for any other person’s account id and for token hashes, push tokens and storage keys. Open to every signed-in person from the account menu (`AUD-08`), it asks for the password again, is delivered in the response and nowhere else (so there is no stored file and no link to expire, forward or guess), is marked no-store, and a security event is written before the data leaves. **Open: a report that names the person is held back until the data protection officer and counsel say what may be shared (D10); a very large history is returned whole, with no paging.***
 - [~] `M17-04` Implement reviewed erasure/anonymisation with legal-hold and ledger/audit exceptions. *Carrying out a request replaces the person’s details, deletes their files and closes the account, keeping the audit trail, ledger, shifts, disputes and incidents; a test scans every text column for the person afterwards (`a720baa`). **Counsel and a data protection officer must sign the retention schedule before it is run on a real person’s data.***
 - [~] `M17-05` Define and enforce retention schedules by data class. *`docs/data-inventory.md` is generated from the code and checked against the schema, so a new table cannot ship unclassified; a daily job deletes one-time codes, ended sessions, the sign-in log, delivered queue entries and abandoned uploads. Every period and every lawful basis is the team’s proposal, not signed off.*
 - [ ] `M17-06` Complete DPIA, breach-response procedure, regulator register and cross-border hosting decision. *Blocked on D10 (`AUD-05`).*
@@ -902,7 +902,7 @@ The **Status** column is v1.0’s, unchanged: no module has been promoted, becau
 | D07 | Payment architecture and licensed provider | Finance + counsel + engineering | G4 | OPEN | `BIL-13`, `BIL-09`, `M12-06` |
 | D08 | Fee payer, launch fee and free-core promise | Owners + product + counsel | Public pages/G4 | Recommended: facility pays; pilot 0% | `BIL-13`, `UXW-06` |
 | D09 | VAT and withholding-tax treatment | Tax counsel | G4 | OPEN | `N02` |
-| D10 | NDPC obligations, DPIA, retention and hosting region | Privacy counsel + DevOps | G1 | OPEN | `AUD-05`, `M17-04`–`M17-06`; the retention schedule in `src/modules/audit-compliance/domain/erasure.ts` and `docs/data-inventory.md` are unreviewed |
+| D10 | NDPC obligations, DPIA, retention and hosting region | Privacy counsel + DevOps | G1 | OPEN | `AUD-05`, `M17-03`–`M17-06`; what may be shared about a clinical incident that names a person (the export holds it back); the retention schedule in `src/modules/audit-compliance/domain/erasure.ts` and `docs/data-inventory.md` are unreviewed |
 | D11 | Clinical safety lead and incident escalation | Owners | M15 | OPEN | `M15-01`, `M15-03` (`INC-02`) |
 | D12 | Support hours, telephone/WhatsApp ownership and response targets | Operations | G1 | OPEN | `M16`, `X06` support |
 | D13 | Counteroffer rounds and commercial limits | Product + finance | G3 | Recommended: two rounds | `N01` |
