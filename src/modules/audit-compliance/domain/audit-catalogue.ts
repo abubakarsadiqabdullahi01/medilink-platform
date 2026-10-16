@@ -856,6 +856,7 @@ export function renderCatalogue(): string {
     '',
     '## What this does not cover',
     '',
+    '- **Most reads leave no trace.** Only the four kinds under security events are recorded when somebody looks at something. A clinical incident opened by staff, or a practitioner’s profile seen by a facility, is not (`AUD-12`, `AUD-14` are open).',
     '- **Sign-in attempts** are kept in `identity.login_attempts`, not here: every attempt, with its outcome, is the input to the lockout and would bury the changes of state below under noise. A lockout is a row there with the reason `locked_out`.',
     '- **The ledger, timesheet revisions and assignment history** are append-only records in their own right, with an actor and a reason on each, and are exempt from the audit rule for that reason (`src/lib/audit-coverage.ts` says why for each).',
     '- **A change made by raw SQL** to a table the rule covers is not found by reading the code, and only the nightly digest would show it if it were to the audit table itself.',
