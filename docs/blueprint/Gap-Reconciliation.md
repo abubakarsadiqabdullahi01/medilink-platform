@@ -22,9 +22,9 @@ The Blueprint’s gap register holds **410 gaps**: 119 P0, 225 P1, 66 P2. Since 
 | Priority | Total | Closed | Partial | Open | Not yet reviewed |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | P0 | 119 | 87 | 18 | 14 | 0 |
-| P1 | 225 | 16 | 60 | 149 | 0 |
+| P1 | 225 | 16 | 61 | 148 | 0 |
 | P2 | 66 | 1 | 7 | 58 | 0 |
-| **All** | **410** | **104** | **85** | **221** | **0** |
+| **All** | **410** | **104** | **86** | **220** | **0** |
 
 By area:
 
@@ -41,7 +41,7 @@ By area:
 | Attendance (`ATT`) | 2 | 8 | 2 | 12 | 3 | 3 | 6 |
 | Timesheets (`TIM`) | 3 | 9 | 0 | 12 | 5 | 4 | 3 |
 | Rates (`RAT`) | 3 | 13 | 3 | 19 | 4 | 4 | 11 |
-| Billing (`BIL`) | 13 | 20 | 6 | 39 | 9 | 9 | 21 |
+| Billing (`BIL`) | 13 | 20 | 6 | 39 | 9 | 10 | 20 |
 | Sanctions (`SAN`) | 2 | 12 | 2 | 16 | 2 | 1 | 13 |
 | Disputes (`DSP`) | 5 | 6 | 1 | 12 | 4 | 2 | 6 |
 | Incidents (`INC`) | 4 | 7 | 2 | 13 | 3 | 0 | 10 |
@@ -57,7 +57,7 @@ By area:
 | Accessibility and low bandwidth (`UXA`) | 6 | 7 | 4 | 17 | 6 | 1 | 10 |
 | Quality and delivery (`QAL`) | 3 | 8 | 1 | 12 | 1 | 2 | 9 |
 
-**Reading the numbers.** About three quarters of the P1 and P2 gaps (207 of 291) are still open, which is what one would expect: Phase 0 went after the pilot blockers. Of the 16 P1 gaps that closed, seven were closed by a P0 fix to the same root cause (the roster’s cancel action, the in-app inbox, the shift type derived from the hours, the roster’s contact window, the payout account reuse check), three by later work on suggestions (SUG-01, SUG-02, UXO-11), four by the retry-safety work after that (TIM-04, TIM-07, TIM-08, ATT-06) and two by the audit work (AUD-13, AUD-06). 1 P2 gaps closed.
+**Reading the numbers.** About three quarters of the P1 and P2 gaps (206 of 291) are still open, which is what one would expect: Phase 0 went after the pilot blockers. Of the 16 P1 gaps that closed, seven were closed by a P0 fix to the same root cause (the roster’s cancel action, the in-app inbox, the shift type derived from the hours, the roster’s contact window, the payout account reuse check), three by later work on suggestions (SUG-01, SUG-02, UXO-11), four by the retry-safety work after that (TIM-04, TIM-07, TIM-08, ATT-06) and two by the audit work (AUD-13, AUD-06). 1 P2 gaps closed.
 
 ## Changed since `9a93861`
 
@@ -75,6 +75,7 @@ Four commits on this branch after the merge changed the status of these gaps. Th
 | TIM-04 | P1 | OPEN | CLOSED | `e140478` |
 | TIM-07 | P1 | OPEN | CLOSED | `6d81631` |
 | TIM-08 | P1 | OPEN | CLOSED | `6d81631` |
+| BIL-33 | P1 | OPEN | PARTIAL | `d86c276` |
 | AUD-06 | P1 | OPEN | CLOSED | `d172eae` |
 | AUD-07 | P1 | OPEN | PARTIAL | `e42b766` |
 | AUD-08 | P1 | OPEN | PARTIAL | `e42b766` |
@@ -352,7 +353,7 @@ Gap text is shortened; the full text and the evidence at `5c199c1` are in the Bl
 | BIL-30 | P1 | OPEN | Ledger integrity is convention only: account is free text, no foreign keys to invoice or payout, no CHECK, no trigger, no actor or correlation id on… | prisma/schema.prisma:2036-2059 (LedgerEntry: account String, invoiceId and payoutId plain uuid, no actor or… — Ledger integrity is still convention only: free-text account, no foreign keys, no CHECK or trigger, no actor or correlation id. |
 | BIL-31 | P1 | PARTIAL | Money events have no subscribers and carry no idempotency key or correlation id; invoice-issued, payout-prepared, released and failed publish no… | invoice.ts:273-278,412-422,506-515; payout.ts:528-541; src/worker/handlers.ts:96-97 (InvoiceIssued and… — invoice.issued and payout.settled are now published and consumed; payout prepared, released and failed publish nothing, and money events carry no idempotency… |
 | BIL-32 | P1 | PARTIAL | Dashboards mix statuses: the "Platform fees" tile sums fee on every invoice including drafts and void; monthly "invoiced" includes drafts; the… | src/modules/billing-settlement/application/finance-summary.ts:32-40 (VOID excluded, DRAFT still counted);… — Void is now excluded from fee, monthly and facility spend figures; drafts are still included, finance page still says ledger, totals cover verified facilities… |
-| BIL-33 | P1 | OPEN | No reconciliation (end-of-day, month-end, provider reports) and no statement correction. | git grep reconcil finds nothing in billing code, routes or screens; tests/integration/billing.test.ts changed… — No end-of-day, month-end or provider reconciliation and no statement correction exists. |
+| BIL-33 | P1 | PARTIAL | No reconciliation (end-of-day, month-end, provider reports) and no statement correction. | (after 9a93861, `d86c276`) A nightly job and a card on the Finance page now add the money up from the ledger and the records that point at it: every transaction and the whole ledger sum to zero, cash and what each facility and practitioner owes stay the right side of nothing, every invoice and payout agrees with its entries, and a payout left released without an answer is reported (d86c276). Still no bank statement or provider report read, no month-end close and no statement correction |
 | BIL-34 | P2 | OPEN | No partial timesheet approval and no multi-tranche settlement: approval is approve or reject, payment is the whole gross, a payout is the whole… | src/modules/timesheets/application/timesheet.ts:254-338 (approve or reject only);… — Approval is still all-or-nothing and invoice payment must equal the whole gross; part payments and multi-tranche settlement are explicitly refused. |
 | BIL-35 | P2 | OPEN | GET /payouts?scopeType=PLATFORM without a person returns every payout and the platform-wide owed total, unpaginated (officer-only). | src/app/api/v1/payouts/route.ts:43-44 (PLATFORM scope takes scopeId as string, may be undefined);… — PLATFORM scope with no person id still lists every payout unpaginated and the platform-wide owed figure; route and schema are unfixed. |
 | BIL-36 | P2 | PARTIAL | Admin screens: the payout page does not show the owed amount the API returns and shows the practitioner's phone; invoice tables omit overtime and… | src/app/admin/payouts/page.tsx:311,328,332-348 (owed now shown; phone still shown);… — Payout page now shows owed, payable and awaiting; practitioner phone still shown, invoice tables still omit overtime and on-call minutes and hide negative… |
