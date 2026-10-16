@@ -765,6 +765,7 @@ const NO_TENANT_IDENTIFIER: Record<string, string> = {
   disputes: 'the platform’s queue; takes no identifier',
   'facilities/register': 'creates for the caller; takes no identifier',
   'finance/invoices': 'the platform’s list; takes no identifier',
+  'finance/reconciliation': 'platform-only check of the whole ledger, which no hospital owns; takes no identifier and reads ids and amounts only',
   health: 'public',
   'health/background': 'operations probe; no tenant data',
   holidays: 'platform-only calendar; takes no identifier',
