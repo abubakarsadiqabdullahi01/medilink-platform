@@ -5,7 +5,20 @@ vi.mock('next/headers', async () => {
   return { cookies: () => cookieJar };
 });
 
+// The real queue, watched: some cases make it refuse once, which is the moment between recording
+// what an officer read and writing what they decided.
+vi.mock('@/lib/outbox', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@/lib/outbox')>();
+  return { ...original, publishEvent: vi.fn(original.publishEvent) };
+});
+
 import { prisma } from '@/lib/db';
+import { EVENTS } from '@/lib/events';
+import { publishEvent } from '@/lib/outbox';
+import {
+  confirmIdentityFromSubmission,
+  confirmRegistrationFromSubmission,
+} from '@/modules/practitioners/application/confirm-from-submission';
 import { POST as confirm } from '@/app/api/v1/practitioners/verification/confirm/route';
 import { POST as review } from '@/app/api/v1/credentials/[id]/review/route';
 import { issueSession } from '@/modules/auth/application/session-service';
@@ -438,5 +451,152 @@ describe('the plain review route', () => {
 
     const approved = await post(review, `/api/v1/credentials/${row.id}/review`, { decision: 'approve' }, row.id);
     expect(approved.status).toBe(200);
+  });
+});
+
+/**
+ * M03-06 (CRE-12): recording, deciding and masking were three transactions.
+ *
+ * An officer's one click wrote the identity or registration, then in another transaction decided
+ * the submission, then in a third masked the number. A failure between the first two left a fact
+ * on the record that the submission it came from did not agree with, and a second officer who
+ * read the slip differently overwrote the first one's reading while the first one's decision
+ * stood. It is now one transaction: all of it, or none.
+ */
+
+const publishMock = vi.mocked(publishEvent);
+const queueDown = () => publishMock.mockRejectedValueOnce(new Error('The queue is down.'));
+const auditCount = (action: string) => prisma.auditLog.count({ where: { action } });
+
+describe('a confirmation that fails part-way', () => {
+  it('records no identity when the decision cannot be written, and a retry records it once', async () => {
+    const { practitioner, submitted } = await submission({ method: 'nimc_verification', reference: NIN });
+    await signInAsOfficer();
+
+    queueDown();
+    const failed = await confirmIdentity({ submissionId: submitted.id, nameMatch: true });
+
+    expect(failed.status).toBe(500);
+    // Nothing from the first step survives the failure of the second.
+    expect(await prisma.identityVerification.count({ where: { userId: practitioner.id } })).toBe(0);
+    expect(await auditCount('practitioner.identity_verified')).toBe(0);
+    const waiting = await rowOf(submitted.id);
+    expect(waiting.status).toBe('PENDING');
+    expect(waiting.referenceNumber).toBe(NIN);
+
+    const retried = await confirmIdentity({ submissionId: submitted.id, nameMatch: true });
+
+    expect(retried.status).toBe(200);
+    expect(retried.body).toMatchObject({ outcome: 'CONFIRMED' });
+    // Once: a retry of a half-done confirmation used to write the identity twice.
+    expect(await auditCount('practitioner.identity_verified')).toBe(1);
+    expect(await auditCount('credential.verified')).toBe(1);
+    expect(await prisma.outboxEvent.count({ where: { eventType: EVENTS.CredentialVerified } })).toBe(1);
+    expect((await rowOf(submitted.id)).status).toBe('VERIFIED');
+  });
+
+  it('records no mismatch either when asking the practitioner to correct it fails', async () => {
+    const { practitioner, submitted } = await submission({ method: 'nimc_verification', reference: NIN });
+    await signInAsOfficer();
+
+    queueDown();
+    expect((await confirmIdentity({ submissionId: submitted.id, nameMatch: false })).status).toBe(500);
+
+    expect(await prisma.identityVerification.count({ where: { userId: practitioner.id } })).toBe(0);
+    expect((await rowOf(submitted.id)).status).toBe('PENDING');
+
+    const retried = await confirmIdentity({ submissionId: submitted.id, nameMatch: false });
+    expect(retried.body).toMatchObject({ outcome: 'NAME_MISMATCH' });
+    expect(await auditCount('practitioner.identity_verified')).toBe(1);
+  });
+
+  it('records no registration when the decision cannot be written, and a retry records it once', async () => {
+    const { practitioner, submitted } = await submission({ method: 'mdcn_status_check', reference: 'N-12345' });
+    await signInAsOfficer();
+
+    queueDown();
+    const failed = await confirmRegistration({ submissionId: submitted.id, registrationStatus: 'ACTIVE' });
+
+    expect(failed.status).toBe(500);
+    expect(await prisma.professionalRegistration.count({ where: { userId: practitioner.id } })).toBe(0);
+    expect(await auditCount('practitioner.registration_recorded')).toBe(0);
+    expect((await rowOf(submitted.id)).status).toBe('PENDING');
+
+    const retried = await confirmRegistration({ submissionId: submitted.id, registrationStatus: 'ACTIVE' });
+
+    expect(retried.body).toMatchObject({ outcome: 'CONFIRMED' });
+    expect(await auditCount('practitioner.registration_recorded')).toBe(1);
+    expect(await auditCount('credential.verified')).toBe(1);
+  });
+
+  it('records no suspended licence when the rejection cannot be written', async () => {
+    const { practitioner, submitted } = await submission({ method: 'mdcn_status_check', reference: 'N-12345' });
+    await signInAsOfficer();
+
+    queueDown();
+    expect((await confirmRegistration({ submissionId: submitted.id, registrationStatus: 'SUSPENDED' })).status).toBe(500);
+
+    expect(await prisma.professionalRegistration.count({ where: { userId: practitioner.id } })).toBe(0);
+    expect((await rowOf(submitted.id)).status).toBe('PENDING');
+  });
+
+  it('writes nothing more when it is repeated after it worked', async () => {
+    const { submitted } = await submission({ method: 'nimc_verification', reference: NIN });
+    await signInAsOfficer();
+    await confirmIdentity({ submissionId: submitted.id, nameMatch: true });
+    const rowsBefore = await prisma.auditLog.count();
+    const eventsBefore = await prisma.outboxEvent.count();
+
+    const again = await confirmIdentity({ submissionId: submitted.id, nameMatch: true });
+
+    expect(again.status).toBe(409);
+    expect(await prisma.auditLog.count()).toBe(rowsBefore);
+    expect(await prisma.outboxEvent.count()).toBe(eventsBefore);
+  });
+});
+
+describe('two officers confirming the same submission at once', () => {
+  it('leave one reading on the record, the one the submission was decided on', async () => {
+    const { practitioner, submitted } = await submission({ method: 'nimc_verification', reference: NIN });
+    const first = await createUser();
+    const second = await createUser();
+
+    const results = await Promise.allSettled([
+      confirmIdentityFromSubmission({ submissionId: submitted.id, nameMatch: true, actorId: first.id }),
+      confirmIdentityFromSubmission({ submissionId: submitted.id, nameMatch: false, actorId: second.id }),
+    ]);
+
+    const won = results.filter((result) => result.status === 'fulfilled');
+    const lost = results.filter((result) => result.status === 'rejected');
+    expect(won).toHaveLength(1);
+    expect(lost).toHaveLength(1);
+    expect((lost[0] as PromiseRejectedResult).reason).toMatchObject({ code: 'already_reviewed' });
+
+    // The identity says what the winner read and the submission says what the winner decided.
+    // Before, the loser's identity was written first and stayed, over the winner's.
+    const outcome = (won[0] as PromiseFulfilledResult<{ outcome: string }>).value.outcome;
+    const identity = await prisma.identityVerification.findUniqueOrThrow({ where: { userId: practitioner.id } });
+    expect(identity.nameMatch).toBe(outcome === 'CONFIRMED');
+    expect((await rowOf(submitted.id)).status).toBe(outcome === 'CONFIRMED' ? 'VERIFIED' : 'MORE_INFO_REQUESTED');
+    expect(await auditCount('practitioner.identity_verified')).toBe(1);
+  });
+
+  it('leave one registration and one decision for a licence', async () => {
+    const { practitioner, submitted } = await submission({ method: 'mdcn_status_check', reference: 'N-12345' });
+    const first = await createUser();
+    const second = await createUser();
+
+    const results = await Promise.allSettled([
+      confirmRegistrationFromSubmission({ submissionId: submitted.id, registrationStatus: 'ACTIVE', actorId: first.id }),
+      confirmRegistrationFromSubmission({ submissionId: submitted.id, registrationStatus: 'SUSPENDED', actorId: second.id }),
+    ]);
+
+    const won = results.filter((result) => result.status === 'fulfilled');
+    expect(won).toHaveLength(1);
+    const outcome = (won[0] as PromiseFulfilledResult<{ outcome: string }>).value.outcome;
+    const registration = await prisma.professionalRegistration.findFirstOrThrow({ where: { userId: practitioner.id } });
+    expect(registration.registrationStatus).toBe(outcome === 'CONFIRMED' ? 'ACTIVE' : 'SUSPENDED');
+    expect((await rowOf(submitted.id)).status).toBe(outcome === 'CONFIRMED' ? 'VERIFIED' : 'REJECTED');
+    expect(await auditCount('practitioner.registration_recorded')).toBe(1);
   });
 });

@@ -364,9 +364,23 @@ const DECISION_ACTION: Record<ReviewDecision, string> = {
   request_info: 'credential.info_requested',
 };
 
-export async function reviewCredential(
-  input: ReviewCredentialParams,
-): Promise<CredentialSubmissionView> {
+/**
+ * Everything a decision needs worked out and checked before anything is written: who it
+ * concerns, what it is allowed to be, the expiry it sets, the masked number it leaves.
+ * Separate from writing it so a caller that records something else with the decision
+ * (an identity, a registration) can do all of it in one transaction (M03-06).
+ */
+export interface ReviewPlan {
+  input: ReviewCredentialParams;
+  existing: Prisma.CredentialSubmissionGetPayload<{ include: { credentialType: true } }>;
+  now: Date;
+  nextStatus: CredentialSubmissionStatusValue;
+  expiresAt: Date | null;
+  documentExpiresOn: string | null;
+  maskedReference: string | null;
+}
+
+export async function prepareReview(input: ReviewCredentialParams): Promise<ReviewPlan> {
   const existing = await prisma.credentialSubmission.findUnique({
     where: { id: input.submissionId },
     include: { credentialType: true },
@@ -401,76 +415,93 @@ export async function reviewCredential(
       ? maskReference(existing.referenceNumber)
       : null;
 
-  return prisma.$transaction(async (tx) => {
-    const review = await tx.credentialSubmission.updateMany({
-      where: { id: input.submissionId, status: 'PENDING' },
-      data: {
-        status: nextStatus,
-        reviewedBy: input.reviewerId,
-        reviewedAt: now,
-        reviewNotes: input.reviewNotes,
-        expiresAt,
-        documentExpiresOn: documentExpiresOn ? new Date(`${documentExpiresOn}T00:00:00.000Z`) : null,
-        ...(maskedReference ? { referenceNumber: maskedReference } : {}),
-      },
-    });
-    if (review.count !== 1) throw CredentialErrors.alreadyReviewed();
+  return { input, existing, now, nextStatus, expiresAt, documentExpiresOn, maskedReference };
+}
 
-    const updated = await tx.credentialSubmission.findUniqueOrThrow({
-      where: { id: input.submissionId },
-    });
-
-    // Scoped to the submitting practitioner, not the reviewer: this row is
-    // about the practitioner's own credential, and they must be able to see
-    // it in their own SELF-scoped audit history. actorId is who actually
-    // did it — the two are deliberately different people here.
-    await recordAudit(tx, {
-      action: DECISION_ACTION[input.decision],
-      entityType: 'credentials.credential_submissions',
-      entityId: updated.id,
-      actorId: input.reviewerId,
-      scopeType: 'SELF',
-      scopeId: existing.userId,
-      reason: input.reviewNotes,
-      before: auditView(toView(existing), existing.credentialType.verificationMethod),
-      after: auditView(toView(updated), existing.credentialType.verificationMethod),
-    });
-
-    // A refusal of something the profession requires sends the application
-    // back to the practitioner, who must fix it and submit again.
-    if (input.decision === 'reject') {
-      await returnApplicationForChanges(tx, {
-        userId: existing.userId,
-        credentialTypeId: existing.credentialTypeId,
-        reviewerId: input.reviewerId,
-        reason: input.reviewNotes,
-      });
-    }
-
-    // Every decision is an event, so the practitioner is told what an officer
-    // decided about their document (CRE-07). The audit row above is the record;
-    // the event is what reaches a person. The notes stay on the audit row and in
-    // the app; the event carries no free text.
-    await publishEvent(tx, {
-      eventType: {
-        approve: EVENTS.CredentialVerified,
-        reject: EVENTS.CredentialRejected,
-        request_info: EVENTS.CredentialInfoRequested,
-      }[input.decision],
-      aggregateType: 'credentials.credential_submissions',
-      aggregateId: updated.id,
-      payload: {
-        submissionId: updated.id,
-        userId: updated.userId,
-        credentialTypeId: updated.credentialTypeId,
-        // A submission can be queried more than once; this is what makes the
-        // second query a new thing to be told about, not a repeat of the first.
-        decidedAt: now.toISOString(),
-      },
-    });
-
-    return toView(updated);
+/**
+ * Writes a decision in the caller's transaction: the claim on the submission, the audit row,
+ * the return of the application on a rejection, and the event that tells the practitioner.
+ * The claim is conditional on the submission still waiting, so of two decisions on one
+ * submission one writes and the other throws, and whatever the caller wrote beside it goes
+ * with it.
+ */
+export async function applyReview(tx: Tx, plan: ReviewPlan): Promise<CredentialSubmissionView> {
+  const { input, existing, now, nextStatus, expiresAt, documentExpiresOn, maskedReference } = plan;
+  const review = await tx.credentialSubmission.updateMany({
+    where: { id: input.submissionId, status: 'PENDING' },
+    data: {
+      status: nextStatus,
+      reviewedBy: input.reviewerId,
+      reviewedAt: now,
+      reviewNotes: input.reviewNotes,
+      expiresAt,
+      documentExpiresOn: documentExpiresOn ? new Date(`${documentExpiresOn}T00:00:00.000Z`) : null,
+      ...(maskedReference ? { referenceNumber: maskedReference } : {}),
+    },
   });
+  if (review.count !== 1) throw CredentialErrors.alreadyReviewed();
+
+  const updated = await tx.credentialSubmission.findUniqueOrThrow({
+    where: { id: input.submissionId },
+  });
+
+  // Scoped to the submitting practitioner, not the reviewer: this row is
+  // about the practitioner's own credential, and they must be able to see
+  // it in their own SELF-scoped audit history. actorId is who actually
+  // did it — the two are deliberately different people here.
+  await recordAudit(tx, {
+    action: DECISION_ACTION[input.decision],
+    entityType: 'credentials.credential_submissions',
+    entityId: updated.id,
+    actorId: input.reviewerId,
+    scopeType: 'SELF',
+    scopeId: existing.userId,
+    reason: input.reviewNotes,
+    before: auditView(toView(existing), existing.credentialType.verificationMethod),
+    after: auditView(toView(updated), existing.credentialType.verificationMethod),
+  });
+
+  // A refusal of something the profession requires sends the application
+  // back to the practitioner, who must fix it and submit again.
+  if (input.decision === 'reject') {
+    await returnApplicationForChanges(tx, {
+      userId: existing.userId,
+      credentialTypeId: existing.credentialTypeId,
+      reviewerId: input.reviewerId,
+      reason: input.reviewNotes,
+    });
+  }
+
+  // Every decision is an event, so the practitioner is told what an officer
+  // decided about their document (CRE-07). The audit row above is the record;
+  // the event is what reaches a person. The notes stay on the audit row and in
+  // the app; the event carries no free text.
+  await publishEvent(tx, {
+    eventType: {
+      approve: EVENTS.CredentialVerified,
+      reject: EVENTS.CredentialRejected,
+      request_info: EVENTS.CredentialInfoRequested,
+    }[input.decision],
+    aggregateType: 'credentials.credential_submissions',
+    aggregateId: updated.id,
+    payload: {
+      submissionId: updated.id,
+      userId: updated.userId,
+      credentialTypeId: updated.credentialTypeId,
+      // A submission can be queried more than once; this is what makes the
+      // second query a new thing to be told about, not a repeat of the first.
+      decidedAt: now.toISOString(),
+    },
+  });
+
+  return toView(updated);
+}
+
+export async function reviewCredential(
+  input: ReviewCredentialParams,
+): Promise<CredentialSubmissionView> {
+  const plan = await prepareReview(input);
+  return prisma.$transaction((tx) => applyReview(tx, plan));
 }
 
 export interface ResupplyCredentialParams {
@@ -593,42 +624,6 @@ export async function getSubmissionForVerification(
     verificationMethod: row.credentialType.verificationMethod,
     credentialTypeExpires: row.credentialType.expires,
   };
-}
-
-/**
- * Once an identity has been recorded from a NIN the number has done its job:
- * the identity record keeps a digest and the last four, and this keeps the same.
- * Left whole it would be the one place in the system that still held somebody's
- * NIN in the clear.
- */
-export async function maskSubmissionReference(input: {
-  submissionId: string;
-  actorId: string;
-}): Promise<void> {
-  const existing = await prisma.credentialSubmission.findUnique({
-    where: { id: input.submissionId },
-  });
-  if (!existing?.referenceNumber) return;
-
-  const masked = maskReference(existing.referenceNumber);
-  if (masked === existing.referenceNumber) return;
-
-  await prisma.$transaction(async (tx) => {
-    await tx.credentialSubmission.update({
-      where: { id: existing.id },
-      data: { referenceNumber: masked },
-    });
-    await recordAudit(tx, {
-      action: 'credential.reference_masked',
-      entityType: 'credentials.credential_submissions',
-      entityId: existing.id,
-      actorId: input.actorId,
-      scopeType: 'SELF',
-      scopeId: existing.userId,
-      reason: 'Identity recorded; the number is no longer held in full.',
-      after: { referenceNumber: masked },
-    });
-  });
 }
 
 export interface RequestDocumentUploadUrlParams {

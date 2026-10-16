@@ -1,5 +1,5 @@
 import { Prisma } from '@prisma/client';
-import { prisma } from '@/lib/db';
+import { prisma, type Tx } from '@/lib/db';
 import { env } from '@/lib/env';
 import { recordAudit } from '@/lib/audit';
 import {
@@ -76,9 +76,24 @@ export interface RecordIdentityParams {
   actorId: string;
 }
 
-export async function recordIdentityVerification(
-  input: RecordIdentityParams,
-): Promise<IdentityVerificationView> {
+/**
+ * What recording an identity needs, worked out and checked before anything is written: the
+ * number normalised and digested, and either the officer's reading of the slip or the
+ * provider's answer. A provider is asked here, outside any transaction, so that a call over
+ * the network is never held inside one.
+ */
+export interface PreparedIdentity {
+  userId: string;
+  actorId: string;
+  ninHash: string;
+  ninLast4: string;
+  nameMatch: boolean;
+  method: 'MANUAL' | 'NIMC';
+  verifiedAt: Date;
+  evidenceRetrievedAt: Date;
+}
+
+export async function prepareIdentityVerification(input: RecordIdentityParams): Promise<PreparedIdentity> {
   const user = await prisma.user.findUnique({
     where: { id: input.userId },
     select: { id: true, fullName: true, deletedAt: true },
@@ -107,49 +122,46 @@ export async function recordIdentityVerification(
     method = 'MANUAL';
   }
 
-  const ninHash = hashNin(nin, env.SESSION_SECRET);
-  const last4 = ninLast4(nin);
+  return {
+    userId: input.userId,
+    actorId: input.actorId,
+    ninHash: hashNin(nin, env.SESSION_SECRET),
+    ninLast4: ninLast4(nin),
+    nameMatch,
+    method,
+    verifiedAt: now,
+    evidenceRetrievedAt,
+  };
+}
+
+/** Writes a prepared identity and its audit row in the caller's transaction. */
+export async function saveIdentityVerification(
+  tx: Tx,
+  prepared: PreparedIdentity,
+): Promise<IdentityVerificationView> {
+  const { userId, actorId, ninHash, ninLast4: last4, nameMatch, method, verifiedAt, evidenceRetrievedAt } = prepared;
 
   try {
-    return await prisma.$transaction(async (tx) => {
-      const saved = await tx.identityVerification.upsert({
-        where: { userId: input.userId },
-        create: {
-          userId: input.userId,
-          ninHash,
-          ninLast4: last4,
-          nameMatch,
-          method,
-          verifiedBy: input.actorId,
-          verifiedAt: now,
-          evidenceRetrievedAt,
-        },
-        update: {
-          ninHash,
-          ninLast4: last4,
-          nameMatch,
-          method,
-          verifiedBy: input.actorId,
-          verifiedAt: now,
-          evidenceRetrievedAt,
-        },
-      });
-
-      await recordAudit(tx, {
-        action: 'practitioner.identity_verified',
-        entityType: 'practitioners.identity_verifications',
-        entityId: saved.id,
-        actorId: input.actorId,
-        scopeType: 'SELF',
-        scopeId: input.userId,
-        // Deliberately only the last four and the outcome. The audit trail is
-        // read by more people than the record itself, and it is append-only:
-        // a NIN written here could never be taken back out.
-        after: { ninLast4: last4, nameMatch, method, evidenceRetrievedAt },
-      });
-
-      return toIdentityView(saved);
+    const saved = await tx.identityVerification.upsert({
+      where: { userId },
+      create: { userId, ninHash, ninLast4: last4, nameMatch, method, verifiedBy: actorId, verifiedAt, evidenceRetrievedAt },
+      update: { ninHash, ninLast4: last4, nameMatch, method, verifiedBy: actorId, verifiedAt, evidenceRetrievedAt },
     });
+
+    await recordAudit(tx, {
+      action: 'practitioner.identity_verified',
+      entityType: 'practitioners.identity_verifications',
+      entityId: saved.id,
+      actorId,
+      scopeType: 'SELF',
+      scopeId: userId,
+      // Deliberately only the last four and the outcome. The audit trail is
+      // read by more people than the record itself, and it is append-only:
+      // a NIN written here could never be taken back out.
+      after: { ninLast4: last4, nameMatch, method, evidenceRetrievedAt },
+    });
+
+    return toIdentityView(saved);
   } catch (error) {
     // Step 5.4: refused by the constraint, not by a prior read, so two
     // concurrent registrations of the same identity cannot both win.
@@ -158,6 +170,13 @@ export async function recordIdentityVerification(
     }
     throw error;
   }
+}
+
+export async function recordIdentityVerification(
+  input: RecordIdentityParams,
+): Promise<IdentityVerificationView> {
+  const prepared = await prepareIdentityVerification(input);
+  return prisma.$transaction((tx) => saveIdentityVerification(tx, prepared));
 }
 
 export async function getIdentityVerification(
@@ -285,9 +304,32 @@ async function assertStanding(
   }
 }
 
-export async function recordProfessionalRegistration(
+/**
+ * What recording a registration needs, worked out and checked before anything is written:
+ * the folio normalised, the level and category checked, and either the officer's reading of
+ * the register or the provider's answer. As with an identity, the provider is asked here,
+ * outside any transaction.
+ */
+export interface PreparedRegistration {
+  userId: string;
+  actorId: string;
+  regulator: string;
+  folioNumber: string;
+  registrationStatus: RegistrationStatusValue;
+  practiceType: string | null;
+  location: string | null;
+  expiresAt: Date | null;
+  evidenceRetrievedAt: Date;
+  source: 'MANUAL' | 'REGULATOR_API';
+  cadreLevelId?: string | null;
+  registrationCategoryId?: string | null;
+  /** The moment the audit row's views are worked out at, so before and after agree. */
+  now: Date;
+}
+
+export async function prepareProfessionalRegistration(
   input: RecordRegistrationParams,
-): Promise<ProfessionalRegistrationView> {
+): Promise<PreparedRegistration> {
   const user = await prisma.user.findUnique({
     where: { id: input.userId },
     select: { id: true, deletedAt: true },
@@ -323,55 +365,77 @@ export async function recordProfessionalRegistration(
     source = 'MANUAL';
   }
 
+  return {
+    userId: input.userId,
+    actorId: input.actorId,
+    regulator: input.regulator,
+    folioNumber,
+    registrationStatus,
+    practiceType,
+    location,
+    expiresAt,
+    evidenceRetrievedAt,
+    source,
+    cadreLevelId: input.cadreLevelId,
+    registrationCategoryId: input.registrationCategoryId,
+    now,
+  };
+}
+
+/** Writes a prepared registration and its audit row in the caller's transaction. */
+export async function saveProfessionalRegistration(
+  tx: Tx,
+  prepared: PreparedRegistration,
+): Promise<ProfessionalRegistrationView> {
+  const { userId, actorId, regulator, now } = prepared;
+
   try {
-    return await prisma.$transaction(async (tx) => {
-      const existing = await tx.professionalRegistration.findUnique({
-        where: { userId_regulator: { userId: input.userId, regulator: input.regulator } },
-        include: STANDING_INCLUDE,
-      });
-
-      const data = {
-        folioNumber,
-        practiceType,
-        registrationStatus,
-        location,
-        evidenceRetrievedAt,
-        expiresAt,
-        source,
-        recordedBy: input.actorId,
-        deletedAt: null,
-        // Only what was said: leaving these out keeps what is recorded, which is what
-        // looking at a registration again should do.
-        ...(input.cadreLevelId !== undefined ? { cadreLevelId: input.cadreLevelId } : {}),
-        ...(input.registrationCategoryId !== undefined
-          ? { registrationCategoryId: input.registrationCategoryId }
-          : {}),
-      };
-
-      const saved = existing
-        ? await tx.professionalRegistration.update({
-            where: { id: existing.id },
-            data,
-            include: STANDING_INCLUDE,
-          })
-        : await tx.professionalRegistration.create({
-            data: { userId: input.userId, regulator: input.regulator, ...data },
-            include: STANDING_INCLUDE,
-          });
-
-      await recordAudit(tx, {
-        action: 'practitioner.registration_recorded',
-        entityType: 'practitioners.professional_registrations',
-        entityId: saved.id,
-        actorId: input.actorId,
-        scopeType: 'SELF',
-        scopeId: input.userId,
-        before: existing ? toRegistrationView(existing, now) : undefined,
-        after: toRegistrationView(saved, now),
-      });
-
-      return toRegistrationView(saved, now);
+    const existing = await tx.professionalRegistration.findUnique({
+      where: { userId_regulator: { userId, regulator } },
+      include: STANDING_INCLUDE,
     });
+
+    const data = {
+      folioNumber: prepared.folioNumber,
+      practiceType: prepared.practiceType,
+      registrationStatus: prepared.registrationStatus,
+      location: prepared.location,
+      evidenceRetrievedAt: prepared.evidenceRetrievedAt,
+      expiresAt: prepared.expiresAt,
+      source: prepared.source,
+      recordedBy: actorId,
+      deletedAt: null,
+      // Only what was said: leaving these out keeps what is recorded, which is what
+      // looking at a registration again should do.
+      ...(prepared.cadreLevelId !== undefined ? { cadreLevelId: prepared.cadreLevelId } : {}),
+      ...(prepared.registrationCategoryId !== undefined
+        ? { registrationCategoryId: prepared.registrationCategoryId }
+        : {}),
+    };
+
+    const saved = existing
+      ? await tx.professionalRegistration.update({
+          where: { id: existing.id },
+          data,
+          include: STANDING_INCLUDE,
+        })
+      : await tx.professionalRegistration.create({
+          data: { userId, regulator, ...data },
+          include: STANDING_INCLUDE,
+        });
+
+    await recordAudit(tx, {
+      action: 'practitioner.registration_recorded',
+      entityType: 'practitioners.professional_registrations',
+      entityId: saved.id,
+      actorId,
+      scopeType: 'SELF',
+      scopeId: userId,
+      before: existing ? toRegistrationView(existing, now) : undefined,
+      after: toRegistrationView(saved, now),
+    });
+
+    return toRegistrationView(saved, now);
   } catch (error) {
     // Step 5.4 again: one folio belongs to one practitioner, enforced by the
     // database.
@@ -380,6 +444,13 @@ export async function recordProfessionalRegistration(
     }
     throw error;
   }
+}
+
+export async function recordProfessionalRegistration(
+  input: RecordRegistrationParams,
+): Promise<ProfessionalRegistrationView> {
+  const prepared = await prepareProfessionalRegistration(input);
+  return prisma.$transaction((tx) => saveProfessionalRegistration(tx, prepared));
 }
 
 export async function listProfessionalRegistrations(

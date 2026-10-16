@@ -1,16 +1,19 @@
 import { prisma } from '@/lib/db';
 import {
+  applyReview,
   getSubmissionForVerification,
-  maskSubmissionReference,
-  reviewCredential,
+  prepareReview,
   type SubmissionForVerification,
 } from '@/modules/credentials/application/submission';
 import { CredentialErrors } from '@/modules/credentials/domain/errors';
 import { printedExpiryProblem } from '@/modules/credentials/domain/submission';
 import {
-  recordIdentityVerification,
-  recordProfessionalRegistration,
+  prepareIdentityVerification,
+  prepareProfessionalRegistration,
+  saveIdentityVerification,
+  saveProfessionalRegistration,
   type IdentityVerificationView,
+  type PreparedIdentity,
   type ProfessionalRegistrationView,
 } from './verification';
 import { NinFormatError, type RegistrationStatusValue } from '../domain/verification';
@@ -38,7 +41,21 @@ import { PractitionerErrors } from '../domain/errors';
  * already in the right place for that.
  *
  * Everything is checked before anything is written, so a refusal leaves no
- * half-recorded identity behind.
+ * half-recorded identity behind. And everything is written in one transaction (M03-06):
+ * what the officer read, and what was decided about the submission it came from, either
+ * both happen or neither does. They used to be three commits (record, decide, mask), so a
+ * failure between the first two left a fact on the record that its own submission did not
+ * agree with, a retry wrote it twice, and a second officer who read the slip differently
+ * overwrote the first one's reading while the first one's decision stood.
+ *
+ * The decision is what the transaction turns on: it only succeeds on a submission still
+ * waiting, so of two officers at once the second blocks on the first, is refused as already
+ * reviewed, and takes whatever it wrote beside the decision with it. It is written first so
+ * that a submission somebody has already decided is refused before anything else is written
+ * and thrown away; either order rolls back together.
+ *
+ * A provider, when one is switched on, is asked before the transaction opens: a call over
+ * the network is not held inside one.
  */
 
 export type ConfirmOutcome =
@@ -79,9 +96,9 @@ export async function confirmIdentityFromSubmission(input: {
 }): Promise<{ outcome: ConfirmOutcome; identity: IdentityVerificationView }> {
   const submission = await loadConfirmable(input.submissionId, input.actorId, 'nimc_verification');
 
-  let identity: IdentityVerificationView;
+  let prepared: PreparedIdentity;
   try {
-    identity = await recordIdentityVerification({
+    prepared = await prepareIdentityVerification({
       userId: submission.userId,
       nin: submission.referenceNumber,
       nameMatch: input.nameMatch,
@@ -96,29 +113,33 @@ export async function confirmIdentityFromSubmission(input: {
     throw error;
   }
 
-  if (!identity.nameMatch) {
-    // Recorded as it is — a mismatch is a fact the record should hold, and it
-    // stands as its own blocker — but not approved. The number is left whole,
-    // because the practitioner will resupply against it.
-    await reviewCredential({
-      submissionId: submission.id,
-      reviewerId: input.actorId,
-      decision: 'request_info',
-      reviewNotes:
-        'The name on the slip does not match the name on your account. Check it, and send a corrected number or a clearer photograph.',
-    });
-    return { outcome: 'NAME_MISMATCH', identity };
-  }
+  // A mismatch is a fact the record should hold, and it stands as its own blocker, but it is
+  // not approved: the practitioner is asked to correct it. The number is masked either way,
+  // by the decision itself, so a practitioner who resupplies is asked for it again.
+  const mismatch = !prepared.nameMatch;
+  const plan = await prepareReview(
+    mismatch
+      ? {
+          submissionId: submission.id,
+          reviewerId: input.actorId,
+          decision: 'request_info',
+          reviewNotes:
+            'The name on the slip does not match the name on your account. Check it, and send a corrected number or a clearer photograph.',
+        }
+      : {
+          submissionId: submission.id,
+          reviewerId: input.actorId,
+          decision: 'approve',
+          reviewNotes: 'Checked against the slip they submitted.',
+        },
+  );
 
-  await reviewCredential({
-    submissionId: submission.id,
-    reviewerId: input.actorId,
-    decision: 'approve',
-    reviewNotes: 'Checked against the slip they submitted.',
+  const identity = await prisma.$transaction(async (tx) => {
+    await applyReview(tx, plan);
+    return saveIdentityVerification(tx, prepared);
   });
-  await maskSubmissionReference({ submissionId: submission.id, actorId: input.actorId });
 
-  return { outcome: 'CONFIRMED', identity };
+  return { outcome: mismatch ? 'NAME_MISMATCH' : 'CONFIRMED', identity };
 }
 
 export async function confirmRegistrationFromSubmission(input: {
@@ -161,7 +182,7 @@ export async function confirmRegistrationFromSubmission(input: {
     : null;
   if (problem) throw CredentialErrors.printedExpiryInvalid(problem);
 
-  const registration = await recordProfessionalRegistration({
+  const prepared = await prepareProfessionalRegistration({
     userId: submission.userId,
     regulator: profile.professionalCategory.regulator,
     folioNumber: submission.referenceNumber,
@@ -172,28 +193,33 @@ export async function confirmRegistrationFromSubmission(input: {
     actorId: input.actorId,
   });
 
-  if (registration.registrationStatus !== 'ACTIVE') {
-    // Recorded accurately — a suspended licence is exactly what the record
-    // should say — and the submission is rejected with the reason, so the
-    // practitioner is told why rather than left waiting.
-    await reviewCredential({
-      submissionId: submission.id,
-      reviewerId: input.actorId,
-      decision: 'reject',
-      reviewNotes: `The register shows this registration as ${registration.registrationStatus
-        .toLowerCase()
-        .replace(/_/g, ' ')}.`,
-    });
-    return { outcome: 'NOT_ACTIVE', registration };
-  }
+  // Recorded accurately whatever the register shows — a suspended licence is exactly what the
+  // record should say — and a registration that is not active rejects the submission with the
+  // reason, so the practitioner is told why rather than left waiting.
+  const active = prepared.registrationStatus === 'ACTIVE';
+  const plan = await prepareReview(
+    active
+      ? {
+          submissionId: submission.id,
+          reviewerId: input.actorId,
+          decision: 'approve',
+          reviewNotes: 'Checked against the licence they submitted.',
+          printedExpiryDate: printedExpiry,
+        }
+      : {
+          submissionId: submission.id,
+          reviewerId: input.actorId,
+          decision: 'reject',
+          reviewNotes: `The register shows this registration as ${prepared.registrationStatus
+            .toLowerCase()
+            .replace(/_/g, ' ')}.`,
+        },
+  );
 
-  await reviewCredential({
-    submissionId: submission.id,
-    reviewerId: input.actorId,
-    decision: 'approve',
-    reviewNotes: 'Checked against the licence they submitted.',
-    printedExpiryDate: printedExpiry,
+  const registration = await prisma.$transaction(async (tx) => {
+    await applyReview(tx, plan);
+    return saveProfessionalRegistration(tx, prepared);
   });
 
-  return { outcome: 'CONFIRMED', registration };
+  return { outcome: active ? 'CONFIRMED' : 'NOT_ACTIVE', registration };
 }
