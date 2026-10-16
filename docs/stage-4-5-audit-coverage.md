@@ -81,6 +81,23 @@ The first is a real per-write audit row; the second is a real per-write
 guarantee the harness cannot see but the transaction boundary enforces
 regardless. Neither relies on coincidence anymore.
 
+## Writes no test reaches, and what the rows are (M17-01)
+
+The harness sees the writes a test makes. A function no test has run is invisible to it, and
+that is where a state change goes unrecorded: the shift that was audited when it filled and not
+when it reopened, and the payout whose release was audited only after the gateway had been asked.
+
+`src/modules/audit-compliance/domain/audit-catalogue.test.ts` reads the code instead. It finds
+every function that changes a table in `AUDITED_MODELS` and fails when one has no `recordAudit`
+call in it and no entry in `UNAUDITED_WRITES` saying why not and what does record the change. It
+is a check by function, not by row, so it does not tell a missing row from an unrelated one in
+the same function, but it does not depend on a test reaching the path.
+
+The same file holds the list of what the trail records, `docs/audit-catalogue.md`: every action
+the code writes, by kind, against the table it names, and the sentence the audit screen shows
+for it. Each is held to the code from both sides, so an action cannot be added without a line
+and a line cannot outlive the code that wrote it.
+
 ## Verifying it
 
 ```

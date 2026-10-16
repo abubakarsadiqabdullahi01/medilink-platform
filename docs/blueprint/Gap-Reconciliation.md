@@ -23,8 +23,8 @@ The Blueprint’s gap register holds **410 gaps**: 119 P0, 225 P1, 66 P2. Since 
 | --- | ---: | ---: | ---: | ---: | ---: |
 | P0 | 119 | 87 | 18 | 14 | 0 |
 | P1 | 225 | 16 | 60 | 149 | 0 |
-| P2 | 66 | 0 | 6 | 60 | 0 |
-| **All** | **410** | **103** | **84** | **223** | **0** |
+| P2 | 66 | 0 | 7 | 59 | 0 |
+| **All** | **410** | **103** | **85** | **222** | **0** |
 
 By area:
 
@@ -46,7 +46,7 @@ By area:
 | Disputes (`DSP`) | 5 | 6 | 1 | 12 | 4 | 2 | 6 |
 | Incidents (`INC`) | 4 | 7 | 2 | 13 | 3 | 0 | 10 |
 | Notifications (`NOT`) | 6 | 6 | 0 | 12 | 5 | 4 | 3 |
-| Audit and compliance (`AUD`) | 5 | 9 | 5 | 19 | 4 | 6 | 9 |
+| Audit and compliance (`AUD`) | 5 | 9 | 5 | 19 | 4 | 7 | 8 |
 | Suggestions (`SUG`) | 0 | 2 | 6 | 8 | 2 | 1 | 5 |
 | Reference data (`CFG`) | 4 | 8 | 3 | 15 | 0 | 6 | 9 |
 | Platform and operations (`PLT`) | 5 | 11 | 5 | 21 | 1 | 8 | 12 |
@@ -57,7 +57,7 @@ By area:
 | Accessibility and low bandwidth (`UXA`) | 6 | 7 | 4 | 17 | 6 | 1 | 10 |
 | Quality and delivery (`QAL`) | 3 | 8 | 1 | 12 | 1 | 2 | 9 |
 
-**Reading the numbers.** About three quarters of the P1 and P2 gaps (209 of 291) are still open, which is what one would expect: Phase 0 went after the pilot blockers. Of the 16 P1 gaps that closed, seven were closed by a P0 fix to the same root cause (the roster’s cancel action, the in-app inbox, the shift type derived from the hours, the roster’s contact window, the payout account reuse check), three by later work on suggestions (SUG-01, SUG-02, UXO-11), four by the retry-safety work after that (TIM-04, TIM-07, TIM-08, ATT-06) and two by the audit work (AUD-13, AUD-06). No P2 gap closed.
+**Reading the numbers.** About three quarters of the P1 and P2 gaps (208 of 291) are still open, which is what one would expect: Phase 0 went after the pilot blockers. Of the 16 P1 gaps that closed, seven were closed by a P0 fix to the same root cause (the roster’s cancel action, the in-app inbox, the shift type derived from the hours, the roster’s contact window, the payout account reuse check), three by later work on suggestions (SUG-01, SUG-02, UXO-11), four by the retry-safety work after that (TIM-04, TIM-07, TIM-08, ATT-06) and two by the audit work (AUD-13, AUD-06). No P2 gap closed.
 
 ## Changed since `9a93861`
 
@@ -82,6 +82,7 @@ Four commits on this branch after the merge changed the status of these gaps. Th
 | SUG-01 | P1 | OPEN | CLOSED | `cdabc54` |
 | SUG-02 | P1 | OPEN | CLOSED | `cdabc54` |
 | UXO-11 | P1 | OPEN | CLOSED | `cdabc54` |
+| AUD-15 | P2 | OPEN | PARTIAL | `7170efb` |
 
 ## By area
 
@@ -449,7 +450,7 @@ Gap text is shortened; the full text and the evidence at `5c199c1` are in the Bl
 | AUD-12 | P1 | OPEN | No data-breach workflow or incident table. | src/modules/audit-compliance/application/read-audit-trail.ts:146;… — No breach workflow or incident table; security events still written from the same three read paths and nothing monitors them. |
 | AUD-13 | P1 | CLOSED | The correlation id is made for every request and logged, but never saved in an audit row or an event, so one business action cannot be followed… | (after 9a93861, `0c39863`) The correlation id is ambient (src/lib/trace.ts) and saved: recordAudit and publishEvent take it from the request wrappers, the hand-written writing routes, the event processor and the job runner, so a request, its rows, its events and the worker run that finished it share one id; a caller-supplied id is accepted only if it looks like an identifier (0c39863) |
 | AUD-14 | P1 | OPEN | Consent has four purposes. | prisma/schema.prisma:2252-2260 — ConsentPurpose still has four values; no listing, contact-reveal or profile-viewing opt-ins and no view log. |
-| AUD-15 | P2 | OPEN | Coverage is by table, so a write can pass because an unrelated write to the same table was audited in the same window. | src/lib/audit-coverage.ts:229-234 (auditedTables set by entityType) — Coverage still matches by table, so an unrelated audited write to the same table can mask an unaudited one. |
+| AUD-15 | P2 | PARTIAL | Coverage is by table, so a write can pass because an unrelated write to the same table was audited in the same window. | (after 9a93861, `7170efb`) A test now reads the code and fails when a function that changes an audited table has no audit call in it and no written reason (audit-catalogue.test.ts); it found two real gaps, a reopened shift and a payout release, both now audited (7170efb). The runtime harness still matches by table, so a missing row in a function with another audited write passes both |
 | AUD-16 | P2 | OPEN | Publishing an agreement with a future start date retires the old one at once and refuses to accept it, leaving nothing in force until the date. | src/modules/audit-compliance/application/consent.ts:229-240,395,486 — Publishing sets old version retiredAt to the future date, so listings and acceptance exclude it now while the new one is not yet effective. |
 | AUD-17 | P2 | OPEN † | No exportable report of any kind (CSV) for the audit trail or queues, which v2.9 Module 16 lists. | src/app/admin/audit/page.tsx; git grep for csv/text/csv in src/ finds nothing — No CSV or other exportable report of the audit trail or queues exists. |
 | AUD-18 | P2 | OPEN | Only platform staff can read a trail. | src/lib/authz/permissions.ts:148-157,180-190 (audit.read only in ADMINISTRATOR and super_administrator) — Only platform staff hold audit.read; facility roles cannot read their own facility trail although the route accepts facility scope. |

@@ -184,6 +184,14 @@ describe('a decision on hours', () => {
   it('keeps a long reason to a length a text can carry', async () => {
     const { world, assignment, nurse } = await submitted();
     const phone = (await prisma.user.findUniqueOrThrow({ where: { id: nurse.id } })).phone;
+    // The world's shift runs eight hours from the moment the test starts, so after four in the
+    // afternoon in Lagos it crosses midnight and the text names a second date: thirteen more
+    // characters, which is a third segment. A window inside one day makes the count the same at
+    // any hour the suite is run.
+    await prisma.assignment.update({
+      where: { id: assignment.id },
+      data: { startsAt: new Date('2026-10-21T07:00:00.000Z'), endsAt: new Date('2026-10-21T15:00:00.000Z') },
+    });
 
     await reviewTimesheet({
       assignmentId: assignment.id,

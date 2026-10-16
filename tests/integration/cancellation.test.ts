@@ -175,6 +175,55 @@ describe('cancelling one booking', () => {
     ).toBe(1);
   });
 
+  it('records that the shift was opened again, with who cancelled and why', async () => {
+    const world = await buildBookingWorld();
+    const nurse = await eligiblePractitioner(world);
+    const assignment = await booked(world, nurse.id);
+    expect((await prisma.serviceRequest.findUniqueOrThrow({ where: { id: world.requestId } })).status).toBe(
+      'FILLED',
+    );
+
+    await cancelAssignment({
+      assignmentId: assignment.id,
+      facilityId: world.facilityId,
+      actorId: world.schedulerId,
+      reason: 'Practitioner asked to be released.',
+    });
+
+    // A request that was filled and is open again is a change of state like any other: it was
+    // audited going one way (service_request.filled) and not at all coming back.
+    const rows = await prisma.auditLog.findMany({ where: { action: 'service_request.reopened' } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      entityType: 'service_requests.service_requests',
+      entityId: world.requestId,
+      actorId: world.schedulerId,
+      scopeType: 'FACILITY',
+      scopeId: world.facilityId,
+      before: { status: 'FILLED' },
+      after: { status: 'PUBLISHED' },
+    });
+    expect(rows[0]!.reason).toContain('Practitioner asked to be released.');
+  });
+
+  it('writes no reopening when the shift was not full', async () => {
+    const world = await buildBookingWorld({ headcount: 2 });
+    const nurse = await eligiblePractitioner(world);
+    const assignment = await booked(world, nurse.id);
+
+    await cancelAssignment({
+      assignmentId: assignment.id,
+      facilityId: world.facilityId,
+      actorId: world.schedulerId,
+      reason: 'Practitioner asked to be released.',
+    });
+
+    expect((await prisma.serviceRequest.findUniqueOrThrow({ where: { id: world.requestId } })).status).toBe(
+      'PUBLISHED',
+    );
+    expect(await prisma.auditLog.count({ where: { action: 'service_request.reopened' } })).toBe(0);
+  });
+
   it('refuses once the shift is over, because that is a question for attendance', async () => {
     const world = await buildBookingWorld();
     const nurse = await eligiblePractitioner(world);
