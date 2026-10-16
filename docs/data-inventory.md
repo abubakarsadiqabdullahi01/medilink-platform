@@ -226,8 +226,8 @@ A scheduled job (`retention.purge_sweep`, daily) deletes only what no obligation
 
 ### Audit trail
 
-- **Tables:** `audit.audit_log`
-- **Holds:** Who did what to what, and when: identifiers, the reason given and the before and after of the change. Names, email addresses and phone numbers are not written into it.
+- **Tables:** `audit.audit_log`, `audit.audit_digests`
+- **Holds:** Who did what to what, and when: identifiers, the reason given and the before and after of the change. Names, email addresses and phone numbers are not written into it. With it, for each day that is over, how many rows the day held and a hash of them, which says nothing about anybody.
 - **Purpose:** Accountability for every change the platform makes.
 - **Proposed basis:** Legal obligation and legitimate interest.
 - **Owner:** Data protection officer (not yet appointed)
