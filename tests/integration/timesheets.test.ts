@@ -7,6 +7,17 @@ vi.mock('next/headers', async () => {
   return { cookies: () => cookieJar };
 });
 
+// TIM-04: the step after approval, which can be made to fail.
+const completion = vi.hoisted(() => ({ fail: false }));
+vi.mock('@/modules/matching/application/assignment', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/modules/matching/application/assignment')>();
+  return {
+    ...actual,
+    markAssignmentCompleted: (input: Parameters<typeof actual.markAssignmentCompleted>[0]) =>
+      completion.fail ? Promise.reject(new Error('database blip')) : actual.markAssignmentCompleted(input),
+  };
+});
+
 const sms = vi.hoisted(() => ({ send: vi.fn() }));
 vi.mock('@/lib/sms', async () => (await import('./support/sms-double')).gatewayDouble(sms.send));
 
@@ -446,6 +457,236 @@ describe('a correction to a time that has not come yet (ATT-04)', () => {
     });
 
     expect(corrected.billableMinutes).toBe(420);
+  });
+});
+
+/**
+ * TIM-07 and TIM-08: a correction that cannot be priced is refused before it commits, and a
+ * record that cannot be priced says why.
+ *
+ * A correction used to commit the revision and the new times, and only then work out the
+ * figures: a break longer than the shift, or a shift over a day, threw after the change was
+ * already made, and surfaced as an "illegal transition" from a state to itself.
+ */
+describe('a correction that cannot be priced (TIM-07, TIM-08)', () => {
+  async function rejectedSheet() {
+    const world = await buildWorld();
+    await submitTimesheet({ assignmentId: world.assignmentId, userId: world.practitionerId });
+    await reviewTimesheet({
+      assignmentId: world.assignmentId,
+      facilityId: world.facilityId,
+      actorId: world.reviewerId,
+      decision: 'reject',
+      reviewNotes: 'The times look wrong.',
+    });
+    return world;
+  }
+
+  async function nothingChanged(world: World, before: Awaited<ReturnType<typeof getTimesheet>>) {
+    const after = await getTimesheet(world.assignmentId);
+    expect(after.revision).toBe(before.revision);
+    expect(after.amountKobo).toBe(before.amountKobo);
+    expect(after.billableMinutes).toBe(before.billableMinutes);
+    expect(await timesheetRevisions(world.assignmentId)).toHaveLength(0);
+    const record = await prisma.attendanceRecord.findUniqueOrThrow({
+      where: { assignmentId: world.assignmentId },
+    });
+    expect(record.status).toBe('REJECTED');
+    expect(record.checkedInAt?.toISOString()).toBe(WORKED_FROM.toISOString());
+    expect(record.checkedOutAt?.toISOString()).toBe(WORKED_TO.toISOString());
+    expect(record.breakMinutes).toBe(0);
+    expect(await prisma.auditLog.count({ where: { action: 'timesheet.corrected' } })).toBe(0);
+  }
+
+  it('is refused when the break is longer than the shift, with nothing committed', async () => {
+    const world = await rejectedSheet();
+    const before = await getTimesheet(world.assignmentId);
+
+    await expect(
+      correctTimesheet({
+        assignmentId: world.assignmentId,
+        facilityId: world.facilityId,
+        actorId: world.reviewerId,
+        breakMinutes: 9 * 60,
+        reason: 'The ward log shows a nine hour break, which is more than the shift.',
+      }),
+    ).rejects.toMatchObject({ code: 'break_longer_than_shift', status: 422 });
+
+    await nothingChanged(world, before);
+  });
+
+  it('is refused when it would make the shift longer than a day, with nothing committed', async () => {
+    const world = await rejectedSheet();
+    const before = await getTimesheet(world.assignmentId);
+
+    await expect(
+      correctTimesheet({
+        assignmentId: world.assignmentId,
+        facilityId: world.facilityId,
+        actorId: world.reviewerId,
+        checkedInAt: new Date(WORKED_FROM.getTime() - 20 * 60 * 60 * 1000),
+        reason: 'The nurse started the previous evening, which the paper sheet omitted.',
+      }),
+    ).rejects.toMatchObject({ code: 'shift_too_long', status: 422 });
+
+    await nothingChanged(world, before);
+  });
+
+  it('is one transaction when it is allowed: the figures are the corrected ones the moment it commits', async () => {
+    const world = await rejectedSheet();
+
+    const corrected = await correctTimesheet({
+      assignmentId: world.assignmentId,
+      facilityId: world.facilityId,
+      actorId: world.reviewerId,
+      breakMinutes: 60,
+      onCallMinutes: 30,
+      reason: 'Ward log records a one hour break and half an hour on call.',
+    });
+
+    // What the call returned is what is stored: not a figure worked out afterwards, which
+    // could be a different one.
+    const stored = await getTimesheet(world.assignmentId);
+    expect(stored).toMatchObject({
+      billableMinutes: 420,
+      breakMinutes: 60,
+      onCallMinutes: 30,
+      revision: 2,
+      amountKobo: corrected.amountKobo,
+    });
+    expect(await timesheetRevisions(world.assignmentId)).toHaveLength(1);
+  });
+
+  it('says why a record that cannot be priced cannot be, as a 422, not as a move from a state to itself', async () => {
+    const world = await buildWorld();
+    // A record from before the check: thirty hours, written straight into the table.
+    await prisma.attendanceRecord.update({
+      where: { assignmentId: world.assignmentId },
+      data: { checkedOutAt: new Date(WORKED_FROM.getTime() + 30 * 60 * 60 * 1000), status: 'CHECKED_OUT' },
+    });
+
+    await expect(computeAndSaveTimesheet(world.assignmentId)).rejects.toMatchObject({
+      code: 'shift_too_long',
+      status: 422,
+    });
+    await expect(
+      submitTimesheet({ assignmentId: world.assignmentId, userId: world.practitionerId }),
+    ).rejects.toMatchObject({ code: 'shift_too_long', status: 422 });
+  });
+});
+
+/**
+ * TIM-04: approving a sheet and completing the assignment are not two things that can come apart.
+ *
+ * Approval committed, and then the assignment was completed in a separate step. A failure
+ * between them left the attendance APPROVED and the assignment still CONFIRMED, the facility's
+ * Approve button gone (it shows only for a submitted sheet) and a retry refused as an illegal
+ * move from APPROVED to APPROVED: a shift worked and approved that never counted as completed.
+ */
+describe('approval and completing the assignment (TIM-04)', () => {
+  beforeEach(() => {
+    completion.fail = false;
+    sms.send.mockReset();
+    sms.send.mockResolvedValue({ accepted: true, provider: 'test', providerMessageId: null });
+  });
+
+  afterEach(() => {
+    completion.fail = false;
+  });
+
+  async function deliver() {
+    await prisma.outboxEvent.updateMany({
+      where: { status: 'FAILED' },
+      data: { availableAt: new Date(Date.now() - 1000) },
+    });
+    return runOnce({ handlers });
+  }
+
+  const approve = (world: World) =>
+    reviewTimesheet({
+      assignmentId: world.assignmentId,
+      facilityId: world.facilityId,
+      actorId: world.reviewerId,
+      decision: 'approve',
+    });
+
+  /** The state a failure used to leave: approved, with the assignment still confirmed. */
+  async function strandedApproval() {
+    const world = await buildWorld();
+    await submitTimesheet({ assignmentId: world.assignmentId, userId: world.practitionerId });
+    completion.fail = true;
+    const approved = await approve(world);
+    completion.fail = false;
+    return { world, approved };
+  }
+
+  it('does not turn a committed approval into an error when completing the assignment fails', async () => {
+    const { world, approved } = await strandedApproval();
+
+    expect(approved.attendanceStatus).toBe('APPROVED');
+    expect((await getTimesheet(world.assignmentId)).attendanceStatus).toBe('APPROVED');
+    expect((await getAssignment(world.assignmentId))?.status).toBe('CONFIRMED');
+  });
+
+  it('completes the assignment from the approved event, so it comes right without anybody retrying', async () => {
+    const { world } = await strandedApproval();
+
+    await deliver();
+
+    expect((await getAssignment(world.assignmentId))?.status).toBe('COMPLETED');
+    expect((await getTimesheet(world.assignmentId)).attendanceStatus).toBe('APPROVED');
+  });
+
+  it('finishes the job when the facility approves again, without a second approval', async () => {
+    const { world } = await strandedApproval();
+
+    const again = await approve(world);
+
+    expect(again.attendanceStatus).toBe('APPROVED');
+    expect((await getAssignment(world.assignmentId))?.status).toBe('COMPLETED');
+    // One approval: one event, one audit row, one entry in the assignment's history.
+    expect(await prisma.outboxEvent.count({ where: { eventType: EVENTS.TimesheetApproved } })).toBe(1);
+    expect(await prisma.auditLog.count({ where: { action: 'timesheet.approved' } })).toBe(1);
+    expect(
+      await prisma.assignmentStatusHistory.count({
+        where: { assignmentId: world.assignmentId, toStatus: 'COMPLETED' },
+      }),
+    ).toBe(1);
+  });
+
+  it('still refuses to approve a sheet that is approved and whose assignment is complete', async () => {
+    const world = await buildWorld();
+    await submitTimesheet({ assignmentId: world.assignmentId, userId: world.practitionerId });
+    await approve(world);
+
+    await expect(approve(world)).rejects.toMatchObject({ code: 'illegal_attendance_transition' });
+  });
+
+  it('completes the assignment once however often the approved event is delivered', async () => {
+    const { world } = await strandedApproval();
+
+    await deliver();
+    await prisma.outboxEvent.updateMany({
+      where: { eventType: EVENTS.TimesheetApproved },
+      data: { status: 'PENDING', processedAt: null, availableAt: new Date(Date.now() - 1000) },
+    });
+    await deliver();
+
+    expect(
+      await prisma.assignmentStatusHistory.count({
+        where: { assignmentId: world.assignmentId, toStatus: 'COMPLETED' },
+      }),
+    ).toBe(1);
+  });
+
+  it('carries who approved it on the event, which is who the completion is recorded against', async () => {
+    const world = await buildWorld();
+    await submitTimesheet({ assignmentId: world.assignmentId, userId: world.practitionerId });
+    await approve(world);
+
+    const event = await prisma.outboxEvent.findFirstOrThrow({ where: { eventType: EVENTS.TimesheetApproved } });
+
+    expect(event.payload).toMatchObject({ assignmentId: world.assignmentId, actorId: world.reviewerId });
   });
 });
 

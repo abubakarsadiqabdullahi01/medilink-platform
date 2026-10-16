@@ -1,7 +1,9 @@
+import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { prisma } from '../lib/db';
 import { logger } from '../lib/logger';
 import { MAX_ATTEMPTS, nextAvailableAt } from '../lib/outbox';
+import { withTrace } from '../lib/trace';
 
 /**
  * One pass of the outbox worker, separated from the loop in ./index.ts so the
@@ -121,7 +123,12 @@ export async function processEvent(
   }
 
   try {
-    await handler(event.payload as Record<string, unknown>);
+    // Under the trace of the action that published the event, so what the handler writes or publishes
+    // in turn carries the same id (AUD-13). An event published outside any request has none, and gets
+    // one here, so the handler's own rows are still tied to each other and to this delivery.
+    await withTrace({ correlationId: event.correlation_id ?? randomUUID() }, () =>
+      handler(event.payload as Record<string, unknown>),
+    );
     await client.outboxEvent.update({
       where: { id: event.id },
       data: { status: 'PROCESSED', processedAt: now, lastError: null },

@@ -80,7 +80,7 @@ export const AUDITED_MODELS: Readonly<Record<string, string>> = {
  */
 export const EXEMPT_MODELS: Readonly<Record<string, string>> = {
   AuditLog:
-    'It is the audit record. Auditing the audit trail is circular, and the table has no update or delete path.',
+    'It is the audit record. Auditing the audit trail is circular, and the table has no update or delete path: a trigger refuses both (AUD-06).',
   OutboxEvent:
     'Delivery bookkeeping, not domain state. The state change that published the event is audited; attempt counts and backoff are not decisions anyone made.',
   SecurityEvent:

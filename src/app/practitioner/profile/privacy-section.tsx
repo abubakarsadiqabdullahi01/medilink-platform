@@ -23,6 +23,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
 import { formatWhen } from '@/components/app/format';
+import { useDownloadMyData } from '@/components/app/download-my-data';
 
 interface Consent {
   purpose: string;
@@ -140,25 +141,11 @@ export function PrivacySection() {
     onError: (error) => toast.error('Could not raise it', { description: errorMessage(error) }),
   });
 
-  /** Downloads what the API returns, rather than showing it and hoping. */
-  async function download() {
-    try {
-      const data = await api.get<unknown>('/api/v1/me/export');
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = `medilink-my-data-${new Date().toISOString().slice(0, 10)}.json`;
-      anchor.click();
-      URL.revokeObjectURL(url);
-      toast.success('Downloaded');
-    } catch (error) {
-      toast.error('Could not build the export', { description: errorMessage(error) });
-    }
-  }
+  const myData = useDownloadMyData();
 
   return (
     <>
+      {myData.dialog}
       {/* What you have agreed to on the left; the things you can ask for on the
           right. Stacked on a phone, in the same order. */}
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
@@ -293,14 +280,15 @@ export function PrivacySection() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <Button onClick={download}>
+              <Button onClick={() => void myData.download()}>
                 <Download />
                 Download my data
               </Button>
               <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
-                The audit trail and the financial ledger are not in it. Both mention you and neither
-                is about you — an audit row is the platform&apos;s record of its own conduct, and a
-                ledger entry has somebody else on the other side of it.
+                It asks for your password again, because it holds everything at once. The audit trail
+                and the financial ledger are not in it — an audit row is the platform&apos;s record of
+                its own conduct, and a ledger entry has somebody else on the other side of it. What
+                else is left out, and why, is written at the top of the file.
               </p>
             </CardContent>
           </Card>

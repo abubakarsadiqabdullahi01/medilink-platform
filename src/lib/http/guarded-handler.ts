@@ -1,9 +1,11 @@
 import { ZodError, type ZodType, type ZodTypeDef } from 'zod';
 import { fail, handleError, ok } from './responses';
-import { contextLogger, requestContextFrom, type RequestContext } from './request-context';
+import { contextLogger, requestContextFrom, traceOf, type RequestContext } from './request-context';
+import { withTrace } from '../trace';
 import { AuthorizationError, requirePermission, type RequestedScope } from '../authz/guard';
 import { requiresStepUp, type Permission } from '../authz/permissions';
 import { HttpError } from './errors';
+import { requireFreshStepUp } from './session-handler';
 import { logger } from '../logger';
 import { env } from '../env';
 import { recordRequest, routeKey, serverTimingHeader, withTiming } from './timing';
@@ -70,9 +72,23 @@ function mergeRouteParams(raw: unknown, routeParams?: Record<string, string>): u
   return { ...base, ...routeParams };
 }
 
+/**
+ * Opens the request's trace, so every audit row and event the action writes carries the request's
+ * correlation id (AUD-13), and runs the guard inside it.
+ */
 async function handle<TInput, TOutput>(
   request: Request,
   options: GuardOptions<TInput, TOutput>,
+  routeParams?: Record<string, string>,
+) {
+  const context = requestContextFrom(request);
+  return withTrace(traceOf(context), () => guard(request, options, context, routeParams));
+}
+
+async function guard<TInput, TOutput>(
+  request: Request,
+  options: GuardOptions<TInput, TOutput>,
+  initial: RequestContext,
   /**
    * A dynamic segment's values, e.g. Next.js's `{ params: { id } }` for a
    * route under `[id]/`. Merged into the parsed input after the query/body,
@@ -81,7 +97,7 @@ async function handle<TInput, TOutput>(
    */
   routeParams?: Record<string, string>,
 ) {
-  let context = requestContextFrom(request);
+  let context = initial;
 
   try {
     // 401 before 403: an anonymous caller is told to sign in, not that they
@@ -99,13 +115,7 @@ async function handle<TInput, TOutput>(
     // response would tell the caller they hold the permission — which is
     // precisely what the 403 below refuses to disclose. Before it, everybody
     // asking gets the same answer whatever they hold.
-    if (requiresStepUp(options.permission) && !session.stepUpFresh) {
-      throw new HttpError(
-        'step_up_required',
-        'Confirm your password to continue.',
-        401,
-      );
-    }
+    if (requiresStepUp(options.permission)) requireFreshStepUp(session);
 
     await requirePermission(session.userId, options.permission, options.scope(input, session));
 

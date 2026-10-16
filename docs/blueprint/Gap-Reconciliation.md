@@ -22,9 +22,9 @@ The Blueprint’s gap register holds **410 gaps**: 119 P0, 225 P1, 66 P2. Since 
 | Priority | Total | Closed | Partial | Open | Not yet reviewed |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | P0 | 119 | 87 | 18 | 14 | 0 |
-| P1 | 225 | 10 | 57 | 158 | 0 |
+| P1 | 225 | 15 | 61 | 149 | 0 |
 | P2 | 66 | 0 | 6 | 60 | 0 |
-| **All** | **410** | **97** | **81** | **232** | **0** |
+| **All** | **410** | **102** | **85** | **223** | **0** |
 
 By area:
 
@@ -38,15 +38,15 @@ By area:
 | Service requests (`REQ`) | 3 | 8 | 1 | 12 | 3 | 4 | 5 |
 | Matching (`MAT`) | 5 | 9 | 2 | 16 | 6 | 2 | 8 |
 | Scheduling (`SCH`) | 2 | 1 | 0 | 3 | 2 | 1 | 0 |
-| Attendance (`ATT`) | 2 | 8 | 2 | 12 | 2 | 2 | 8 |
-| Timesheets (`TIM`) | 3 | 9 | 0 | 12 | 2 | 4 | 6 |
+| Attendance (`ATT`) | 2 | 8 | 2 | 12 | 3 | 3 | 6 |
+| Timesheets (`TIM`) | 3 | 9 | 0 | 12 | 5 | 4 | 3 |
 | Rates (`RAT`) | 3 | 13 | 3 | 19 | 4 | 4 | 11 |
 | Billing (`BIL`) | 13 | 20 | 6 | 39 | 9 | 9 | 21 |
 | Sanctions (`SAN`) | 2 | 12 | 2 | 16 | 2 | 1 | 13 |
 | Disputes (`DSP`) | 5 | 6 | 1 | 12 | 4 | 2 | 6 |
 | Incidents (`INC`) | 4 | 7 | 2 | 13 | 3 | 0 | 10 |
 | Notifications (`NOT`) | 6 | 6 | 0 | 12 | 5 | 4 | 3 |
-| Audit and compliance (`AUD`) | 5 | 9 | 5 | 19 | 2 | 4 | 13 |
+| Audit and compliance (`AUD`) | 5 | 9 | 5 | 19 | 3 | 7 | 9 |
 | Suggestions (`SUG`) | 0 | 2 | 6 | 8 | 2 | 1 | 5 |
 | Reference data (`CFG`) | 4 | 8 | 3 | 15 | 0 | 6 | 9 |
 | Platform and operations (`PLT`) | 5 | 11 | 5 | 21 | 1 | 8 | 12 |
@@ -57,7 +57,7 @@ By area:
 | Accessibility and low bandwidth (`UXA`) | 6 | 7 | 4 | 17 | 6 | 1 | 10 |
 | Quality and delivery (`QAL`) | 3 | 8 | 1 | 12 | 1 | 2 | 9 |
 
-**Reading the numbers.** About three quarters of the P1 and P2 gaps (218 of 291) are still open, which is what one would expect: Phase 0 went after the pilot blockers. Of the 10 P1 gaps that closed, seven were closed by a P0 fix to the same root cause (the roster’s cancel action, the in-app inbox, the shift type derived from the hours, the roster’s contact window, the payout account reuse check) and three by later work on suggestions (SUG-01, SUG-02, UXO-11). No P2 gap closed.
+**Reading the numbers.** About three quarters of the P1 and P2 gaps (209 of 291) are still open, which is what one would expect: Phase 0 went after the pilot blockers. Of the 15 P1 gaps that closed, seven were closed by a P0 fix to the same root cause (the roster’s cancel action, the in-app inbox, the shift type derived from the hours, the roster’s contact window, the payout account reuse check), three by later work on suggestions (SUG-01, SUG-02, UXO-11), four by the retry-safety work after that (TIM-04, TIM-07, TIM-08, ATT-06) and one by the audit work (AUD-13). No P2 gap closed.
 
 ## Changed since `9a93861`
 
@@ -70,6 +70,15 @@ Four commits on this branch after the merge changed the status of these gaps. Th
 | FAC-06 | P1 | PARTIAL | PARTIAL | `0040f00` |
 | SCH-01 | P1 | OPEN | PARTIAL | `064b1b7` |
 | ATT-04 | P1 | OPEN | PARTIAL | `ae317e4` |
+| ATT-05 | P1 | OPEN | PARTIAL | `c5959a2` |
+| ATT-06 | P1 | OPEN | CLOSED | `c5959a2` |
+| TIM-04 | P1 | OPEN | CLOSED | `e140478` |
+| TIM-07 | P1 | OPEN | CLOSED | `6d81631` |
+| TIM-08 | P1 | OPEN | CLOSED | `6d81631` |
+| AUD-06 | P1 | OPEN | PARTIAL | `60e030b` |
+| AUD-07 | P1 | OPEN | PARTIAL | `e42b766` |
+| AUD-08 | P1 | OPEN | PARTIAL | `e42b766` |
+| AUD-13 | P1 | OPEN | CLOSED | `0c39863` |
 | SUG-01 | P1 | OPEN | CLOSED | `cdabc54` |
 | SUG-02 | P1 | OPEN | CLOSED | `cdabc54` |
 | UXO-11 | P1 | OPEN | CLOSED | `cdabc54` |
@@ -255,8 +264,8 @@ Gap text is shortened; the full text and the evidence at `5c199c1` are in the Bl
 | ATT-02 | P0 | CLOSED | The facility-side "issue a code" and "record by hand" functions never check that the shift belongs to the facility named in the request. Staff of… | `52a0456` |
 | ATT-03 | P1 | OPEN | There is no server-side check-in window. | src/modules/attendance/application/attendance.ts:142-205,221-322 — Still no server-side check-in window; code issue and presentation work at any time. Only ownership and CONFIRMED-status checks were added (52a0456). |
 | ATT-04 | P1 | PARTIAL | Hand-recorded and corrected times can be any date, including the future or days from the shift. | (after 9a93861, `ae317e4`) A hand-recorded or corrected time more than five minutes ahead of the server's clock is refused (ae317e4). Times days from the shift, or from any shift, are still accepted: a window needs a number from operations, as the check-in window does (ATT-03). The practitioner is still never asked to agree |
-| ATT-05 | P1 | OPEN | No idempotency. | src/modules/attendance/application/attendance.ts:251,282-290 — Retry after success hits an illegal transition; token update result is unchecked and the record update unconditional, so parallel presents can both pass. |
-| ATT-06 | P1 | OPEN | The wrong-try limit reads a count and then increments it, so a burst of parallel guesses can exceed five. | src/modules/attendance/application/attendance.ts:257-276;… — Attempts are read, judged, then incremented afterwards, so parallel wrong guesses can exceed the limit; the conditional-update fix used for login codes is… |
+| ATT-05 | P1 | PARTIAL | No idempotency. | (after 9a93861, `c5959a2`) Parallel presentations of one right code check in once: spending the code and moving the record are conditional (c5959a2). Presenting a code again after it worked is still refused, by design: M09-03 pins that a used code is refused |
+| ATT-06 | P1 | CLOSED | The wrong-try limit reads a count and then increments it, so a burst of parallel guesses can exceed five. | (after 9a93861, `c5959a2`) The attempt is taken before the guess is judged, in one conditional statement; fourteen parallel guesses are five attempts (c5959a2) |
 | ATT-07 | P1 | PARTIAL | Stuck states have no sweep or alert. "Check-in pending" never lapses (the move back to "not started" is in the table and no code uses it), "checked… | src/worker/jobs.ts:86; src/modules/notifications/application/shift-alerts.ts:86-118 (ed67c35);… — Alert now fires 30 minutes after start with no check-in. Pending never lapses to NOT_STARTED; checked-in never auto-closed; checked-out-never-submitted not… |
 | ATT-08 | P1 | OPEN † | The QR exists only as an API string. | src/app/facility/roster/attendance-panel.tsx:36; src/app/practitioner/shifts/check-in-panel.tsx:98;… — No QR drawing or scanning anywhere; the QR is still only an API string and practitioners type digits. |
 | ATT-09 | P1 | OPEN † | A practitioner cannot record or declare a break; it exists only if the facility enters it by hand or in a correction. v2.9 lists breaks, overtime… | src/app/practitioner/shifts/check-in-panel.tsx (no break input);… — Practitioner still cannot declare a break; breakMinutes is set only by facility manual entry or timesheet correction. |
@@ -271,11 +280,11 @@ Gap text is shortened; the full text and the evidence at `5c199c1` are in the Bl
 | TIM-01 | P0 | PARTIAL | No deadline, reminder or auto-approval. A facility that never approves stalls the practitioner's pay; nothing reminds either side. The facility… | Not done: A deadline after which hours are approved for the facility is a commercial decision and is not made. |
 | TIM-02 | P0 | CLOSED | The sheet is at base rate; the invoice adds night, holiday, overtime and on-call premiums from the facility's rate card. The facility approves a… | `48b1501` |
 | TIM-03 | P0 | CLOSED | The correct non-overlapping split of minutes is computed and then discarded. Billing re-derives it by subtracting all holiday minutes from night, so… | `9cf2997` |
-| TIM-04 | P1 | OPEN | Approval and "assignment completed" are two steps. | src/modules/timesheets/application/timesheet.ts:263-275 (approval commits), :330 (markAssignmentCompleted… — Approval still commits before the assignment is completed in a separate step; a failure strands attendance APPROVED, assignment CONFIRMED, and retry is refused. |
+| TIM-04 | P1 | CLOSED | Approval and "assignment completed" are two steps. | (after 9a93861, `e140478`) Approval no longer fails when completing the assignment fails; the approved event completes the assignment idempotently; approving again finishes a stranded approval (e140478) |
 | TIM-05 | P1 | PARTIAL | The holiday list is six fixed 2026 dates (no Easter, no Eid al-Fitr or al-Adha, no Maulud, nothing after 2026) and has no state or region. | 20fb06d; src/modules/rates-contracts/domain/holidays.ts:50-65; prisma/seed.ts:254-258;… — Holidays generated to 2030 with Good Friday, Easter Monday and an admin route for declared Eids; still no state/region and night window is constant. |
 | TIM-06 | P1 | OPEN | A facility correction puts a submitted sheet back to "manually corrected" and the facility has no Approve button until the practitioner submits again. | src/modules/timesheets/application/timesheet.ts:373-374,417 (correction sets MANUALLY_CORRECTED, publishes no… — Correction still leaves the sheet MANUALLY_CORRECTED; Approve renders only for SUBMITTED, and nobody is notified of the correction. |
-| TIM-07 | P1 | OPEN | A correction is not atomic. | src/modules/timesheets/application/timesheet.ts:389-439 (transaction commits), :441 (recompute outside it),… — Correction still commits revision and record change, then recomputes outside the transaction; a domain refusal still surfaces as a same-state transition error. |
-| TIM-08 | P1 | OPEN | A check-in or check-out that makes a shift longer than 24 hours raises an error inside the shift.completed handler. | src/modules/timesheets/domain/hours.ts:147-148; src/worker/handlers.ts:79-81; src/worker/processor.ts:131-146… — Over-24h shift still throws inside the shift.completed handler, retries and dead-letters; no check at check-in or check-out prevents it. |
+| TIM-07 | P1 | CLOSED | A correction is not atomic. | (after 9a93861, `6d81631`) A correction works out its figures before anything is written and commits the record, the revision, the figures and the audit row as one transaction; a refusal is a 422 with the domain's own code and commits nothing (6d81631) |
+| TIM-08 | P1 | CLOSED | A check-in or check-out that makes a shift longer than 24 hours raises an error inside the shift.completed handler. | (after 9a93861, `6d81631`) A shift over 24 hours is refused at check-out, in a hand-recording and in a correction (6d81631). A record from before the check still retries and dead-letters in the handler, now with a 422 that says why |
 | TIM-09 | P1 | OPEN | History is thinner than v2.9 asks. | prisma/schema.prisma:1291-1296 (review fields on attendance record);… — Review fields are still overwritten on each review, correction still overwrites check-in/out times with no check-in event, and no approvals or per-line entries… |
 | TIM-10 | P1 | OPEN | No weekend band exists in the classifier or the rate card, although v2.9 lists weekend allowances. | src/modules/timesheets/domain/hours.ts:103-206 (night and holiday bands only); prisma/schema.prisma:1906-1909… — No weekend band in classifier or rate card; overtime still needs no approval and on-call is still typed by the facility. |
 | TIM-11 | P1 | PARTIAL | Nobody is told when a sheet is submitted, approved, rejected or corrected. | src/worker/handlers.ts:61-62,95 (submitted, approved, rejected handlers);… — Submitted, approved and rejected now notify (fd31453); a facility correction still publishes no event and tells nobody. |
@@ -431,14 +440,14 @@ Gap text is shortened; the full text and the evidence at `5c199c1` are in the Bl
 | AUD-03 | P0 | PARTIAL | Agreements are not enforced. Sign-up has no privacy-notice or terms step; nothing blocks work until accepted; a new version is not re-accepted; a… | Not done: A facility-level acceptance record (the hospital as an organisation, not the person) is not built, and the content of the documents is counsel's. |
 | AUD-04 | P0 | PARTIAL | No data inventory, no retention schedule and no purge job for any category (identity, documents, notifications, audit, sessions). v2.9 §9.14 requires… | Not done: **Every period and every lawful basis is the team's proposal, not signed off by counsel or a data protection officer.** Messages, security events, search rankings,… |
 | AUD-05 | P0 | OPEN | Registration with the data-protection regulator as a controller of major importance, a data-protection officer, a privacy impact assessment,… | Needs something from outside engineering: Counsel, a data protection officer, the regulator |
-| AUD-06 | P1 | OPEN | The audit table is append-only by habit only. | prisma/schema.prisma:236-238 (comment only); no trigger or REVOKE in prisma/migrations;… — Append-only still by convention: no database trigger, permission block or tamper evidence on audit.audit_log. |
-| AUD-07 | P1 | OPEN | The export omits disputes, incidents, notifications, attendance, timesheets, screening, sessions and invoices. | src/modules/audit-compliance/application/data-subject.ts:331-435 — Export still omits disputes, incidents, notifications, attendance, timesheets, screening, sessions and invoices; only payout accounts were added. |
-| AUD-08 | P1 | OPEN | Hospital staff cannot exercise any right: export, erasure assessment, consent and request routes need practitioner permissions that no facility role… | src/app/api/v1/me/export/route.ts:16; src/lib/authz/permissions.ts:148-157 (FACILITY_ADMINISTRATOR lacks… — Export, erasure assessment, consent and request routes still need practitioner permissions that no facility role holds. |
+| AUD-06 | P1 | PARTIAL | The audit table is append-only by habit only. | (after 9a93861, `60e030b`) A row trigger on audit.audit_log refuses UPDATE and DELETE for every client (60e030b). Still open: a role that owns the table can drop it, TRUNCATE is left alone, and there is no digest or hash check that would show a change made that way |
+| AUD-07 | P1 | PARTIAL | The export omits disputes, incidents, notifications, attendance, timesheets, screening, sessions and invoices. | (after 9a93861, `e42b766`) The export now returns a section for every table the data inventory lists as about a person, or says in the file why one is left out, and a test fails when the two disagree (e42b766). Still held back: a report that names the person, until the data protection officer and counsel say what may be shared (D10) |
+| AUD-08 | P1 | PARTIAL | Hospital staff cannot exercise any right: export, erasure assessment, consent and request routes need practitioner permissions that no facility role… | (after 9a93861, `e42b766`) The export is open to every signed-in person, asks for the password again, and is in the account menu every role has (e42b766). Still open: the erasure assessment, consent and request routes need a practitioner permission that no facility role holds |
 | AUD-09 | P1 | PARTIAL | Consent is "yes by silence" in matching: a practitioner with no consent record is shown to hospitals, and the sign-up tick-box is enforced by the… | src/modules/auth/application/registration.ts:63-64; src/modules/auth/presentation/schemas.ts:47;… — Privacy-notice acceptance now server-enforced at sign-up. Sharing consent still optional server-side, and no consent record still counts as consent in matching. |
 | AUD-10 | P1 | PARTIAL | Picking up and closing a rights request needs only audit.read, a read permission. | src/app/api/v1/data-requests/[id]/close/route.ts:19; .../start/route.ts:22; .../erase/route.ts:20;… — Start and close still need only audit.read. Erasure now needs data.erase with step-up and cannot be closed by hand; rectification and restriction remain words. |
 | AUD-11 | P1 | OPEN | No lawful-disclosure route for a regulator, court or police request (the request, legal basis, authorising officer and what was released recorded). | prisma/schema.prisma (no disclosure model); git grep found no lawful-disclosure route in src/ — No lawful-disclosure model or route exists for regulator, court or police requests. |
 | AUD-12 | P1 | OPEN | No data-breach workflow or incident table. | src/modules/audit-compliance/application/read-audit-trail.ts:146;… — No breach workflow or incident table; security events still written from the same three read paths and nothing monitors them. |
-| AUD-13 | P1 | OPEN | The correlation id is made for every request and logged, but never saved in an audit row or an event, so one business action cannot be followed… | src/lib/audit.ts:96 and src/lib/outbox.ts:26 accept correlationId; only src/app/api/v1/audit/route.ts:40… — Correlation id still not stored on ordinary audit rows or published events; no business-action caller sets it. |
+| AUD-13 | P1 | CLOSED | The correlation id is made for every request and logged, but never saved in an audit row or an event, so one business action cannot be followed… | (after 9a93861, `0c39863`) The correlation id is ambient (src/lib/trace.ts) and saved: recordAudit and publishEvent take it from the request wrappers, the hand-written writing routes, the event processor and the job runner, so a request, its rows, its events and the worker run that finished it share one id; a caller-supplied id is accepted only if it looks like an identifier (0c39863) |
 | AUD-14 | P1 | OPEN | Consent has four purposes. | prisma/schema.prisma:2252-2260 — ConsentPurpose still has four values; no listing, contact-reveal or profile-viewing opt-ins and no view log. |
 | AUD-15 | P2 | OPEN | Coverage is by table, so a write can pass because an unrelated write to the same table was audited in the same window. | src/lib/audit-coverage.ts:229-234 (auditedTables set by entityType) — Coverage still matches by table, so an unrelated audited write to the same table can mask an unaudited one. |
 | AUD-16 | P2 | OPEN | Publishing an agreement with a future start date retires the old one at once and refuses to accept it, leaving nothing in force until the date. | src/modules/audit-compliance/application/consent.ts:229-240,395,486 — Publishing sets old version retiredAt to the future date, so listings and acceptance exclude it now while the new one is not yet effective. |

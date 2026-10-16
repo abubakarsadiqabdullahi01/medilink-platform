@@ -556,7 +556,8 @@ describe('a time that has not come yet (ATT-04)', () => {
   it('accepts a time a couple of minutes ahead of the server, which is a watch running fast', async () => {
     const world = await buildWorld();
 
-    const result = await record(world, PAST_START, minutesFromNow(2));
+    // An eight-hour shift that ends a couple of minutes ahead of the server's clock.
+    const result = await record(world, minutesFromNow(2 - 8 * 60), minutesFromNow(2));
 
     expect(result.status).toBe('MANUALLY_CORRECTED');
   });
@@ -568,6 +569,158 @@ describe('a time that has not come yet (ATT-04)', () => {
     const result = await record(world, longAgo, new Date(longAgo.getTime() + 8 * 60 * 60 * 1000));
 
     expect(result.status).toBe('MANUALLY_CORRECTED');
+  });
+});
+
+/**
+ * TIM-08: no shift longer than a day can be recorded.
+ *
+ * The timesheet will not price one. It used to find that out only after the record existed:
+ * the shift.completed handler threw, retried eight times and dead-lettered, and the
+ * practitioner never got a sheet to submit. Now it is refused where the times are written, with
+ * a message that says what to do.
+ */
+describe('a shift longer than a day (TIM-08)', () => {
+  const reason = 'The ward network was down; recorded from the paper log.';
+
+  it('is refused at check-out, before the code is spent, with what to do about it', async () => {
+    const world = await buildWorld();
+    await checkIn(world);
+    // Checked in more than a day ago: they forgot to check out.
+    await prisma.attendanceRecord.update({
+      where: { assignmentId: world.assignmentId },
+      data: { checkedInAt: new Date(Date.now() - 25 * 60 * 60 * 1000) },
+    });
+    const token = await issueCheckInToken({
+      assignmentId: world.assignmentId,
+      purpose: 'CHECK_OUT',
+      actorId: world.schedulerId,
+    });
+
+    await expect(
+      presentCheckInToken({
+        assignmentId: world.assignmentId,
+        purpose: 'CHECK_OUT',
+        code: token.code,
+        userId: world.practitionerId,
+      }),
+    ).rejects.toMatchObject({ code: 'shift_too_long', status: 422 });
+
+    const record = await prisma.attendanceRecord.findUniqueOrThrow({
+      where: { assignmentId: world.assignmentId },
+    });
+    expect(record.status).toBe('CHECKED_IN');
+    expect(record.checkedOutAt).toBeNull();
+    const spent = await prisma.checkInToken.findFirstOrThrow({
+      where: { attendanceRecordId: record.id, purpose: 'CHECK_OUT' },
+    });
+    expect(spent.consumedAt).toBeNull();
+    expect(spent.attempts).toBe(0);
+  });
+
+  it('is refused in a hand-recording, and nothing is written', async () => {
+    const world = await buildWorld();
+
+    await expect(
+      recordManualAttendance({
+        assignmentId: world.assignmentId,
+        actorId: world.schedulerId,
+        checkedInAt: new Date(PAST_START.getTime() - 24 * 60 * 60 * 1000),
+        checkedOutAt: PAST_END,
+        reason,
+      }),
+    ).rejects.toMatchObject({ code: 'shift_too_long', status: 422 });
+
+    expect(
+      await prisma.attendanceRecord.findUnique({ where: { assignmentId: world.assignmentId } }),
+    ).toBeNull();
+    expect(await prisma.checkInEvent.count()).toBe(0);
+  });
+
+  it('allows a shift of exactly a day, which the timesheet prices', async () => {
+    const world = await buildWorld();
+
+    const result = await recordManualAttendance({
+      assignmentId: world.assignmentId,
+      actorId: world.schedulerId,
+      checkedInAt: PAST_START,
+      checkedOutAt: new Date(PAST_START.getTime() + 24 * 60 * 60 * 1000),
+      reason,
+    });
+
+    expect(result.status).toBe('MANUALLY_CORRECTED');
+  });
+});
+
+/**
+ * ATT-06 and ATT-05: a code is five tries, and it checks one person in once, however many
+ * requests arrive together.
+ *
+ * The attempt count was read, judged and only then incremented, so guesses arriving together all
+ * read the old count and all were compared: the limit could be exceeded by as many requests as fit
+ * in one round trip. And the code was marked spent, and the record updated, without checking that
+ * either was still as it had been read, so two presentations of one right code could both check
+ * in, each writing its own event, audit row and shift.started.
+ */
+describe('a code under parallel use (ATT-06, ATT-05)', () => {
+  async function pending() {
+    const world = await buildWorld();
+    const token = await issueCheckInToken({
+      assignmentId: world.assignmentId,
+      purpose: 'CHECK_IN',
+      actorId: world.schedulerId,
+    });
+    const present = (code: string) =>
+      presentCheckInToken({
+        assignmentId: world.assignmentId,
+        purpose: 'CHECK_IN',
+        code,
+        userId: world.practitionerId,
+      });
+    return { world, token, present };
+  }
+
+  const wrongCode = (right: string) => (right === '000000' ? '111111' : '000000');
+
+  it('never lets more than five wrong guesses be tried, however many arrive together', async () => {
+    const { world, token, present } = await pending();
+
+    const results = await Promise.allSettled(
+      Array.from({ length: 14 }, () => present(wrongCode(token.code))),
+    );
+
+    expect(results.every((result) => result.status === 'rejected')).toBe(true);
+    const row = await prisma.checkInToken.findFirstOrThrow({
+      where: { attendanceRecord: { assignmentId: world.assignmentId }, purpose: 'CHECK_IN' },
+    });
+    expect(row.attempts).toBe(5);
+
+    // The code is dead, whoever holds it: the right one is refused too.
+    await expect(present(token.code)).rejects.toMatchObject({ code: 'check_in_token_invalid' });
+    expect((await getAttendance(world.assignmentId)).status).toBe('CHECK_IN_PENDING');
+  });
+
+  it('still accepts the right code on the fifth try, after four wrong ones', async () => {
+    const { token, present } = await pending();
+    for (let guess = 0; guess < 4; guess += 1) {
+      await expect(present(wrongCode(token.code))).rejects.toMatchObject({ code: 'check_in_token_invalid' });
+    }
+
+    await expect(present(token.code)).resolves.toMatchObject({ status: 'CHECKED_IN' });
+  });
+
+  it('checks a person in once when the same right code is presented twice at the same moment', async () => {
+    const { world, token, present } = await pending();
+
+    const results = await Promise.allSettled([present(token.code), present(token.code), present(token.code)]);
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect((await getAttendance(world.assignmentId)).status).toBe('CHECKED_IN');
+    // One check-in: one event, one audit row, one shift.started.
+    const events = await listCheckInEvents(world.assignmentId);
+    expect(events.filter((event) => event.kind === 'CHECK_IN')).toHaveLength(1);
+    expect(await prisma.auditLog.count({ where: { action: 'attendance.checked_in' } })).toBe(1);
+    expect(await prisma.outboxEvent.count({ where: { eventType: EVENTS.ShiftStarted } })).toBe(1);
   });
 });
 

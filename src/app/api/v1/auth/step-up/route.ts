@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { fail, handleError, ok } from '@/lib/http/responses';
-import { requestContextFrom } from '@/lib/http/request-context';
+import { requestContextFrom, traceOf } from '@/lib/http/request-context';
+import { withTrace } from '@/lib/trace';
 import { HttpError } from '@/lib/http/errors';
 import { requireSession, stepUpSession } from '@/modules/auth/application/session-service';
 
@@ -23,12 +24,14 @@ export async function POST(request: Request) {
     const session = await requireSession();
     const { password } = schema.parse(await request.json().catch(() => ({})));
 
-    const result = await stepUpSession({
-      sessionId: session.sessionId,
-      userId: session.userId,
-      password,
-      ipAddress: context.ipAddress,
-    });
+    const result = await withTrace(traceOf(context), () =>
+      stepUpSession({
+        sessionId: session.sessionId,
+        userId: session.userId,
+        password,
+        ipAddress: context.ipAddress,
+      }),
+    );
 
     // The timestamp, not the window: a client that wants to grey out a button
     // can ask the session endpoint, which already reports `stepUpFresh`.

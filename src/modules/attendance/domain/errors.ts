@@ -46,6 +46,14 @@ export const AttendanceErrors = {
       422,
     ),
 
+  /** TIM-08. Refused where the times are written; the timesheet will not price one. */
+  shiftTooLong: () =>
+    new AttendanceError(
+      'shift_too_long',
+      'A shift cannot be longer than 24 hours. Check the times, or ask the facility to record the shift by hand.',
+      422,
+    ),
+
   checkoutBeforeCheckIn: () =>
     new AttendanceError('checkout_before_checkin', 'A shift must end after it starts.', 422),
 

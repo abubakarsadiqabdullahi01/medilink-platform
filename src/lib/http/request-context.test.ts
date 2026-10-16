@@ -44,3 +44,32 @@ describe('the address a request came from', () => {
     expect(requestContextFrom(request({ 'x-real-ip': '102.89.1.1, 10.0.0.2' })).ipAddress).toBe('102.89.1.1');
   });
 });
+
+describe('the identifiers a caller may supply', () => {
+  it('are taken when they are the kind a tracing tool produces', () => {
+    const context = requestContextFrom(
+      request({ 'x-correlation-id': 'trace-4f9c1a7e.b2', 'x-request-id': 'req_0123456789' }),
+    );
+
+    expect(context.correlationId).toBe('trace-4f9c1a7e.b2');
+    expect(context.requestId).toBe('req_0123456789');
+  });
+
+  it('are replaced when they are anything else, because the correlation id is now written to the audit trail for good', () => {
+    // A header is the caller's to write. Saved on a row nobody can delete, it would be a way to put
+    // an address, a number or a page of text into the trail, or to forge a link to somebody else's action.
+    for (const hostile of [
+      'jane.doe@example.com',
+      '+234 803 123 4567',
+      'a'.repeat(200),
+      'two words',
+      '',
+      'x',
+    ]) {
+      const context = requestContextFrom(request({ 'x-correlation-id': hostile, 'x-request-id': hostile }));
+
+      expect(context.correlationId, JSON.stringify(hostile)).toMatch(/^[0-9a-f-]{36}$/);
+      expect(context.requestId, JSON.stringify(hostile)).toMatch(/^[0-9a-f-]{36}$/);
+    }
+  });
+});

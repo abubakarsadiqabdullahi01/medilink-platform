@@ -10,6 +10,7 @@ import {
   Building2,
   CalendarDays,
   ClipboardList,
+  Download,
   FileCheck2,
   FileClock,
   Gavel,
@@ -29,6 +30,7 @@ import {
 import { cn } from '@/lib/utils';
 import { Avatar } from '@/components/app/avatar';
 import { SuggestionDialog } from '@/components/app/suggestion-dialog';
+import { useDownloadMyData } from '@/components/app/download-my-data';
 import { NotificationBell } from '@/components/app/notification-bell';
 import { TextSizeControl } from '@/components/app/text-size-control';
 import { api } from '@/lib/ui/api';
@@ -107,6 +109,7 @@ export function ConsoleShell({
   const [open, setOpen] = useState(false);
   const [dark, setDark] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
+  const myData = useDownloadMyData();
 
   const visible = sections
     .map((section) => ({
@@ -346,6 +349,12 @@ export function ConsoleShell({
                     Send a suggestion
                   </DropdownMenuItem>
                 ) : null}
+                {/* Everyone who can sign in may ask what is held about them, not
+                    only practitioners (AUD-08). */}
+                <DropdownMenuItem onSelect={() => void myData.download()}>
+                  <Download />
+                  Download my data
+                </DropdownMenuItem>
                 <DropdownMenuItem onSelect={signOut}>
                   <LogOut />
                   Sign out
@@ -355,6 +364,7 @@ export function ConsoleShell({
           </div>
         </header>
         <SuggestionDialog open={suggesting} onOpenChange={setSuggesting} />
+        {myData.dialog}
 
         {/*
           Full width, not a centred column. This was capped at `max-w-6xl`,

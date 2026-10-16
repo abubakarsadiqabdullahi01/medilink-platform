@@ -1,4 +1,5 @@
-import { requestContextFrom } from '@/lib/http/request-context';
+import { requestContextFrom, traceOf } from '@/lib/http/request-context';
+import { withTrace } from '@/lib/trace';
 import { ok } from '@/lib/http/responses';
 import { currentSession, revokeSession } from '@/modules/auth/application/session-service';
 
@@ -13,11 +14,13 @@ export async function POST(request: Request) {
   const session = await currentSession();
 
   if (session) {
-    await revokeSession({
-      sessionId: session.sessionId,
-      actorId: session.userId,
-      reason: 'User signed out',
-    });
+    await withTrace(traceOf(context), () =>
+      revokeSession({
+        sessionId: session.sessionId,
+        actorId: session.userId,
+        reason: 'User signed out',
+      }),
+    );
   }
 
   return ok({ status: 'signed_out' }, context);

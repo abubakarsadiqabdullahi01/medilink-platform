@@ -29,9 +29,9 @@ export const ROUTES: RouteDefinition[] = [
   // the facility while the acceptance carries the person's id.
   { method: 'GET', path: '/api/v1/agreements/facility', permission: 'facility.read', scopeType: 'FACILITY' },
   { method: 'POST', path: '/api/v1/agreements/facility', permission: 'facility.read', scopeType: 'FACILITY' },
-  // SELF only, deliberately: an officer who could export anybody would have a
-  // one-request dossier on every practitioner on the platform.
-  { method: 'GET', path: '/api/v1/me/export', permission: 'practitioner.profile.read', scopeType: 'SELF' },
+  // `/api/v1/me/export` is not here: it is open to any signed-in person (AUD-08), reads no
+  // input, and so has no permission to name. It is the caller's own by construction, and
+  // asks for the password again; see the route.
   { method: 'GET', path: '/api/v1/me/erasure', permission: 'practitioner.profile.read', scopeType: 'SELF' },
   { method: 'GET', path: '/api/v1/me/data-requests', permission: 'practitioner.profile.read', scopeType: 'SELF' },
   { method: 'POST', path: '/api/v1/data-requests', permission: 'practitioner.profile.write', scopeType: 'SELF' },

@@ -1,6 +1,8 @@
+import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { prisma } from '../lib/db';
 import { logger } from '../lib/logger';
+import { withTrace } from '../lib/trace';
 
 /**
  * The scheduled-job runner: recurring sweeps, claimed and run by the same
@@ -86,7 +88,8 @@ export async function runJob(
   const startedAt = Date.now();
 
   try {
-    await handler();
+    // One id for one run, so everything a sweep wrote can be found together and told from the next run (AUD-13).
+    await withTrace({ correlationId: randomUUID() }, handler);
     await client.scheduledJob.update({
       where: { id: job.id },
       data: {
