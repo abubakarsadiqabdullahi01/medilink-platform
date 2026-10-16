@@ -71,11 +71,12 @@ read the code out of the same log.
 Use a phone number outside `0803 120 0xxx`, which the seed owns. `0805 555 xxxx`
 is free and on the platform's prefix allow-list.
 
-> **Going live needs an adapter written.** `SMS_PROVIDER` also accepts `termii`
-> and `africastalking`, but both are placeholders that throw
-> `SmsNotConfiguredError` — the interface is there and the implementation is
-> Stage 4.7. Nothing else has to change when one lands: every caller goes
-> through `smsAdapter()`.
+> **Going live needs a provider account and a real delivery test.** Adapters for
+> Termii and Africa's Talking are implemented, but neither has been exercised
+> with Medilink's own credentials or sender ID. Staging and production refuse
+> to start when the selected provider's settings are incomplete, and the
+> console adapter is local-only. D04 in the completion plan chooses the primary
+> and fallback providers before either can be relied on.
 
 **What a fresh registration gets you:** an account with status `UNDER_REVIEW`,
 the practitioner role, and no profile. That is correct — see the onboarding

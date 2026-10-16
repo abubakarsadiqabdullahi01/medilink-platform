@@ -354,7 +354,9 @@ describe('the words the audit screen uses', () => {
 
 describe('the catalogue document', () => {
   it('is the one rendered from this data, so what compliance reads is what the code writes', () => {
-    expect(readFileSync(join(ROOT, 'docs/audit-catalogue.md'), 'utf8')).toBe(renderCatalogue());
+    const written = readFileSync(join(ROOT, 'docs/audit-catalogue.md'), 'utf8').replace(/\r\n/g, '\n');
+
+    expect(written).toBe(renderCatalogue());
   });
 
   it('lists every action and every security event by name', () => {

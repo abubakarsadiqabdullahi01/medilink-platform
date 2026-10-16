@@ -56,6 +56,9 @@ to sign in as to see each part of the product, and what each part is there to
 demonstrate. `docs/testing-by-role.md` is the checklist version — what to do as
 each role and what you should see — including where to read the one-time codes
 during registration, since local development has no SMS gateway.
+[docs/test-and-demo-access.md](docs/test-and-demo-access.md) is the environment
+boundary: which synthetic credentials belong to demo, performance and tests,
+and the checks that keep them out of staging and production.
 
 | Service                              | URL                                                |
 | ------------------------------------ | -------------------------------------------------- |
@@ -83,6 +86,8 @@ pnpm verify            # lint, typecheck, unit tests — run before every push
 pnpm test:integration  # one suite per module, against a real database
 pnpm test:e2e          # Playwright journeys through all three consoles; needs web + worker
 pnpm db:updown         # migrate down and up again on an empty database
+BUILD_IMAGE=true IMAGE=medilink:smoke sh scripts/smoke-production-image.sh
+                       # disposable DB: migrate + seed + production web + worker + one scheduled job
 ```
 
 `pnpm test:integration` creates and migrates `medilink_test`, separate from the

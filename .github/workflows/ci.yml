@@ -119,6 +119,8 @@ jobs:
           docker run --rm --entrypoint test medilink:ci -d prisma/migrations
       - name: it runs as an unprivileged user
         run: test "$(docker run --rm --entrypoint id medilink:ci -u)" != "0"
+      - name: start the production web, worker and a scheduled job
+        run: sh scripts/smoke-production-image.sh
 
   security:
     name: Dependency and secret scanning

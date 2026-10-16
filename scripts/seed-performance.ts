@@ -29,7 +29,7 @@
  * the API against it.
  */
 import { prisma } from '../src/lib/db';
-import { DEMO_PASSWORD, demoPasswordHash, syncRoles } from './support/demo';
+import { assertLocal, DEMO_PASSWORD, demoPasswordHash, syncRoles } from './support/demo';
 
 export const VOLUME = {
   facilities: 100,
@@ -52,6 +52,7 @@ async function run(label: string, sql: string, ...params: unknown[]) {
 }
 
 async function main() {
+  assertLocal('seed-performance.ts');
   const [row] = await prisma.$queryRaw<{ name: string }[]>`SELECT current_database() AS name`;
   const name = row?.name ?? '';
   if (!name.endsWith('_perf')) {
@@ -63,7 +64,7 @@ async function main() {
   await prisma.$executeRawUnsafe(
     `TRUNCATE billing.invoice_lines, billing.invoices, matching.assignments,
        service_requests.service_requests, audit.audit_log, facilities.facilities,
-       identity.user_roles, identity.sessions, identity.users CASCADE`,
+       identity.user_roles, identity.sessions, identity.users, practitioners.practitioner_profiles CASCADE`,
   );
 
   const hash = await demoPasswordHash();
@@ -97,6 +98,14 @@ async function main() {
     'a practitioner who can sign in',
     `UPDATE identity.users SET password_hash = $1 WHERE id = md5('perf-user-1')::uuid`,
     hash,
+  );
+
+  await run(
+    'a profile for that practitioner',
+    `INSERT INTO practitioners.practitioner_profiles
+       (id, user_id, professional_category_id, years_of_experience, submitted_for_review_at, created_at, updated_at)
+     SELECT gen_random_uuid(), md5('perf-user-1')::uuid, (SELECT id FROM config.professional_categories ORDER BY id LIMIT 1),
+            6, now() - interval '30 days', now() - interval '60 days', now()`,
   );
 
   await run(

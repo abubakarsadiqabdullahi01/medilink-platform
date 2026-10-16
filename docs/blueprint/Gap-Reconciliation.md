@@ -6,7 +6,7 @@ The Blueprint’s gap register holds **410 gaps**: 119 P0, 225 P1, 66 P2. Since 
 
 ## How each mark was made
 
-- **P0 (119 gaps).** From [Phase0-progress.md](Phase0-progress.md), which records for each fix what changed, the commit and how it was shown to work. The counts there (87 fixed, 18 in part, 14 not done) were re-derived from its tables against the Blueprint’s P0 list and agree exactly; every P0 identifier is accounted for and none is listed that is not in the register.
+- **P0 (119 gaps).** From [Phase0-progress.md](Phase0-progress.md), which records for each fix what changed, the commit and how it was shown to work. Its original counts (87 fixed, 18 in part, 14 not done) were re-derived from its tables against the Blueprint’s P0 list and agree exactly; every P0 identifier is accounted for and none is listed that is not in the register. The v1.2 operational validation based on `71b5901` then proved `PLT-01`, moving one partial gap to closed.
 - **P1 and P2 (291 gaps).** Phase 0 aimed at the P0s, so these were not tracked as they went. Each was judged afterwards by reading the current code against the gap’s description and the evidence the Module Reference cites (`file:line` at `5c199c1`), checking what changed in those files since, and searching for the behaviour where the cited files were untouched. Six reviewers each took an area; each mark that moved a gap to closed was checked a second time against the code. The reviewers were told to mark a gap open when they could not show it closed.
 
 | Mark | Meaning |
@@ -21,10 +21,10 @@ The Blueprint’s gap register holds **410 gaps**: 119 P0, 225 P1, 66 P2. Since 
 
 | Priority | Total | Closed | Partial | Open | Not yet reviewed |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| P0 | 119 | 87 | 18 | 14 | 0 |
+| P0 | 119 | 88 | 17 | 14 | 0 |
 | P1 | 225 | 16 | 61 | 148 | 0 |
 | P2 | 66 | 1 | 7 | 58 | 0 |
-| **All** | **410** | **104** | **86** | **220** | **0** |
+| **All** | **410** | **105** | **85** | **220** | **0** |
 
 By area:
 
@@ -49,7 +49,7 @@ By area:
 | Audit and compliance (`AUD`) | 5 | 9 | 5 | 19 | 4 | 7 | 8 |
 | Suggestions (`SUG`) | 0 | 2 | 6 | 8 | 2 | 1 | 5 |
 | Reference data (`CFG`) | 4 | 8 | 3 | 15 | 0 | 6 | 9 |
-| Platform and operations (`PLT`) | 5 | 11 | 5 | 21 | 1 | 8 | 12 |
+| Platform and operations (`PLT`) | 5 | 11 | 5 | 21 | 2 | 7 | 12 |
 | Practitioner console (`UXP`) | 4 | 7 | 2 | 13 | 3 | 3 | 7 |
 | Facility console (`UXF`) | 7 | 9 | 0 | 16 | 8 | 1 | 7 |
 | Operations console (`UXO`) | 4 | 10 | 0 | 14 | 4 | 3 | 7 |
@@ -68,6 +68,7 @@ Four commits on this branch after the merge changed the status of these gaps. Th
 | NOT-02 | P0 | PARTIAL | PARTIAL | `fd6faa8` |
 | UXW-02 | P0 | PARTIAL | PARTIAL | `fd6faa8` |
 | FAC-06 | P1 | PARTIAL | PARTIAL | `0040f00` |
+| PLT-01 | P0 | PARTIAL | CLOSED | v1.2 G0 production-image smoke based on `71b5901` |
 | SCH-01 | P1 | OPEN | PARTIAL | `064b1b7` |
 | ATT-04 | P1 | OPEN | PARTIAL | `ae317e4` |
 | ATT-05 | P1 | OPEN | PARTIAL | `c5959a2` |
@@ -495,7 +496,7 @@ Gap text is shortened; the full text and the evidence at `5c199c1` are in the Bl
 
 | ID | Pri | Mark | Gap | Evidence and what remains |
 | --- | --- | --- | --- | --- |
-| PLT-01 | P0 | PARTIAL | The production image has no src/ folder, so pnpm worker and pnpm db:seed (which import from src/) cannot run from it. Nothing runs migrations when… | Not done: **The image has not been built here** — there is no Docker daemon in this environment. The worker was started from a scratch directory holding exactly the runner's files… |
+| PLT-01 | P0 | CLOSED | The production image lacked `src/`, so the worker and seed could not run from it, and migrations were not wired for deployment. | The runner now contains `src/`, migrations, seed and worker dependencies and runs unprivileged. `scripts/smoke-production-image.sh` built and started the image against a disposable PostgreSQL database, applied all 23 migrations, seeded 14 scheduled jobs, served a healthy web process and proved the image's worker completed `retention.purge_sweep`; CI runs the same isolated proof. Deployment remains `PLT-02`, not this gap. |
 | PLT-02 | P0 | OPEN | Nothing deploys. There is no deploy workflow and no staging or production definition, and CI never builds the image, which is how PLT-01 went… | Needs something from outside engineering: An environment |
 | PLT-03 | P0 | CLOSED | Stranded outbox events are never reclaimed. A worker killed after claiming leaves up to 20 events in PROCESSING for ever; the claim query only looks… | `434d1ea` |
 | PLT-04 | P0 | PARTIAL | No alerts of any kind and no way to see trouble: no view, alert or replay for dead letters; no alert on a sweep's failure count; no worker heartbeat;… | Not done: **Nothing pages anybody.** There is no alert channel or external monitor configured, only the endpoint to point one at. |

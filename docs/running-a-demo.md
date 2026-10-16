@@ -55,3 +55,9 @@ its permission; see `tests/integration/dashboard-summary.test.ts`.
 The session is also kept on screen through a failed background refresh. Only a
 401 (really signed out) sends somebody to the login page; a slow or failed
 response shows "Could not reach Medilink" with a retry, instead of bouncing them.
+
+How the system behaves when it is large, and the budgets and scripts that check it: [performance.md](performance.md).
+
+The accounts in the demonstration are synthetic and local-only. Their intended
+roles, public demo password and the checks that keep them out of real
+environments are recorded in [test-and-demo-access.md](test-and-demo-access.md).

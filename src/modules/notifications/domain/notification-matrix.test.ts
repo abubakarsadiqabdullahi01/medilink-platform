@@ -23,7 +23,7 @@ import {
  */
 
 const ROOT = join(__dirname, '../../../..');
-const read = (path: string) => readFileSync(join(ROOT, path), 'utf8');
+const read = (path: string) => readFileSync(join(ROOT, path), 'utf8').replace(/\r\n/g, '\n');
 const stripComments = (source: string) =>
   source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 
@@ -83,6 +83,11 @@ function published(): Set<string> {
   return found;
 }
 
+// Walking a Windows bind mount is comparatively expensive. Discover the live
+// events once for this file instead of repeating the same full source scan in
+// two tests.
+const publishedEvents = published();
+
 const eventNames = Object.keys(EVENTS) as (keyof typeof EVENTS)[];
 const kindsOf = (event: string): string[] => {
   const coverage = EVENT_COVERAGE[event as keyof typeof EVENTS];
@@ -116,7 +121,7 @@ describe('every domain event', () => {
   });
 
   it('that is published and has no handler is stated as silent, with its reason', () => {
-    for (const name of published()) {
+    for (const name of publishedEvents) {
       const coverage = EVENT_COVERAGE[name as keyof typeof EVENTS];
       expect(coverage, `${name} is published`).toBeDefined();
       if (!registered.has(name)) {
@@ -126,9 +131,8 @@ describe('every domain event', () => {
   });
 
   it('that no code publishes is marked as such rather than listed as a message', () => {
-    const live = published();
     for (const name of eventNames) {
-      if (!live.has(name)) {
+      if (!publishedEvents.has(name)) {
         const coverage = EVENT_COVERAGE[name];
         expect('notPublished' in coverage && coverage.notPublished === true, `${name} is never published`).toBe(true);
       }

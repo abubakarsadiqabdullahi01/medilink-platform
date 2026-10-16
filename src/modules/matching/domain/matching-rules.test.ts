@@ -40,7 +40,7 @@ const pointsOf = (candidate: CandidateInput, factor: keyof typeof WEIGHTS) =>
 
 describe('the page', () => {
   it('is the one the code renders, so neither can change without the other', () => {
-    const onDisk = readFileSync(join(ROOT, 'docs/matching-rules.md'), 'utf8');
+    const onDisk = readFileSync(join(ROOT, 'docs/matching-rules.md'), 'utf8').replace(/\r\n/g, '\n');
     expect(onDisk).toBe(renderMatchingRules());
   });
 
@@ -294,7 +294,7 @@ describe('what the page says about when a match runs', () => {
   it('is only when somebody asks: the one place that calls the match is its route', () => {
     const callers = sources(join(ROOT, 'src'))
       .filter((path) => /\brunMatch\(/.test(readFileSync(path, 'utf8')))
-      .map((path) => path.slice(ROOT.length + 1))
+      .map((path) => path.slice(ROOT.length + 1).replaceAll('\\', '/'))
       // The definition itself.
       .filter((path) => path !== 'src/modules/matching/application/match.ts');
     expect(callers).toEqual(['src/app/api/v1/service-requests/[id]/match/route.ts']);

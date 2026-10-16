@@ -61,7 +61,11 @@ COPY --from=build /app/prisma ./prisma
 COPY --from=build /app/src ./src
 COPY --from=build /app/scripts/docker-entrypoint.sh ./scripts/docker-entrypoint.sh
 COPY --from=build /app/scripts/create-first-administrator.ts ./scripts/create-first-administrator.ts
-RUN chmod +x ./scripts/docker-entrypoint.sh
+# A Windows checkout may present shell scripts as CRLF even though the runner
+# is Linux. Normalise the one the kernel executes; otherwise it reports the
+# existing file as "not found" because the shebang names `/bin/sh\r`.
+RUN sed -i 's/\r$//' ./scripts/docker-entrypoint.sh \
+    && chmod +x ./scripts/docker-entrypoint.sh
 USER app
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \

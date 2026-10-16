@@ -113,7 +113,7 @@ describe('the data inventory', () => {
 
 describe('the inventory document', () => {
   it('is the one rendered from this data, so counsel reads what the code does', () => {
-    const written = readFileSync(join(ROOT, 'docs/data-inventory.md'), 'utf8');
+    const written = readFileSync(join(ROOT, 'docs/data-inventory.md'), 'utf8').replace(/\r\n/g, '\n');
 
     expect(written).toBe(renderInventory());
   });

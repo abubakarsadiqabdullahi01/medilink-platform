@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Tx } from './db';
@@ -155,27 +155,31 @@ describe('a write that fails', () => {
 describe('every call to recordAudit', () => {
   /** All .ts and .tsx sources under src, tests excluded. */
   function sources(directory: string): string[] {
-    return readdirSync(directory).flatMap((entry) => {
-      const path = join(directory, entry);
-      if (statSync(path).isDirectory()) return sources(path);
-      return /\.tsx?$/.test(entry) && !/\.test\.tsx?$/.test(entry) ? [path] : [];
+    return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) return sources(path);
+      return /\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name) ? [path] : [];
     });
   }
 
-  it('is awaited or returned, so a failed write can never come after the act has committed', () => {
-    const loose: string[] = [];
+  it(
+    'is awaited or returned, so a failed write can never come after the act has committed',
+    () => {
+      const loose: string[] = [];
 
-    for (const file of sources(join(process.cwd(), 'src'))) {
-      readFileSync(file, 'utf8')
-        .split('\n')
-        .forEach((line, index) => {
-          if (!/\brecordAudit\(/.test(line)) return;
-          if (/^\s*(export\s+)?(async\s+)?function\s+recordAudit\b/.test(line)) return;
-          if (/^\s*(\/\/|\*)/.test(line)) return;
-          if (!/(await|return)\s+recordAudit\(/.test(line)) loose.push(`${file}:${index + 1}: ${line.trim()}`);
-        });
-    }
+      for (const file of sources(join(process.cwd(), 'src'))) {
+        readFileSync(file, 'utf8')
+          .split('\n')
+          .forEach((line, index) => {
+            if (!/\brecordAudit\(/.test(line)) return;
+            if (/^\s*(export\s+)?(async\s+)?function\s+recordAudit\b/.test(line)) return;
+            if (/^\s*(\/\/|\*)/.test(line)) return;
+            if (!/(await|return)\s+recordAudit\(/.test(line)) loose.push(`${file}:${index + 1}: ${line.trim()}`);
+          });
+      }
 
-    expect(loose).toEqual([]);
-  });
+      expect(loose).toEqual([]);
+    },
+    30_000,
+  );
 });

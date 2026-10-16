@@ -1,15 +1,16 @@
-# Medilink Module Completion Plan v1.1
+# Medilink Module Completion Plan v1.2
 
 **Document type:** implementation and sign-off plan  
 **Status:** working source of truth for delivery  
-**Prepared:** 14 October 2026 (v1.0); re-baselined the same day (v1.1)  
-**Application baseline:** `main` at `9a93861` (v1.0 was written against `6a2ce43`)  
+**Prepared:** 14 October 2026 (v1.0); operational validation added 16 October 2026 (v1.2)
+**Application baseline:** module reconciliation at `9a93861`; branch rebased on `main` at `1fb401a`, with local G0 operational drills recorded at `71b5901`
 **Product scope:** Gombe pilot first; expansion only after the pilot gates pass
 
 | Version | What changed |
 | --- | --- |
 | v1.0 | The plan as first written, against `main` at `6a2ce43`. |
 | v1.1 | Re-baselined to `9a93861`, which carries the Phase 0 work (87 of the 119 P0 gaps fixed, 18 fixed in part, 14 not done). Section 5 lists what that closed; Section 7 carries an evidence column; task marks in Sections 8 and 9 say what is done, partly done or open; G0 in Section 12 records the evidence. **No module status was promoted**: promotion needs the sign-offs in Section 3, and none has been given. The full gap-by-gap reconciliation of all 410 gaps is in [Gap-Reconciliation.md](Gap-Reconciliation.md): **104 closed, 86 partly closed, 220 open** (P0: 87, 18 and 14; P1: 16, 61 and 148; P2: 1, 7 and 58; the P1 changes after `9a93861` are listed in that file). The P1 and P2 marks are one reading of the code and were not tested. |
+| v1.2 | Rebased on `main` at `1fb401a` after recording the local G0 operational drills at `71b5901`: the production runner migrated and seeded a disposable database, served a healthy web process and ran a scheduled job through its worker; a local backup restored with all 66 tables identical; the synthetic test/demo boundary is documented; and production-volume read/browser budgets passed. `PLT-01` moves from partial to closed, making the register **105 closed, 85 partly closed, 220 open** (P0: 88, 17 and 14). X02 and every module remain unpromoted because no staging/production deployment or required owner sign-off exists. |
 
 ---
 
@@ -175,12 +176,12 @@ Pull request 1 merged 71 commits. Each fix was written test-first; the record of
 | Disputes and incidents | `DSP-03` notices, `DSP-04` facility screen, `INC-03` severe-incident alert, `INC-04` no patient identity | `56fe6ed`, `773e6ef`, `0421b43`, `c87f795` |
 | Notifications | `NOT-03`–`NOT-06`, `UXP-01` in-app inbox; `NOT-01`, `NOT-02`, `UXW-02` in part (adapters written, never run against a provider) | `a1c6576`, `bd278ee`, `bb6589a`, `7426f3a` |
 | Privacy | `AUD-01` erasure that deletes, `AUD-02` no personal data in the audit trail, `PRA-14` sanctions screen (mechanism; the lists are compliance’s); `AUD-04` in part | `a720baa`, `80a314e`, `7d40059` |
-| Platform | `PLT-03` stranded events reclaimed; `PLT-01`, `PLT-04` in part | `434d1ea` |
+| Platform | `PLT-01` production runner proven; `PLT-03` stranded events reclaimed; `PLT-04` in part | `434d1ea`; v1.2 G0 image smoke |
 | Readability | `UXA-01`, `UXA-02`, `UXA-03`, `UXA-04`, `UXA-06`, `UXA-08` | `6708bb6`, `3dfbfbb`, `7f83e8e` |
 
-**The register as a whole** (410 gaps, in [Gap-Reconciliation.md](Gap-Reconciliation.md)): 104 closed, 86 partly closed, 220 open. The P1 and P2 gaps (291) were not tracked during Phase 0 and were judged afterwards by reading the code; 209 of them are still open.
+**The register as a whole** (410 gaps, in [Gap-Reconciliation.md](Gap-Reconciliation.md)): 105 closed, 85 partly closed, 220 open. The P1 and P2 gaps (291) were not tracked during Phase 0 and were judged afterwards by reading the code; 206 of them are still open.
 
-**Not closed, and why.** Fourteen P0 gaps remain open and each needs something from outside engineering: `BIL-13` and `BIL-09` (the legal role, the provider, the fee and credit-note decisions), `AUD-05` (counsel and the regulator), `CRE-01`, `CRE-02`, `CFG-01`, `CFG-03`, `UXP-03`, `QAL-06` (the regulators’ requirements for each profession), `UXW-06` (a commercial statement), `INC-02` (a policy), `PLT-02`, `PLT-05`, `QAL-02` (an environment to deploy to, a restored backup, a staging site). Eighteen more are fixed in part.
+**Not closed, and why.** Fourteen P0 gaps remain open and each needs something from outside engineering: `BIL-13` and `BIL-09` (the legal role, the provider, the fee and credit-note decisions), `AUD-05` (counsel and the regulator), `CRE-01`, `CRE-02`, `CFG-01`, `CFG-03`, `UXP-03`, `QAL-06` (the regulators’ requirements for each profession), `UXW-06` (a commercial statement), `INC-02` (a policy), `PLT-02`, `PLT-05`, `QAL-02` (an environment to deploy to, a restored backup, a staging site). Seventeen more are fixed in part.
 
 ### 5.3 Baseline evidence on `9a93861`
 
@@ -199,7 +200,7 @@ GitGuardian’s pull-request check flagged one test fixture string and is not pa
 
 **What v1.0 recorded and is now resolved.** On 14 October, before the merge, the integration suite could not be rerun locally because the PostgreSQL credentials were rejected, so no status could be promoted. The suite now runs in CI against a PostgreSQL service container and passes. That removes the technical reason for caution; the reasons that remain are the missing sign-offs (Section 3) and the open decisions (Section 11).
 
-**Still not shown on `9a93861`.** The production image has never been started by anyone (CI builds it and checks its contents; there is no Docker daemon in the development environment). The scheduled jobs have not been run from the image. Nothing has run on a phone, behind a real proxy, with a real SMS provider or against a real bank. The `docker-compose.yml` change to MinIO has not been run with `docker compose up`.
+**Additional G0 evidence based on `71b5901`.** The production runner was built and started against a disposable PostgreSQL database: all 23 migrations and the reference seed ran, the web health route answered, and the worker completed `retention.purge_sweep`. CI now runs the same isolated script. The pulled Bitnami MinIO image was also started against the existing developer volume; a root-owned-volume compatibility fault was found and repaired with a repeatable permission initializer. Nothing has run on a physical phone, behind a real proxy, with a real SMS provider, against a real bank or in a staging/production environment.
 
 ---
 
@@ -728,17 +729,17 @@ The **Status** column is v1.0’s, unchanged: no module has been promoted, becau
 **Outcome:** the complete application, worker, database and providers can be deployed, observed, recovered and demonstrated predictably.
 
 - [x] `X02-01` Repair local PostgreSQL/test credentials and prove G0 from a clean database. *Proven in CI on a PostgreSQL service container, from an empty database (Section 5.3); the local credentials problem in v1.0 does not affect it.*
-- [ ] `X02-02` Run demonstrations from a production build; keep the development server separate. *`.env` sets `NODE_ENV=development`, which makes `next build` fail; unset it for builds (recorded in Phase0-progress.md).*
-- [~] `X02-03` Package and run the web process, worker and scheduled jobs in production. *The image carries the web process, the worker, `src/`, the migrations and the first-administrator command, runs unprivileged, and CI builds it and checks its contents. The image has not been started anywhere; scheduled jobs are registered by `pnpm db:seed` and have not been run from the image (`PLT-01` in part).*
+- [~] `X02-02` Run demonstrations from a production build; keep the development server separate. *`scripts/demo.ps1` keeps the production demo and development server modes separate, and the production build is exercised by browser and image smoke checks. The `demo.ps1 on/off` switch itself still needs one end-to-end rehearsal before a presentation.*
+- [~] `X02-03` Package and run the web process, worker and scheduled jobs in production. *The isolated runner smoke now migrates and seeds a disposable database, starts the web and worker from the production image, checks health and proves `retention.purge_sweep` completes; CI repeats it. No staging or production environment deploys the image yet (`PLT-01` closed; `PLT-02` open).*
 - [~] `X02-04` Add CI deployment gates, migrations, smoke tests and rollback. *CI runs lint, types, unit, migrations up/down/up with seed, image build, dependency and secret scan, integration and end-to-end. Nothing deploys and there is no rollback (`PLT-02`).*
 - [~] `X02-05` Add central structured logs, metrics, tracing and alerts for web, database, queue, provider and worker failure. *Health endpoint and screen only; nothing pages anybody (`PLT-04` in part).*
 - [~] `X02-06` Encrypt secrets and sensitive data appropriately; document rotation and emergency revocation. *Payout account numbers are sealed with AES-256-GCM under a key derived from `PAYOUT_ACCOUNT_KEY`; opening the whole number is audited. No rotation or revocation procedure is written.*
-- [ ] `X02-07` Automate backups and perform a timed restore exercise. *`scripts/backup-drill.sh` exists; no backup has been restored (`PLT-05`).*
+- [~] `X02-07` Automate backups and perform a timed restore exercise. *The local drill restored a 1,279,100-byte dump in 6 seconds, matched all 66 tables and confirmed all 23 migrations. Provider scheduling, object-storage recovery, RPO/RTO and a production-like exercise remain open (`PLT-05`).*
 - [ ] `X02-08` Define availability, recovery-time, recovery-point, latency and support targets.
-- [ ] `X02-09` Load-test matching, dashboards, offer concurrency, notification fan-out and settlement. *`scripts/load-test.ts`, `scripts/seed-performance.ts` and `scripts/page-budget.mjs` exist; no result is recorded.*
+- [~] `X02-09` Load-test matching, dashboards, offer concurrency, notification fan-out and settlement. *On production-volume synthetic data, all 15 read routes passed (worst normal p95 83 ms; worst dashboard p95 141 ms) and all 11 throttled browser pages passed on the repeat run. The first browser pass immediately after an image build had three facility navigations just over two seconds with no API call; matching writes, offer contention, notification fan-out and settlement are not yet load-tested.*
 - [ ] `X02-10` Maintain production, staging, test and demo separation; never use live personal data in demos. *No staging (`QAL-02`).*
 
-**G0 command evidence:** `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm test:integration`, production build, worker smoke test and `pnpm test:e2e`. All but the worker smoke test from the image have run green on `9a93861` (Section 12).
+**G0 command evidence:** `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm test:integration`, production build, production-image worker/scheduled-job smoke and `pnpm test:e2e`. Baseline CI was green; v1.2 adds the isolated image smoke, restore drill and recorded production-volume budgets. Branch CI must still pass after this change is pushed.
 
 ---
 
@@ -918,15 +919,15 @@ No engineer should guess an open regulatory, clinical or money decision. The tas
 
 ## G0 · Technical baseline
 
-Evidence is for `main` at `9a93861` (CI run 12; Section 5.3).
+Baseline suite evidence is from `main`; the v1.2 local operational drills are based on `71b5901`. The branch is rebased on `1fb401a` and must be confirmed by branch CI after push (Section 5.3).
 
 - [x] Fresh database can migrate and seed without manual repair. *CI: migrate up, down and up again, seed, row counts.*
-- [x] Lint, typecheck and unit tests pass. *1,004 unit tests.*
+- [x] Lint, typecheck and unit tests pass. *1,262 unit tests in 86 files on the v1.2 branch rebased at `1fb401a`.*
 - [x] Integration tests pass in isolation. *1,122 tests, 67 files, against a PostgreSQL service container; also run locally with no `.env`.*
 - [x] Production build succeeds. *The end-to-end job builds and starts it.*
-- [~] Worker and scheduled jobs start and process one event safely. *The worker runs in the end-to-end job and the journeys that wait on the outbox pass. The image has not been started, and the scheduled jobs have not been run from it.*
+- [x] Worker and scheduled jobs start and process one event safely. *The production runner smoke starts both processes and proves the worker completes `retention.purge_sweep` against a disposable migrated and seeded database; CI runs the same script.*
 - [x] Browser journeys pass against the production build. *56 journeys, desktop and mobile.*
-- [ ] Test and demo credentials are documented without using live data. *Not checked.*
+- [x] Test and demo credentials are documented without using live data. *`docs/test-and-demo-access.md` separates local demo, performance, integration, browser, staging and production identities and records the release checks.*
 
 ## G1 · Controlled Gombe pilot
 
@@ -1006,4 +1007,4 @@ Next review date:
 6. Keep all production activation behind reviewed feature flags until the relevant gate passes.
 7. After each pilot cohort, update decisions, metrics, incidents and module status before adding users.
 
-**The immediate next action (v1.1)** is to close what G0 still lacks (start the production image and run the scheduled jobs from it; document the test and demo credentials) and to obtain the decisions in Section 11, beginning with D01, D04 and D05, which unblock the most work. Engineering that needs no decision can proceed in the plan’s dependency order (X02 → M01/M16/M17 → M02/M03/M04/X01 → M05–M15 → X03–X06): message delivery receipts and failover, the replacement search from a missed check-in, the feedback loop, agenda views and facility licence expiry.
+**The immediate next action (v1.2)** is to obtain green branch CI for the completed local G0 evidence, then establish the external G1 operating environment: choose staging/deployment ownership (`PLT-02`, `QAL-02`), approve RTO/RPO and provider-backed backups (`PLT-05`), and obtain the decisions in Section 11 beginning with D01, D04 and D05. Engineering that needs no decision can proceed in dependency order (X02 → M01/M16/M17 → M02/M03/M04/X01 → M05–M15 → X03–X06): finish load tests for write/contention paths, configure real message monitoring, build the missed-check-in replacement policy once D05 is decided, and continue the feedback, agenda and facility-renewal work.
