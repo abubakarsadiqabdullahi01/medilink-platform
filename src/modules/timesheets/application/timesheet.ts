@@ -704,7 +704,16 @@ export interface BilledFigures {
   premiumKobo: number;
 }
 
-export type TimesheetWithBilling = TimesheetView & BilledFigures;
+/**
+ * What the facility said when it sent the hours back, for the practitioner to read on their
+ * sheet. Only while the sheet is `REJECTED`: the note on an approval is not a reason, and once
+ * the practitioner has sent the hours again the old reason is about figures that have changed.
+ */
+export interface RejectionNote {
+  rejectionReason: string | null;
+}
+
+export type TimesheetWithBilling = TimesheetView & BilledFigures & RejectionNote;
 
 export interface RevisionView {
   revision: number;
@@ -732,7 +741,7 @@ export async function timesheetsForAssignments(
 
   const records = await prisma.attendanceRecord.findMany({
     where: { assignmentId: { in: assignmentIds } },
-    select: { id: true, assignmentId: true, status: true },
+    select: { id: true, assignmentId: true, status: true, reviewNotes: true },
   });
   if (records.length === 0) return out;
 
@@ -766,6 +775,7 @@ export async function timesheetsForAssignments(
         attendanceStatus: record.status,
         billedKobo: priced?.totalKobo ?? timesheet.amountKobo,
         premiumKobo: priced?.premiumKobo ?? 0,
+        rejectionReason: record.status === 'REJECTED' ? record.reviewNotes : null,
       },
       revisions: revisions
         .filter((row) => row.timesheetId === timesheet.id)

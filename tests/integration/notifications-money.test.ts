@@ -163,7 +163,7 @@ describe('a decision on hours', () => {
     expect(sentTo(phone).map((m) => m.body).join(' ')).toMatch(/approved/i);
   });
 
-  it('tells the practitioner their hours were not approved, and why, so they know what to correct', async () => {
+  it('tells the practitioner their hours were not approved and sends them to the app for why', async () => {
     const { world, assignment, nurse } = await submitted();
     const phone = (await prisma.user.findUniqueOrThrow({ where: { id: nurse.id } })).phone;
 
@@ -178,16 +178,19 @@ describe('a decision on hours', () => {
 
     const body = sentTo(phone).map((m) => m.body).join(' ');
     expect(body).toMatch(/not approved/i);
-    expect(body).toContain('The break was not taken off');
+    expect(body).toMatch(/open medilink/i);
+    // What the facility typed is free text from a person at another organisation, about a
+    // person, and a text is read on a lock screen and kept by the carrier. It stays in the app.
+    expect(body).not.toContain('The break was not taken off');
+    expect(body).not.toContain('resubmit');
   });
 
-  it('keeps a long reason to a length a text can carry', async () => {
+  it('is the same text however long the reason, so a long note cannot become more messages', async () => {
     const { world, assignment, nurse } = await submitted();
     const phone = (await prisma.user.findUniqueOrThrow({ where: { id: nurse.id } })).phone;
     // The world's shift runs eight hours from the moment the test starts, so after four in the
     // afternoon in Lagos it crosses midnight and the text names a second date: thirteen more
-    // characters, which is a third segment. A window inside one day makes the count the same at
-    // any hour the suite is run.
+    // characters. A window inside one day makes the count the same at any hour the suite is run.
     await prisma.assignment.update({
       where: { id: assignment.id },
       data: { startsAt: new Date('2026-10-21T07:00:00.000Z'), endsAt: new Date('2026-10-21T15:00:00.000Z') },
@@ -203,16 +206,12 @@ describe('a decision on hours', () => {
     await deliver();
 
     const body = sentTo(phone)[0]!.body;
-    expect(body.length).toBeLessThan(320);
-    // The cut used to be marked with the ellipsis character, one place outside the alphabet that
-    // made this UCS-2 and five segments. In the plain alphabet it is two.
-    expect(smsEncoding(body)).toMatchObject({ encoding: 'GSM-7', segments: 2 });
-    // The reason is cut at 140 characters including the three full stops that mark the cut.
-    expect(body).toContain(`${'x'.repeat(137)}...`);
-    expect(body).not.toContain('x'.repeat(138));
+    expect(body).not.toMatch(/x{5}/);
+    expect(smsEncoding(body)).toMatchObject({ encoding: 'GSM-7' });
+    expect(smsEncoding(body).segments).toBeLessThanOrEqual(2);
   });
 
-  it('stays within three segments with a long hospital name and a long reason together', async () => {
+  it('stays within three segments with a long hospital name', async () => {
     const { world, assignment, nurse } = await submitted();
     await prisma.facility.update({
       where: { id: world.facilityId },
