@@ -3,6 +3,12 @@
 Implements module 7 and steps 6.3 and 6.4: who could work this shift, in
 order, and why.
 
+> **The rules as they stand are in [`matching-rules.md`](matching-rules.md)**,
+> generated from the engine and held to it by a test. This page records why the
+> engine was built the way it was; where a list below differs from that page
+> (this one was written before the level and supervision filters), that page is
+> right.
+
 ## The engine is pure
 
 `src/modules/matching/domain/engine.ts` takes everything it needs as
@@ -12,9 +18,8 @@ queries as it scores.
 
 Two phases, both recorded:
 
-**Hard filters**, each producing a named reason — `not_eligible`,
-`category_mismatch`, `specialty_mismatch`, `unavailable`, `blocked`,
-`already_assigned`, `travel_preference`. All of them are reported, not just
+**Hard filters**, each producing a named reason (nine, listed in
+[`matching-rules.md`](matching-rules.md)). All of them are reported, not just
 the first: an operations officer asking "why did nobody match?" wants the
 whole picture.
 
@@ -65,9 +70,9 @@ intermittently.
 **Cold start (6.4) scores neutral, at the midpoint.** No history is not
 evidence of unreliability, and not evidence of reliability either. A newcomer
 and a proven-average practitioner rank identically on that factor; a
-proven-good one still ranks above both. Nothing completes an assignment until
-Stage 7, so today every practitioner is in cold start — which makes the
-neutrality case the one that matters.
+proven-good one still ranks above both. (When this was written nothing
+completed an assignment, so everybody was in cold start; reliability now comes
+from decided shifts, as `matching-rules.md` describes.)
 
 **Cross-module reads go through application functions**, never joins:
 `getServiceRequest`, `listMatchCandidates`, `availabilityForWindow`. That rule
@@ -87,8 +92,6 @@ to reading a request.
 ## Not in this stage
 
 - **Inviting anyone.** A run ranks and explains; 6.5 is what acts on it.
-- **Reliability that means anything.** It needs completed assignments, which
-  need Stage 7 attendance.
 - **Paging the candidate pool.** Every profile in the requested category is
   evaluated. The pilot is fifty practitioners; this needs paging well before
   it is thousands, and `listMatchCandidates` says so.
