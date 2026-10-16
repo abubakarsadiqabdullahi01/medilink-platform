@@ -177,11 +177,6 @@ export const AUDIT_CATALOGUE: Record<string, AuditAction> = {
     entity: 'credentials.credential_submissions',
     what: 'A reviewer asked the practitioner for more about a credential, with who asked and what was asked.',
   },
-  'credential.reference_masked': {
-    category: 'verification',
-    entity: 'credentials.credential_submissions',
-    what: 'The reference number on a credential was cut to its last digits once identity had been recorded.',
-  },
   'credential.expired': {
     category: 'verification',
     entity: 'credentials.credential_submissions',

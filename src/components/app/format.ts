@@ -218,7 +218,6 @@ export const ACTION_LABELS: Record<string, string> = {
   'credential.document_upload_requested': 'Credential upload started',
   'credential.expired': 'Credential expired',
   'credential.info_requested': 'More information requested',
-  'credential.reference_masked': 'Credential reference shortened',
   'credential.rejected': 'Credential rejected',
   'credential.resupplied': 'Credential resupplied',
   'credential.submitted': 'Credential submitted',
