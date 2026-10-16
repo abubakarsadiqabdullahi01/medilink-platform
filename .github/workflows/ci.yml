@@ -188,10 +188,18 @@ jobs:
           docker run -d --name minio -p 9000:9000 \
             -e MINIO_ROOT_USER=medilink -e MINIO_ROOT_PASSWORD=medilink-secret \
             bitnamilegacy/minio:2025.7.23-debian-12-r5
-          for i in $(seq 1 30); do curl -sf http://localhost:9000/minio/health/live && break; sleep 2; done
-          docker run --rm --network host --entrypoint sh bitnamilegacy/minio-client:2025.7.21-debian-12-r3 -c \
-            "mc alias set local http://localhost:9000 medilink medilink-secret && mc mb --ignore-existing local/medilink-documents" \
-            || { docker logs minio; exit 1; }
+          # The health endpoint can answer before the server takes requests, and the Bitnami
+          # entrypoint can restart it once it is configured, so one attempt at the bucket step
+          # failed this job twice with "connection reset by peer". Try it until MinIO accepts it.
+          for i in $(seq 1 30); do
+            if docker run --rm --network host --entrypoint sh bitnamilegacy/minio-client:2025.7.21-debian-12-r3 -c \
+              "mc alias set local http://localhost:9000 medilink medilink-secret && mc mb --ignore-existing local/medilink-documents"; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs minio
+          exit 1
       - run: pnpm prisma migrate deploy && pnpm db:seed
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm build
