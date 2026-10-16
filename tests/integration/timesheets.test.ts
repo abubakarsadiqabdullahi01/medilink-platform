@@ -51,6 +51,7 @@ import { ROUTES } from '@/modules/timesheets/routes';
 import { runOnce } from '@/worker/processor';
 import { handlers } from '@/worker/handlers';
 import { POST as reviewRoute } from '@/app/api/v1/assignments/[id]/timesheet/review/route';
+import { GET as listAssignmentsRoute } from '@/app/api/v1/assignments/route';
 import { issueSession } from '@/modules/auth/application/session-service';
 import { clearCookies } from './support/cookie-jar';
 import {
@@ -1297,5 +1298,78 @@ describe('telling the practitioner their sheet was worked out again', () => {
 
     expect(await recalculatedMessages(world.reviewerId)).toHaveLength(0);
     expect(await recalculatedMessages(world.schedulerId)).toHaveLength(0);
+  });
+});
+
+describe('the reason a facility gave for sending hours back, read where the practitioner reads their sheet', () => {
+  const REASON = 'The break was an hour, not nought; the ward log shows it.';
+
+  async function theirSheets(practitionerId: string) {
+    await grant({
+      userId: practitionerId,
+      roleKey: 'practitioner',
+      permissions: ['service_request.read'],
+      scopeType: 'SELF',
+      scopeId: practitionerId,
+    });
+    await issueSession({ userId: practitionerId });
+    const response = await listAssignmentsRoute(
+      new Request('http://localhost/api/v1/assignments?scopeType=SELF&include=timesheet'),
+    );
+    expect(response.status).toBe(200);
+    return (
+      (await response.json()) as {
+        assignments: { id: string; sheet: { timesheet: { attendanceStatus: string; rejectionReason: string | null } } | null }[];
+      }
+    ).assignments;
+  }
+
+  it('comes with the sheet on the list the page loads', async () => {
+    const world = await buildWorld();
+    await submitTimesheet({ assignmentId: world.assignmentId, userId: world.practitionerId });
+    await reviewTimesheet({
+      assignmentId: world.assignmentId,
+      facilityId: world.facilityId,
+      actorId: world.reviewerId,
+      decision: 'reject',
+      reviewNotes: REASON,
+    });
+
+    const row = (await theirSheets(world.practitionerId)).find((candidate) => candidate.id === world.assignmentId);
+
+    expect(row?.sheet?.timesheet).toMatchObject({ attendanceStatus: 'REJECTED', rejectionReason: REASON });
+  });
+
+  it('is gone once they have sent the sheet again, so an old reason is not read against new hours', async () => {
+    const world = await buildWorld();
+    await submitTimesheet({ assignmentId: world.assignmentId, userId: world.practitionerId });
+    await reviewTimesheet({
+      assignmentId: world.assignmentId,
+      facilityId: world.facilityId,
+      actorId: world.reviewerId,
+      decision: 'reject',
+      reviewNotes: REASON,
+    });
+    await submitTimesheet({ assignmentId: world.assignmentId, userId: world.practitionerId });
+
+    const row = (await theirSheets(world.practitionerId)).find((candidate) => candidate.id === world.assignmentId);
+
+    expect(row?.sheet?.timesheet).toMatchObject({ attendanceStatus: 'SUBMITTED', rejectionReason: null });
+  });
+
+  it('is not shown as a reason when the facility approved, whatever note came with it', async () => {
+    const world = await buildWorld();
+    await submitTimesheet({ assignmentId: world.assignmentId, userId: world.practitionerId });
+    await reviewTimesheet({
+      assignmentId: world.assignmentId,
+      facilityId: world.facilityId,
+      actorId: world.reviewerId,
+      decision: 'approve',
+      reviewNotes: 'Thank you, all in order.',
+    });
+
+    const row = (await theirSheets(world.practitionerId)).find((candidate) => candidate.id === world.assignmentId);
+
+    expect(row?.sheet?.timesheet).toMatchObject({ attendanceStatus: 'APPROVED', rejectionReason: null });
   });
 });

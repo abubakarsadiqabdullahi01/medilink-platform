@@ -22,6 +22,7 @@ import {
   recordProfessionalRegistration,
 } from '@/modules/practitioners/application/verification';
 import { screenPractitioner } from '@/modules/practitioners/application/screening';
+import { recordConsent } from '@/modules/audit-compliance/application/consent';
 import { clearCookies } from './support/cookie-jar';
 import {
   createCredentialType,
@@ -472,6 +473,140 @@ describe('what may be matched', () => {
     await callMatch(world.requestId, world.facilityId);
 
     expect(await prisma.matchRun.count()).toBe(0);
+  });
+});
+
+/**
+ * M07-03: what `docs/matching-rules.md` says about who is looked at and what rest counts.
+ *
+ * The engine's rules are held to the page by its own unit test. These are the facts the page states
+ * that the engine is handed rather than decides: who is in the pool, which assignments are added up
+ * as hours already committed, and which one is a conflict.
+ */
+describe('who is looked at, and what rest counts (M07-03)', () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const HOUR = 60 * 60 * 1000;
+
+  /** A shift the practitioner already holds, booked against a request of its own. */
+  async function holds(
+    world: World,
+    userId: string,
+    shift: { startsAt: Date; hours: number; status?: 'CONFIRMED' | 'CANCELLED' | 'COMPLETED' },
+  ) {
+    const endsAt = new Date(shift.startsAt.getTime() + shift.hours * HOUR);
+    const request = await createServiceRequest({
+      facilityId: world.facilityId,
+      professionalCategoryId: world.categoryId,
+      shiftType: 'DAY',
+      startsAt: shift.startsAt,
+      endsAt,
+      headcount: 1,
+      hourlyRateKobo: 500_000,
+      urgency: 'ROUTINE',
+      cancellationTerms: 'Either party may cancel up to 24 hours before the shift.',
+      actorId: world.schedulerId,
+    });
+    return prisma.assignment.create({
+      data: {
+        serviceRequestId: request.id,
+        userId,
+        facilityId: world.facilityId,
+        startsAt: shift.startsAt,
+        endsAt,
+        status: shift.status ?? 'CONFIRMED',
+        confirmedBy: world.schedulerId,
+      },
+    });
+  }
+
+  const restOf = (body: Record<string, unknown>) =>
+    (ranked(body)[0]!.factors as { factor: string; detail: string }[]).find((row) => row.factor === 'fatigue')!.detail;
+
+  it('adds up the hours of confirmed assignments that start in the seven days before the shift, each in full', async () => {
+    const world = await buildWorld();
+    const practitioner = await eligiblePractitioner(world);
+    // Eight, six and four hours, each starting inside the week before the shift, the last
+    // close to its far edge.
+    await holds(world, practitioner.id, { startsAt: new Date(SHIFT_START.getTime() - 3 * DAY), hours: 8 });
+    await holds(world, practitioner.id, { startsAt: new Date(SHIFT_START.getTime() - 1 * DAY), hours: 6 });
+    await holds(world, practitioner.id, { startsAt: new Date(SHIFT_START.getTime() - 6.5 * DAY), hours: 4 });
+    // None of these is in the week: one starts before it, one after the shift, one was cancelled.
+    await holds(world, practitioner.id, { startsAt: new Date(SHIFT_START.getTime() - 8 * DAY), hours: 10 });
+    await holds(world, practitioner.id, { startsAt: new Date(SHIFT_START.getTime() + 1 * DAY), hours: 5 });
+    await holds(world, practitioner.id, { startsAt: new Date(SHIFT_START.getTime() - 2 * DAY), hours: 12, status: 'CANCELLED' });
+    await issueSession({ userId: world.schedulerId });
+
+    const result = await callMatch(world.requestId, world.facilityId);
+
+    expect(restOf(result.body)).toBe('18 hours already committed this week');
+  });
+
+  it('does not count a shift already worked and approved, which is marked completed, as the page says', async () => {
+    const world = await buildWorld();
+    const practitioner = await eligiblePractitioner(world);
+    await holds(world, practitioner.id, { startsAt: new Date(SHIFT_START.getTime() - 3 * DAY), hours: 8 });
+    await holds(world, practitioner.id, { startsAt: new Date(SHIFT_START.getTime() - 2 * DAY), hours: 9, status: 'COMPLETED' });
+    await issueSession({ userId: world.schedulerId });
+
+    const result = await callMatch(world.requestId, world.facilityId);
+
+    // Nine hours worked and approved weigh nothing on the next ranking. If that is changed, the
+    // page says so in two places (rest, and what it does not do) and this test changes with them.
+    expect(restOf(result.body)).toBe('8 hours already committed this week');
+  });
+
+  it('excludes somebody holding a confirmed assignment that overlaps any part of the shift, and not for a cancelled one', async () => {
+    const world = await buildWorld();
+    const startsInside = await eligiblePractitioner(world);
+    const endsInside = await eligiblePractitioner(world);
+    const free = await eligiblePractitioner(world);
+    // One starts inside the shift and runs past its end; one starts before it and ends inside.
+    await holds(world, startsInside.id, { startsAt: new Date(SHIFT_START.getTime() + 2 * HOUR), hours: 10 });
+    await holds(world, endsInside.id, { startsAt: new Date(SHIFT_START.getTime() - 2 * HOUR), hours: 4 });
+    await holds(world, free.id, { startsAt: new Date(SHIFT_START.getTime() + 2 * HOUR), hours: 10, status: 'CANCELLED' });
+    await issueSession({ userId: world.schedulerId });
+
+    const result = await callMatch(world.requestId, world.facilityId);
+
+    expect(ranked(result.body).map((row) => row.userId)).toEqual([free.id]);
+    expect(excluded(result.body)).toEqual([{ reasons: ['already_assigned'] }, { reasons: ['already_assigned'] }]);
+  });
+
+  it('leaves out somebody who has withdrawn what matching rests on, as though they were not there', async () => {
+    const world = await buildWorld();
+    await eligiblePractitioner(world);
+    const withdrawn = await eligiblePractitioner(world);
+    await issueSession({ userId: world.schedulerId });
+    expect((await callMatch(world.requestId, world.facilityId)).body.consideredCount).toBe(2);
+
+    await recordConsent({
+      userId: withdrawn.id,
+      purpose: 'CREDENTIAL_SHARING',
+      granted: false,
+      note: 'I would rather not share my documents with hospitals for now.',
+      actorId: withdrawn.id,
+    });
+    await issueSession({ userId: world.schedulerId });
+    const result = await callMatch(world.requestId, world.facilityId);
+
+    // Not ranked, not listed as excluded and not counted among those considered.
+    expect(result.body.consideredCount).toBe(1);
+    expect(ranked(result.body)).toHaveLength(1);
+    expect(excluded(result.body)).toHaveLength(0);
+  });
+
+  it('does not look at anybody registered in another profession', async () => {
+    const world = await buildWorld();
+    await eligiblePractitioner(world);
+    const other = await createProfessionalCategory({ regulator: 'MDCN' });
+    const stranger = await createUser({ fullName: 'Practitioner Elsewhere' });
+    await createProfile({ userId: stranger.id, professionalCategoryId: other.id, yearsOfExperience: 9 });
+    await issueSession({ userId: world.schedulerId });
+
+    const result = await callMatch(world.requestId, world.facilityId);
+
+    expect(result.body.consideredCount).toBe(1);
+    expect(excluded(result.body)).toHaveLength(0);
   });
 });
 

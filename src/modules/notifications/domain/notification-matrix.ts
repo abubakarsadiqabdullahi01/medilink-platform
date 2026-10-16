@@ -156,7 +156,7 @@ export const MESSAGES: MessageKind[] = [
     to: PRACTITIONER,
     when: 'The facility sends their hours back.',
     once: 'Once per rejection.',
-    names: 'The facility’s name, the shift’s window and the first part of the reason the facility gave.',
+    names: 'The facility’s name and the shift’s window. Never the reason the facility gave: that is read on their sheet in the app.',
   },
   {
     kind: 'dispute.opened',

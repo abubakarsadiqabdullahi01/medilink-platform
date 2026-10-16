@@ -297,21 +297,14 @@ export async function notifyDisputeStage(
 }
 
 /**
- * What a text carries of a reason somebody wrote, so one long note cannot become six messages.
- * The cut is marked with three full stops and not the ellipsis character: that one character is
- * outside the GSM alphabet and turned the whole message into UCS-2, 301 places in five segments
- * where the same words in the plain alphabet are two.
- */
-const REASON_MAX = 140;
-function brief(text: string): string {
-  const flat = text.replace(/\s+/g, ' ').trim();
-  return flat.length > REASON_MAX ? `${flat.slice(0, REASON_MAX - 3)}...` : flat;
-}
-
-/**
- * The facility sent the hours back, told to the practitioner with the reason, which
- * is the part they need to act on. (Approval is `notifyTimesheetApproved` in
- * event-handlers.ts.)
+ * The facility sent the hours back, told to the practitioner so they know to act.
+ * (Approval is `notifyTimesheetApproved` in event-handlers.ts.)
+ *
+ * The reason is not in the text. It is what a person at the facility typed, about the
+ * practitioner and often about the ward, and a text sits on a lock screen and in the
+ * carrier's records. It is read on the practitioner's sheet in the app, which is where they
+ * correct the hours; the text says there is something to read there. The same rule keeps a
+ * dispute's reason out of its text.
  */
 export async function notifyTimesheetRejected(payload: Record<string, unknown>): Promise<void> {
   const assignmentId = String(payload.assignmentId ?? '');
@@ -325,7 +318,7 @@ export async function notifyTimesheetRejected(payload: Record<string, unknown>):
   const [facility, assignment, record] = await Promise.all([
     prisma.facility.findUnique({ where: { id: facilityId }, select: { name: true } }),
     prisma.assignment.findUnique({ where: { id: assignmentId }, select: { startsAt: true, endsAt: true } }),
-    prisma.attendanceRecord.findUnique({ where: { assignmentId }, select: { reviewedAt: true, reviewNotes: true } }),
+    prisma.attendanceRecord.findUnique({ where: { assignmentId }, select: { reviewedAt: true } }),
   ]);
   if (!facility || !assignment) {
     logger.warn('timesheet.rejected for a record that no longer exists', { assignmentId });
@@ -340,7 +333,7 @@ export async function notifyTimesheetRejected(payload: Record<string, unknown>):
     await notify({
       userId: practitionerId,
       kind: 'timesheet.rejected',
-      body: `Your hours for the shift at ${facility.name} (${when}) were not approved: ${brief(record?.reviewNotes ?? 'see the app')}. Open Medilink to correct and send them again. Medilink.`,
+      body: `Your hours for the shift at ${facility.name} (${when}) were not approved. Open Medilink to see why, correct them and send them again. Medilink.`,
       relatedType: 'matching.assignments',
       relatedId: assignmentId,
     }),

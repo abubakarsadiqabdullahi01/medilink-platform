@@ -50,6 +50,13 @@ export const EXPERIENCE_CAP_YEARS = 10;
 /** Hours already committed in the preceding week at which fatigue scores zero. */
 export const FATIGUE_CAP_HOURS = 48;
 
+/**
+ * How far before a shift's start an assignment still counts as hours already committed. The
+ * caller reads the assignments; this is the window it reads them over, kept here beside the cap
+ * so that what `docs/matching-rules.md` says about rest comes from one place.
+ */
+export const FATIGUE_WINDOW_HOURS = 7 * 24;
+
 /** Completed assignments before a reliability score is trusted (step 6.4). */
 export const COLD_START_ASSIGNMENTS = 5;
 

@@ -63,6 +63,8 @@ interface Timesheet {
   /** Allowances the facility's rate card adds on top of `amountKobo`. */
   premiumKobo?: number;
   revision: number;
+  /** What the facility said when it sent the hours back; null unless the sheet is rejected. */
+  rejectionReason?: string | null;
 }
 
 interface Revision {
@@ -198,6 +200,20 @@ export default function MyTimesheetsPage() {
                 </CardHeader>
 
                 <CardContent className="space-y-4">
+                  {/* The text message says only that hours were sent back; this is where the
+                      reason is read, next to the button that sends them again. */}
+                  {sheet.attendanceStatus === 'REJECTED' ? (
+                    <Alert variant="warning">
+                      <TriangleAlert />
+                      <AlertDescription>
+                        <strong className="font-medium">The facility sent these hours back.</strong>{' '}
+                        {sheet.rejectionReason
+                          ? `They said: ${sheet.rejectionReason}`
+                          : 'They did not say why. Check the hours, correct what is wrong and send them again.'}
+                      </AlertDescription>
+                    </Alert>
+                  ) : null}
+
                   <DetailGrid>
                     <Detail label="Worked">{formatMinutes(sheet.workedMinutes)}</Detail>
                     <Detail label="Break">{formatMinutes(sheet.breakMinutes)}</Detail>

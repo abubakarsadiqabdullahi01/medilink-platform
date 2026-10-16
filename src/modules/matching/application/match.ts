@@ -6,6 +6,7 @@ import { getFacility } from '@/modules/facilities/application/facility';
 import { listMatchCandidates } from '@/modules/practitioners/application/candidates';
 import { availabilityForWindowBatch } from '@/modules/availability/application/availability';
 import {
+  FATIGUE_WINDOW_HOURS,
   match,
   proximityTier,
   WEIGHTS,
@@ -31,9 +32,6 @@ import { AssignmentErrors, assignmentOutcomesFor } from './assignment';
  * thousand eight hundred queries. The engine is unchanged — it was never
  * the slow part.
  */
-
-/** Hours before a shift that count toward the fatigue factor. */
-const FATIGUE_WINDOW_HOURS = 7 * 24;
 
 /**
  * What a facility sees of a ranked candidate: enough to offer them the shift
