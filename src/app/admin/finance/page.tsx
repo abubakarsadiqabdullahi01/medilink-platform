@@ -28,6 +28,7 @@ import {
 } from '@/components/ui/table';
 import { PageHeader } from '@/components/app/page-shell';
 import { formatNaira } from '@/components/app/format';
+import { ReconciliationCard } from './reconciliation-card';
 
 const INVOICE_STATUSES = ['DRAFT', 'ISSUED', 'PAID'] as const;
 const PAGE_SIZE = 20;
@@ -203,6 +204,8 @@ export default function FinancePage() {
           );
         })}
       </div>
+
+      <ReconciliationCard />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 [&>*]:min-w-0">
         <Card>

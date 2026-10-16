@@ -18,6 +18,7 @@ import {
   warnExpiringFacilityLicences,
 } from '../modules/notifications/application/licence-sweeps';
 import { runAuditDigestSweep } from '../modules/audit-compliance/application/audit-digest';
+import { runReconciliationSweep } from '../modules/billing-settlement/application/reconciliation';
 import type { JobHandler } from './scheduler';
 
 /**
@@ -118,6 +119,12 @@ export const JOB_DEFINITIONS: JobDefinition[] = [
     intervalSeconds: DAILY,
   },
   {
+    key: 'billing.reconciliation_sweep',
+    description:
+      'Add the money up: every transaction in the ledger sums to zero, every invoice and every payout agrees with the entries made for it, cash and what a practitioner has been paid never go the wrong side of nothing, and no released payout has been left without an answer. Daily. Fails, naming the kinds of break, when anything does not add up; the list is on the Finance page and clears itself once the cause is put right. Changes nothing.',
+    intervalSeconds: DAILY,
+  },
+  {
     key: 'retention.purge_sweep',
     description:
       'Delete what the data inventory says is not worth keeping: one-time codes, sessions that have ended, the sign-in log, queue entries already delivered and uploads nobody finished, each on its own period. Daily. Touches nothing else: the rest is kept, or removed by an erasure request. Writes one audit row with counts on a run that deleted anything.',
@@ -128,6 +135,9 @@ export const JOB_DEFINITIONS: JobDefinition[] = [
 export const jobs: Record<string, JobHandler> = {
   'audit.digest_sweep': async () => {
     await runAuditDigestSweep();
+  },
+  'billing.reconciliation_sweep': async () => {
+    await runReconciliationSweep();
   },
   'retention.purge_sweep': async () => {
     await purgeExpiredData();
