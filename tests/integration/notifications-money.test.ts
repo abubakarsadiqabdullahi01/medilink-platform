@@ -4,6 +4,7 @@ const sms = vi.hoisted(() => ({ send: vi.fn() }));
 vi.mock('@/lib/sms', async () => (await import('./support/sms-double')).gatewayDouble(sms.send));
 
 import { prisma } from '@/lib/db';
+import { smsEncoding } from '@/lib/sms-text';
 import { EVENTS } from '@/lib/events';
 import { publishEvent } from '@/lib/outbox';
 import {
@@ -193,7 +194,34 @@ describe('a decision on hours', () => {
     });
     await deliver();
 
-    expect(sentTo(phone)[0]!.body.length).toBeLessThan(320);
+    const body = sentTo(phone)[0]!.body;
+    expect(body.length).toBeLessThan(320);
+    // The cut used to be marked with the ellipsis character, one place outside the alphabet that
+    // made this UCS-2 and five segments. In the plain alphabet it is two.
+    expect(smsEncoding(body)).toMatchObject({ encoding: 'GSM-7', segments: 2 });
+    // The reason is cut at 140 characters including the three full stops that mark the cut.
+    expect(body).toContain(`${'x'.repeat(137)}...`);
+    expect(body).not.toContain('x'.repeat(138));
+  });
+
+  it('stays within three segments with a long hospital name and a long reason together', async () => {
+    const { world, assignment, nurse } = await submitted();
+    await prisma.facility.update({
+      where: { id: world.facilityId },
+      data: { name: 'The Federal Medical Centre and Teaching Hospital of the Niger Delta Region, Specialist Annex Block' },
+    });
+    const phone = (await prisma.user.findUniqueOrThrow({ where: { id: nurse.id } })).phone;
+
+    await reviewTimesheet({
+      assignmentId: assignment.id,
+      facilityId: world.facilityId,
+      actorId: world.schedulerId,
+      decision: 'reject',
+      reviewNotes: 'The break was not taken off. '.repeat(30),
+    });
+    await deliver();
+
+    expect(smsEncoding(sentTo(phone)[0]!.body).segments).toBeLessThanOrEqual(3);
   });
 });
 

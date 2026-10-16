@@ -1,4 +1,5 @@
 import { EVENTS } from '@/lib/events';
+import { MAX_SEGMENTS } from './sms-hygiene';
 
 /**
  * Who is told what, by which event, over which channel (M16-02). Pure, no database.
@@ -416,6 +417,7 @@ export function renderMatrix(): string {
     '- **A text that does not go is retried.** An event’s handler throws when a text failed, after trying everybody, so the outbox retries the event with backoff and parks it as a dead letter an operator can see. A scheduled job fails the same way and its next run reaches whoever was missed. A second gateway takes over when the first fails, if one is configured.',
     '- **Once is once.** Each message is checked against what the person has already been sent before it goes, so a redelivered event or a second run of a job sends nothing more.',
     '- **Names, not arguments.** Every text goes to a phone anybody may pick up, so none carries a patient, a clinical summary, a person’s full name where initials do, or what was argued in a dispute.',
+    `- **Plain characters, at most ${MAX_SEGMENTS} segments.** A text in the GSM alphabet is 160 characters to a segment; one character outside it (a curly apostrophe, an ellipsis, the naira sign) makes the whole text UCS-2 at 70, which more than doubles what it costs. The templates write "NGN" and "...", and punctuation typed on a phone, in a hospital's name for instance, is made plain at the one place every text is sent. A letter a name needs, such as Ọ or ṣ, is kept as it is and costs more. A text of more than ${MAX_SEGMENTS} segments, a time without WAT, an email address, a phone number or a run of nine digits fails a test (\`sms-hygiene.ts\`), and the integration tests hold every text they cause to be stored to it.`,
     '- **Sign-in and reset codes are not in this table.** They are sent by the request that asks for them, by SMS only, and are not kept in the inbox.',
     '',
     '## Messages',

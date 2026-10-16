@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/db';
 import { attemptSms } from '@/lib/sms';
 import { maskPhone } from '@/lib/phone';
+import { toSmsText } from '@/lib/sms-text';
 import { logger } from '@/lib/logger';
 
 /**
@@ -55,11 +56,14 @@ export async function notify(input: NotifyParams): Promise<NotifyOutcome> {
     return { sent: true, reason: null };
   }
 
-  const attempt = await attemptSms({ to: user.phone, body: input.body });
+  // The same characters go to the phone and into the row, so what support reads is what arrived. A
+  // name typed on a phone has a curly apostrophe, which would double the cost of the message.
+  const body = toSmsText(input.body);
+  const attempt = await attemptSms({ to: user.phone, body });
   // Which gateway took it, under what id, and whether a second one had to (M16-05). Nothing for a
   // message nobody took: the reason says why.
   const fields = {
-    body: input.body,
+    body,
     sentAt: attempt.delivered ? new Date() : null,
     failureReason: attempt.delivered ? null : (attempt.reason ?? 'The SMS was not delivered.'),
     provider: attempt.delivered ? (attempt.result?.provider ?? null) : null,
