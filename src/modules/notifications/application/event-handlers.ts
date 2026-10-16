@@ -301,6 +301,37 @@ export async function notifyTimesheetApproved(payload: Record<string, unknown>):
 }
 
 /**
+ * `timesheet.recalculated`: the practitioner is told their sheet was worked out again at the
+ * facility's approval, because the holiday calendar or the rate had changed since they submitted.
+ *
+ * That it happened, and where: not the figures, which are on their screen behind the sign-in
+ * with the revision that kept the old ones, and not an amount, which is the base or the billed
+ * one depending on who is asking. One text per recalculation, however often the event is
+ * delivered.
+ */
+export async function notifyTimesheetRecalculated(payload: Record<string, unknown>): Promise<void> {
+  const assignmentId = text(payload.assignmentId);
+  const userId = text(payload.userId);
+  const key = text(payload.recalculationKey);
+  if (!assignmentId || !userId || !key) {
+    logger.warn('timesheet.recalculated event missing ids; skipping notification');
+    return;
+  }
+  const facts = await assignmentFacts(assignmentId);
+  if (!facts) return;
+
+  await tellAll([
+    {
+      userId,
+      kind: 'timesheet.recalculated',
+      body: `Your hours for ${facts.when} at ${facts.facility.name} were worked out again before approval, because the holiday calendar or the rate changed. The new figures are in Medilink. Medilink.`,
+      relatedType: 'timesheets.timesheets',
+      relatedId: key,
+    },
+  ]);
+}
+
+/**
  * `dispute.opened`: the other side is told there is a case, and the people who
  * adjudicate are told there is one to pick up. Nothing about its category or what
  * was claimed: that is for the screen, behind the sign-in.

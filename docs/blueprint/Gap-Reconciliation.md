@@ -22,9 +22,9 @@ The Blueprint’s gap register holds **410 gaps**: 119 P0, 225 P1, 66 P2. Since 
 | Priority | Total | Closed | Partial | Open | Not yet reviewed |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | P0 | 119 | 87 | 18 | 14 | 0 |
-| P1 | 225 | 10 | 56 | 159 | 0 |
+| P1 | 225 | 10 | 57 | 158 | 0 |
 | P2 | 66 | 0 | 6 | 60 | 0 |
-| **All** | **410** | **97** | **80** | **233** | **0** |
+| **All** | **410** | **97** | **81** | **232** | **0** |
 
 By area:
 
@@ -38,7 +38,7 @@ By area:
 | Service requests (`REQ`) | 3 | 8 | 1 | 12 | 3 | 4 | 5 |
 | Matching (`MAT`) | 5 | 9 | 2 | 16 | 6 | 2 | 8 |
 | Scheduling (`SCH`) | 2 | 1 | 0 | 3 | 2 | 1 | 0 |
-| Attendance (`ATT`) | 2 | 8 | 2 | 12 | 2 | 1 | 9 |
+| Attendance (`ATT`) | 2 | 8 | 2 | 12 | 2 | 2 | 8 |
 | Timesheets (`TIM`) | 3 | 9 | 0 | 12 | 2 | 4 | 6 |
 | Rates (`RAT`) | 3 | 13 | 3 | 19 | 4 | 4 | 11 |
 | Billing (`BIL`) | 13 | 20 | 6 | 39 | 9 | 9 | 21 |
@@ -57,7 +57,7 @@ By area:
 | Accessibility and low bandwidth (`UXA`) | 6 | 7 | 4 | 17 | 6 | 1 | 10 |
 | Quality and delivery (`QAL`) | 3 | 8 | 1 | 12 | 1 | 2 | 9 |
 
-**Reading the numbers.** About three quarters of the P1 and P2 gaps (219 of 291) are still open, which is what one would expect: Phase 0 went after the pilot blockers. Of the 10 P1 gaps that closed, seven were closed by a P0 fix to the same root cause (the roster’s cancel action, the in-app inbox, the shift type derived from the hours, the roster’s contact window, the payout account reuse check) and three by later work on suggestions (SUG-01, SUG-02, UXO-11). No P2 gap closed.
+**Reading the numbers.** About three quarters of the P1 and P2 gaps (218 of 291) are still open, which is what one would expect: Phase 0 went after the pilot blockers. Of the 10 P1 gaps that closed, seven were closed by a P0 fix to the same root cause (the roster’s cancel action, the in-app inbox, the shift type derived from the hours, the roster’s contact window, the payout account reuse check) and three by later work on suggestions (SUG-01, SUG-02, UXO-11). No P2 gap closed.
 
 ## Changed since `9a93861`
 
@@ -69,6 +69,7 @@ Four commits on this branch after the merge changed the status of these gaps. Th
 | UXW-02 | P0 | PARTIAL | PARTIAL | `fd6faa8` |
 | FAC-06 | P1 | PARTIAL | PARTIAL | `0040f00` |
 | SCH-01 | P1 | OPEN | PARTIAL | `064b1b7` |
+| ATT-04 | P1 | OPEN | PARTIAL | `ae317e4` |
 | SUG-01 | P1 | OPEN | CLOSED | `cdabc54` |
 | SUG-02 | P1 | OPEN | CLOSED | `cdabc54` |
 | UXO-11 | P1 | OPEN | CLOSED | `cdabc54` |
@@ -253,7 +254,7 @@ Gap text is shortened; the full text and the evidence at `5c199c1` are in the Bl
 | ATT-01 | P0 | CLOSED | Check-in is not tied to the assignee. Any signed-in practitioner who hears or guesses the code can check someone else in, and can burn another… | `52a0456` |
 | ATT-02 | P0 | CLOSED | The facility-side "issue a code" and "record by hand" functions never check that the shift belongs to the facility named in the request. Staff of… | `52a0456` |
 | ATT-03 | P1 | OPEN | There is no server-side check-in window. | src/modules/attendance/application/attendance.ts:142-205,221-322 — Still no server-side check-in window; code issue and presentation work at any time. Only ownership and CONFIRMED-status checks were added (52a0456). |
-| ATT-04 | P1 | OPEN | Hand-recorded and corrected times can be any date, including the future or days from the shift. | src/modules/attendance/presentation/schemas.ts:27-37; src/modules/attendance/application/attendance.ts:356 — Manual times accept any date, including future or far from the shift; only checkout-after-checkin is checked. Practitioner is never asked to agree. |
+| ATT-04 | P1 | PARTIAL | Hand-recorded and corrected times can be any date, including the future or days from the shift. | (after 9a93861, `ae317e4`) A hand-recorded or corrected time more than five minutes ahead of the server's clock is refused (ae317e4). Times days from the shift, or from any shift, are still accepted: a window needs a number from operations, as the check-in window does (ATT-03). The practitioner is still never asked to agree |
 | ATT-05 | P1 | OPEN | No idempotency. | src/modules/attendance/application/attendance.ts:251,282-290 — Retry after success hits an illegal transition; token update result is unchecked and the record update unconditional, so parallel presents can both pass. |
 | ATT-06 | P1 | OPEN | The wrong-try limit reads a count and then increments it, so a burst of parallel guesses can exceed five. | src/modules/attendance/application/attendance.ts:257-276;… — Attempts are read, judged, then incremented afterwards, so parallel wrong guesses can exceed the limit; the conditional-update fix used for login codes is… |
 | ATT-07 | P1 | PARTIAL | Stuck states have no sweep or alert. "Check-in pending" never lapses (the move back to "not started" is in the table and no code uses it), "checked… | src/worker/jobs.ts:86; src/modules/notifications/application/shift-alerts.ts:86-118 (ed67c35);… — Alert now fires 30 minutes after start with no check-in. Pending never lapses to NOT_STARTED; checked-in never auto-closed; checked-out-never-submitted not… |

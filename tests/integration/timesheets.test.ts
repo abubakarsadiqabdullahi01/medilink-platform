@@ -7,6 +7,9 @@ vi.mock('next/headers', async () => {
   return { cookies: () => cookieJar };
 });
 
+const sms = vi.hoisted(() => ({ send: vi.fn() }));
+vi.mock('@/lib/sms', async () => (await import('./support/sms-double')).gatewayDouble(sms.send));
+
 import { prisma } from '@/lib/db';
 import { EVENTS } from '@/lib/events';
 import { ROLE_PERMISSIONS } from '@/lib/authz/permissions';
@@ -34,6 +37,8 @@ import {
   timesheetRevisions,
 } from '@/modules/timesheets/application/timesheet';
 import { ROUTES } from '@/modules/timesheets/routes';
+import { runOnce } from '@/worker/processor';
+import { handlers } from '@/worker/handlers';
 import { POST as reviewRoute } from '@/app/api/v1/assignments/[id]/timesheet/review/route';
 import { issueSession } from '@/modules/auth/application/session-service';
 import { clearCookies } from './support/cookie-jar';
@@ -388,6 +393,59 @@ describe('corrections (7.6)', () => {
     expect(previous.amountKobo).toBe(before.amountKobo);
     expect(previous.breakMinutes).toBe(0);
     expect(previous.checkedInAt).toBe(WORKED_FROM.toISOString());
+  });
+});
+
+describe('a correction to a time that has not come yet (ATT-04)', () => {
+  it('is refused, and the sheet and its history are as they were', async () => {
+    const world = await buildWorld();
+    await submitTimesheet({ assignmentId: world.assignmentId, userId: world.practitionerId });
+    await reviewTimesheet({
+      assignmentId: world.assignmentId,
+      facilityId: world.facilityId,
+      actorId: world.reviewerId,
+      decision: 'reject',
+      reviewNotes: 'The check-out looks wrong.',
+    });
+    const before = await getTimesheet(world.assignmentId);
+
+    await expect(
+      correctTimesheet({
+        assignmentId: world.assignmentId,
+        facilityId: world.facilityId,
+        actorId: world.reviewerId,
+        checkedOutAt: new Date(Date.now() + 3 * 60 * 60 * 1000),
+        reason: 'The nurse stayed on for the handover, which ran late.',
+      }),
+    ).rejects.toMatchObject({ code: 'time_in_future', status: 422 });
+
+    const after = await getTimesheet(world.assignmentId);
+    expect(after.revision).toBe(before.revision);
+    expect(after.amountKobo).toBe(before.amountKobo);
+    expect(after.attendanceStatus).toBe('REJECTED');
+    expect(await timesheetRevisions(world.assignmentId)).toHaveLength(0);
+  });
+
+  it('still lets a break be corrected, which names no time', async () => {
+    const world = await buildWorld();
+    await submitTimesheet({ assignmentId: world.assignmentId, userId: world.practitionerId });
+    await reviewTimesheet({
+      assignmentId: world.assignmentId,
+      facilityId: world.facilityId,
+      actorId: world.reviewerId,
+      decision: 'reject',
+      reviewNotes: 'An hour of it was a break.',
+    });
+
+    const corrected = await correctTimesheet({
+      assignmentId: world.assignmentId,
+      facilityId: world.facilityId,
+      actorId: world.reviewerId,
+      breakMinutes: 60,
+      reason: 'Ward log records a one hour break that the paper sheet omitted.',
+    });
+
+    expect(corrected.billableMinutes).toBe(420);
   });
 });
 
@@ -846,5 +904,157 @@ describe('figures that change under a submitted timesheet (M10-04)', () => {
       expect(resubmitted.attendanceStatus).toBe('SUBMITTED');
       expect(resubmitted.holidayMinutes).toBe(480);
     });
+  });
+});
+
+/**
+ * When an approval works a sheet out again and the figures differ, the practitioner is told.
+ *
+ * The sheet takes the new figures at the facility's approval, so what the practitioner will be
+ * paid can change without either of them doing anything: the practitioner would find out only
+ * by happening to open their timesheet. The text says that it happened, not what the figures
+ * are; the figures, and the revision that kept the old ones, are on their screen.
+ */
+describe('telling the practitioner their sheet was worked out again', () => {
+  const WORKED_DATE = '2026-09-09';
+
+  beforeEach(() => {
+    sms.send.mockReset();
+    sms.send.mockResolvedValue({ accepted: true, provider: 'test', providerMessageId: null });
+  });
+
+  afterEach(async () => {
+    await prisma.publicHoliday.deleteMany({ where: { owner: 'test' } });
+  });
+
+  const declareHoliday = (date: string) =>
+    prisma.publicHoliday.create({
+      data: { date: new Date(`${date}T00:00:00.000Z`), name: `Declared ${date}`, year: 2026, owner: 'test' },
+    });
+
+  const approve = (world: World) =>
+    reviewTimesheet({
+      assignmentId: world.assignmentId,
+      facilityId: world.facilityId,
+      actorId: world.reviewerId,
+      decision: 'approve',
+    });
+
+  async function deliver() {
+    await prisma.outboxEvent.updateMany({
+      where: { status: 'FAILED' },
+      data: { availableAt: new Date(Date.now() - 1000) },
+    });
+    return runOnce({ handlers });
+  }
+
+  const recalculatedMessages = (userId: string) =>
+    prisma.notificationMessage.findMany({ where: { userId, kind: 'timesheet.recalculated' } });
+
+  async function refusedAfterHolidayDeclared(world: World) {
+    await submitTimesheet({ assignmentId: world.assignmentId, userId: world.practitionerId });
+    await declareHoliday(WORKED_DATE);
+    await expect(approve(world)).rejects.toMatchObject({ code: 'timesheet_figures_changed' });
+  }
+
+  it('texts them that it was worked out again, and names the shift and the facility', async () => {
+    const world = await buildWorld();
+    await refusedAfterHolidayDeclared(world);
+
+    await deliver();
+
+    const [message] = await recalculatedMessages(world.practitionerId);
+    expect(message).toMatchObject({ relatedType: 'timesheets.timesheets' });
+    expect(message!.sentAt).not.toBeNull();
+    const sent = sms.send.mock.calls.map((call) => call[0].body as string).find((body) => /worked out again/i.test(body));
+    expect(sent).toBeDefined();
+    expect(sent).toContain('Enugu Teaching Hospital');
+    // The shift as it was scheduled, worded as the other timesheet texts word it: a day and a
+    // time, in Lagos time.
+    expect(sent).toMatch(/Your hours for \w{3} \d{1,2} \w{3}, \d{2}:\d{2}/);
+  });
+
+  it('says nothing of the figures: the text carries no amount, and neither does the event', async () => {
+    const world = await buildWorld();
+    await refusedAfterHolidayDeclared(world);
+
+    await deliver();
+
+    const sent = sms.send.mock.calls.map((call) => call[0].body as string).find((body) => /worked out again/i.test(body))!;
+    expect(sent).not.toMatch(/₦|NGN|naira|kobo|\d{4,}/i);
+    const event = await prisma.outboxEvent.findFirstOrThrow({ where: { eventType: 'timesheet.recalculated' } });
+    expect(JSON.stringify(event.payload)).not.toMatch(/amount|kobo|figures|minutes/i);
+  });
+
+  it('tells nobody when nothing changed', async () => {
+    const world = await buildWorld();
+    await submitTimesheet({ assignmentId: world.assignmentId, userId: world.practitionerId });
+
+    await approve(world);
+    await deliver();
+
+    expect(await prisma.outboxEvent.count({ where: { eventType: 'timesheet.recalculated' } })).toBe(0);
+    expect(await recalculatedMessages(world.practitionerId)).toHaveLength(0);
+  });
+
+  it('is retried when the text did not go, and not sent twice when it did, even if the event comes again', async () => {
+    const world = await buildWorld();
+    await refusedAfterHolidayDeclared(world);
+    let failedOnce = false;
+    sms.send.mockImplementation(async (message: { body: string }) => {
+      // Only this text fails, and only the first time: the other events queued by the same
+      // shift send theirs as usual.
+      if (/worked out again/i.test(message.body) && !failedOnce) {
+        failedOnce = true;
+        throw new Error('gateway down');
+      }
+      return { accepted: true, provider: 'test', providerMessageId: null };
+    });
+
+    await deliver();
+    await deliver();
+    await deliver();
+
+    const wording = () => sms.send.mock.calls.filter((call) => /worked out again/i.test(call[0].body));
+    const sentRows = async () =>
+      (await recalculatedMessages(world.practitionerId)).filter((row) => row.sentAt !== null);
+    expect(await sentRows()).toHaveLength(1);
+    // The first attempt failed and the retry went: two calls, one text.
+    expect(wording()).toHaveLength(2);
+
+    // The outbox delivers at least once. The same event, delivered again after it went, is not
+    // another text: it is the same recalculation.
+    await prisma.outboxEvent.updateMany({
+      where: { eventType: 'timesheet.recalculated' },
+      data: { status: 'PENDING', processedAt: null, availableAt: new Date(Date.now() - 1000) },
+    });
+    await deliver();
+
+    expect(wording()).toHaveLength(2);
+    expect(await sentRows()).toHaveLength(1);
+  });
+
+  it('is told again when the figures are worked out a second time, which is a second thing to know', async () => {
+    const world = await buildWorld();
+    await refusedAfterHolidayDeclared(world);
+    await deliver();
+
+    // The mistaken holiday is taken away; the approval after it is refused again.
+    await prisma.publicHoliday.deleteMany({ where: { owner: 'test' } });
+    await expect(approve(world)).rejects.toMatchObject({ code: 'timesheet_figures_changed' });
+    await deliver();
+
+    const messages = await recalculatedMessages(world.practitionerId);
+    expect(messages.filter((row) => row.sentAt !== null)).toHaveLength(2);
+  });
+
+  it('does not tell the facility, who asked for it and was told at the time', async () => {
+    const world = await buildWorld();
+    await refusedAfterHolidayDeclared(world);
+
+    await deliver();
+
+    expect(await recalculatedMessages(world.reviewerId)).toHaveLength(0);
+    expect(await recalculatedMessages(world.schedulerId)).toHaveLength(0);
   });
 });

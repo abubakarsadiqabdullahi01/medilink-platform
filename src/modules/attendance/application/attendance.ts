@@ -20,6 +20,7 @@ import {
 import { IllegalAttendanceTransition } from '../domain/state-machine';
 import { getAssignment } from '@/modules/matching/application/assignment';
 import { AttendanceErrors } from '../domain/errors';
+import { isInFuture } from '../domain/recorded-times';
 
 /**
  * Attendance: what actually happened during the shift (steps 7.1–7.3).
@@ -355,6 +356,11 @@ export async function recordManualAttendance(
   if (!input.reason?.trim()) throw AttendanceErrors.manualReasonRequired();
   if (input.checkedOutAt.getTime() <= input.checkedInAt.getTime()) {
     throw AttendanceErrors.checkoutBeforeCheckIn();
+  }
+  // Written from a log after the fact, so what it records has happened (ATT-04). Before the
+  // assignment is loaded or a record is made, so a refusal leaves nothing behind.
+  if (isInFuture(input.checkedInAt) || isInFuture(input.checkedOutAt)) {
+    throw AttendanceErrors.timeInFuture();
   }
 
   const assignment = await loadAssignment(input.assignmentId);
