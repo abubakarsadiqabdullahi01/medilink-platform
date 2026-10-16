@@ -22,9 +22,9 @@ The Blueprint’s gap register holds **410 gaps**: 119 P0, 225 P1, 66 P2. Since 
 | Priority | Total | Closed | Partial | Open | Not yet reviewed |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | P0 | 119 | 87 | 18 | 14 | 0 |
-| P1 | 225 | 15 | 61 | 149 | 0 |
+| P1 | 225 | 16 | 60 | 149 | 0 |
 | P2 | 66 | 0 | 6 | 60 | 0 |
-| **All** | **410** | **102** | **85** | **223** | **0** |
+| **All** | **410** | **103** | **84** | **223** | **0** |
 
 By area:
 
@@ -46,7 +46,7 @@ By area:
 | Disputes (`DSP`) | 5 | 6 | 1 | 12 | 4 | 2 | 6 |
 | Incidents (`INC`) | 4 | 7 | 2 | 13 | 3 | 0 | 10 |
 | Notifications (`NOT`) | 6 | 6 | 0 | 12 | 5 | 4 | 3 |
-| Audit and compliance (`AUD`) | 5 | 9 | 5 | 19 | 3 | 7 | 9 |
+| Audit and compliance (`AUD`) | 5 | 9 | 5 | 19 | 4 | 6 | 9 |
 | Suggestions (`SUG`) | 0 | 2 | 6 | 8 | 2 | 1 | 5 |
 | Reference data (`CFG`) | 4 | 8 | 3 | 15 | 0 | 6 | 9 |
 | Platform and operations (`PLT`) | 5 | 11 | 5 | 21 | 1 | 8 | 12 |
@@ -57,7 +57,7 @@ By area:
 | Accessibility and low bandwidth (`UXA`) | 6 | 7 | 4 | 17 | 6 | 1 | 10 |
 | Quality and delivery (`QAL`) | 3 | 8 | 1 | 12 | 1 | 2 | 9 |
 
-**Reading the numbers.** About three quarters of the P1 and P2 gaps (209 of 291) are still open, which is what one would expect: Phase 0 went after the pilot blockers. Of the 15 P1 gaps that closed, seven were closed by a P0 fix to the same root cause (the roster’s cancel action, the in-app inbox, the shift type derived from the hours, the roster’s contact window, the payout account reuse check), three by later work on suggestions (SUG-01, SUG-02, UXO-11), four by the retry-safety work after that (TIM-04, TIM-07, TIM-08, ATT-06) and one by the audit work (AUD-13). No P2 gap closed.
+**Reading the numbers.** About three quarters of the P1 and P2 gaps (209 of 291) are still open, which is what one would expect: Phase 0 went after the pilot blockers. Of the 16 P1 gaps that closed, seven were closed by a P0 fix to the same root cause (the roster’s cancel action, the in-app inbox, the shift type derived from the hours, the roster’s contact window, the payout account reuse check), three by later work on suggestions (SUG-01, SUG-02, UXO-11), four by the retry-safety work after that (TIM-04, TIM-07, TIM-08, ATT-06) and two by the audit work (AUD-13, AUD-06). No P2 gap closed.
 
 ## Changed since `9a93861`
 
@@ -75,7 +75,7 @@ Four commits on this branch after the merge changed the status of these gaps. Th
 | TIM-04 | P1 | OPEN | CLOSED | `e140478` |
 | TIM-07 | P1 | OPEN | CLOSED | `6d81631` |
 | TIM-08 | P1 | OPEN | CLOSED | `6d81631` |
-| AUD-06 | P1 | OPEN | PARTIAL | `60e030b` |
+| AUD-06 | P1 | OPEN | CLOSED | `d172eae` |
 | AUD-07 | P1 | OPEN | PARTIAL | `e42b766` |
 | AUD-08 | P1 | OPEN | PARTIAL | `e42b766` |
 | AUD-13 | P1 | OPEN | CLOSED | `0c39863` |
@@ -440,7 +440,7 @@ Gap text is shortened; the full text and the evidence at `5c199c1` are in the Bl
 | AUD-03 | P0 | PARTIAL | Agreements are not enforced. Sign-up has no privacy-notice or terms step; nothing blocks work until accepted; a new version is not re-accepted; a… | Not done: A facility-level acceptance record (the hospital as an organisation, not the person) is not built, and the content of the documents is counsel's. |
 | AUD-04 | P0 | PARTIAL | No data inventory, no retention schedule and no purge job for any category (identity, documents, notifications, audit, sessions). v2.9 §9.14 requires… | Not done: **Every period and every lawful basis is the team's proposal, not signed off by counsel or a data protection officer.** Messages, security events, search rankings,… |
 | AUD-05 | P0 | OPEN | Registration with the data-protection regulator as a controller of major importance, a data-protection officer, a privacy impact assessment,… | Needs something from outside engineering: Counsel, a data protection officer, the regulator |
-| AUD-06 | P1 | PARTIAL | The audit table is append-only by habit only. | (after 9a93861, `60e030b`) A row trigger on audit.audit_log refuses UPDATE and DELETE for every client (60e030b). Still open: a role that owns the table can drop it, TRUNCATE is left alone, and there is no digest or hash check that would show a change made that way |
+| AUD-06 | P1 | CLOSED | The audit table is append-only by habit only. | (after 9a93861, `d172eae`) A row trigger on audit.audit_log refuses UPDATE and DELETE for every client (60e030b), and a nightly job seals each finished day as a count and a chained hash of its rows and fails by name when a sealed day no longer matches (d172eae), so a change made with the trigger switched off would show. Not covered, and said so in docs/audit-digest.md: an owner who also rewrites the digests; the defence against that is a copy of the logged digests kept off the database host |
 | AUD-07 | P1 | PARTIAL | The export omits disputes, incidents, notifications, attendance, timesheets, screening, sessions and invoices. | (after 9a93861, `e42b766`) The export now returns a section for every table the data inventory lists as about a person, or says in the file why one is left out, and a test fails when the two disagree (e42b766). Still held back: a report that names the person, until the data protection officer and counsel say what may be shared (D10) |
 | AUD-08 | P1 | PARTIAL | Hospital staff cannot exercise any right: export, erasure assessment, consent and request routes need practitioner permissions that no facility role… | (after 9a93861, `e42b766`) The export is open to every signed-in person, asks for the password again, and is in the account menu every role has (e42b766). Still open: the erasure assessment, consent and request routes need a practitioner permission that no facility role holds |
 | AUD-09 | P1 | PARTIAL | Consent is "yes by silence" in matching: a practitioner with no consent record is shown to hospitals, and the sign-up tick-box is enforced by the… | src/modules/auth/application/registration.ts:63-64; src/modules/auth/presentation/schemas.ts:47;… — Privacy-notice acceptance now server-enforced at sign-up. Sharing consent still optional server-side, and no consent record still counts as consent in matching. |

@@ -410,9 +410,9 @@ export const DATA_CATEGORIES: DataCategory[] = [
   {
     key: 'audit_trail',
     name: 'Audit trail',
-    tables: ['audit.audit_log'],
+    tables: ['audit.audit_log', 'audit.audit_digests'],
     holds:
-      'Who did what to what, and when: identifiers, the reason given and the before and after of the change. Names, email addresses and phone numbers are not written into it.',
+      'Who did what to what, and when: identifiers, the reason given and the before and after of the change. Names, email addresses and phone numbers are not written into it. With it, for each day that is over, how many rows the day held and a hash of them, which says nothing about anybody.',
     purpose: 'Accountability for every change the platform makes.',
     basis: 'Legal obligation and legitimate interest.',
     owner: DPO,

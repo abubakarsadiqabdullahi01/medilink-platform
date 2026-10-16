@@ -120,6 +120,7 @@ export const EXPORT_COVERAGE: Record<string, ExportCoverage> = {
 
   'notifications.messages': { section: 'notifications' },
   'audit.audit_log': { excluded: 'auditTrail' },
+  'audit.audit_digests': { excluded: 'auditTrail' },
   'audit.security_events': { section: 'securityEvents', limits: ['readsOfYourRecords'] },
   'audit.outbox_events': { excluded: 'backgroundQueue' },
   'audit.scheduled_jobs': { excluded: 'backgroundQueue' },

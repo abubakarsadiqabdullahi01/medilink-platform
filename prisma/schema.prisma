@@ -262,6 +262,20 @@ model AuditLog {
   @@schema("audit")
 }
 
+// One row per finished day of the audit trail: how many rows it held and a hash of them, chained to
+// the day before (AUD-06). Sealed once by the nightly job, never changed; a database trigger refuses
+// an update or a delete. A later night recomputes the sealed days to see whether any rows changed.
+model AuditDigest {
+  day      DateTime @id @db.Date
+  rowCount Int      @map("row_count")
+  dayHash  String   @map("day_hash")
+  digest   String
+  sealedAt DateTime @default(now()) @map("sealed_at")
+
+  @@map("audit_digests")
+  @@schema("audit")
+}
+
 // Transactional outbox. Events are written in the same transaction as the
 // state change, so an event cannot be lost when a consumer fails.
 model OutboxEvent {

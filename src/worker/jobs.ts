@@ -17,6 +17,7 @@ import {
   announceLapsedFacilityLicences,
   warnExpiringFacilityLicences,
 } from '../modules/notifications/application/licence-sweeps';
+import { runAuditDigestSweep } from '../modules/audit-compliance/application/audit-digest';
 import type { JobHandler } from './scheduler';
 
 /**
@@ -111,6 +112,12 @@ export const JOB_DEFINITIONS: JobDefinition[] = [
     intervalSeconds: HOURLY,
   },
   {
+    key: 'audit.digest_sweep',
+    description:
+      'Seal each finished day of the audit trail as a count and a hash of its rows, chained to the day before, and check the days already sealed still come to what they did. Daily. Fails, naming the day, when one does not: that is the trail having been changed by somebody who switched the database\'s append-only trigger off. Seals a day only once its slowest transaction can have finished.',
+    intervalSeconds: DAILY,
+  },
+  {
     key: 'retention.purge_sweep',
     description:
       'Delete what the data inventory says is not worth keeping: one-time codes, sessions that have ended, the sign-in log, queue entries already delivered and uploads nobody finished, each on its own period. Daily. Touches nothing else: the rest is kept, or removed by an erasure request. Writes one audit row with counts on a run that deleted anything.',
@@ -119,6 +126,9 @@ export const JOB_DEFINITIONS: JobDefinition[] = [
 ];
 
 export const jobs: Record<string, JobHandler> = {
+  'audit.digest_sweep': async () => {
+    await runAuditDigestSweep();
+  },
   'retention.purge_sweep': async () => {
     await purgeExpiredData();
   },
