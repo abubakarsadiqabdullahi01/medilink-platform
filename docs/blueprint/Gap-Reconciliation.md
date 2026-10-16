@@ -23,8 +23,8 @@ The Blueprint’s gap register holds **410 gaps**: 119 P0, 225 P1, 66 P2. Since 
 | --- | ---: | ---: | ---: | ---: | ---: |
 | P0 | 119 | 87 | 18 | 14 | 0 |
 | P1 | 225 | 16 | 60 | 149 | 0 |
-| P2 | 66 | 0 | 7 | 59 | 0 |
-| **All** | **410** | **103** | **85** | **222** | **0** |
+| P2 | 66 | 1 | 7 | 58 | 0 |
+| **All** | **410** | **104** | **85** | **221** | **0** |
 
 By area:
 
@@ -32,7 +32,7 @@ By area:
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Authentication (`AUT`) | 10 | 10 | 6 | 26 | 9 | 6 | 11 |
 | Practitioners (`PRA`) | 6 | 21 | 5 | 32 | 7 | 3 | 22 |
-| Credentials (`CRE`) | 5 | 7 | 6 | 18 | 3 | 1 | 14 |
+| Credentials (`CRE`) | 5 | 7 | 6 | 18 | 4 | 1 | 13 |
 | Facilities (`FAC`) | 5 | 8 | 2 | 15 | 4 | 7 | 4 |
 | Availability (`AVL`) | 1 | 5 | 1 | 7 | 1 | 0 | 6 |
 | Service requests (`REQ`) | 3 | 8 | 1 | 12 | 3 | 4 | 5 |
@@ -57,7 +57,7 @@ By area:
 | Accessibility and low bandwidth (`UXA`) | 6 | 7 | 4 | 17 | 6 | 1 | 10 |
 | Quality and delivery (`QAL`) | 3 | 8 | 1 | 12 | 1 | 2 | 9 |
 
-**Reading the numbers.** About three quarters of the P1 and P2 gaps (208 of 291) are still open, which is what one would expect: Phase 0 went after the pilot blockers. Of the 16 P1 gaps that closed, seven were closed by a P0 fix to the same root cause (the roster’s cancel action, the in-app inbox, the shift type derived from the hours, the roster’s contact window, the payout account reuse check), three by later work on suggestions (SUG-01, SUG-02, UXO-11), four by the retry-safety work after that (TIM-04, TIM-07, TIM-08, ATT-06) and two by the audit work (AUD-13, AUD-06). No P2 gap closed.
+**Reading the numbers.** About three quarters of the P1 and P2 gaps (207 of 291) are still open, which is what one would expect: Phase 0 went after the pilot blockers. Of the 16 P1 gaps that closed, seven were closed by a P0 fix to the same root cause (the roster’s cancel action, the in-app inbox, the shift type derived from the hours, the roster’s contact window, the payout account reuse check), three by later work on suggestions (SUG-01, SUG-02, UXO-11), four by the retry-safety work after that (TIM-04, TIM-07, TIM-08, ATT-06) and two by the audit work (AUD-13, AUD-06). 1 P2 gaps closed.
 
 ## Changed since `9a93861`
 
@@ -82,6 +82,7 @@ Four commits on this branch after the merge changed the status of these gaps. Th
 | SUG-01 | P1 | OPEN | CLOSED | `cdabc54` |
 | SUG-02 | P1 | OPEN | CLOSED | `cdabc54` |
 | UXO-11 | P1 | OPEN | CLOSED | `cdabc54` |
+| CRE-12 | P2 | OPEN | CLOSED | `fadcda6` |
 | AUD-15 | P2 | OPEN | PARTIAL | `7170efb` |
 
 ## By area
@@ -172,7 +173,7 @@ Gap text is shortened; the full text and the evidence at `5c199c1` are in the Bl
 | CRE-10 | P1 | OPEN | The confirm path reads a photographed licence, not the regulator's register. | src/app/admin/practitioners/evidence-review.tsx:75-82,455-480; prisma/schema.prisma:781-806 — Confirm still reads the photographed licence; no register response, screenshot or source reference is stored on the registration. |
 | CRE-11 | P1 | OPEN | A verified credential cannot be revoked, withdrawn or superseded, so a forged certificate cannot be un-verified except by editing the registration… | src/modules/credentials/application/submission.ts:376 — Review still requires status PENDING; no revoke, withdraw or supersede path exists for a verified credential. |
 | CRE-14 | P1 | OPEN | No retention rule for rejected documents, no image compression for weak connections and no malware check on uploads. | src/lib/storage/tigris.ts:61-69; src/modules/audit-compliance/domain/data-inventory.ts:211-214 — Rejected-document retention is only a proposal nothing enforces; still no image compression and no malware scan on uploads. |
-| CRE-12 | P2 | OPEN | Confirm-from-submission commits three times (record, decide, mask). | src/modules/practitioners/application/confirm-from-submission.ts:84-119 — Identity confirm still records, decides and calls maskSubmissionReference in separate transactions; failure between them leaves a recorded identity with the… |
+| CRE-12 | P2 | CLOSED | Confirm-from-submission commits three times (record, decide, mask). | (after 9a93861, `fadcda6`) Confirming an identity or a licence prepares everything first (the provider, if one is on, is asked before any transaction) and then writes the decision and the record in one transaction; a failure at the decision leaves nothing recorded, a retry records once, and the second of two officers at once is refused as already reviewed and leaves nothing behind. The third commit, maskSubmissionReference, did nothing (reviewCredential already masks a NIN with any decision) and is removed |
 | CRE-13 | P2 | OPEN | The status model and tables differ from v2.9. | prisma/schema.prisma:557-616; src/modules/credentials/application/submission.ts:529-541 — Still one table, no Draft/Under review/Suspended status, no source reference or superseded link; reviewer fields cleared on resupply. Only documentExpiresOn… |
 | CRE-15 | P2 | OPEN | One live submission per type is checked in code only; there is no unique index, so a concurrent double submit can create two waiting rows. | src/modules/credentials/application/submission.ts:192-210; prisma/schema.prisma:589 — One live submission per type is still checked in code only; no unique index, so a concurrent double submit can create two waiting rows. |
 | CRE-16 | P2 | OPEN | The spec says expiry suspends the account automatically. | src/modules/credentials/application/expiry.ts:15-21; docs/stage-5-8-5-9-eligibility-and-expiry.md:98 — Expiry still blocks matching and does not suspend; the divergence is only a code comment and stage note, with no recorded decision or spec amendment. |
