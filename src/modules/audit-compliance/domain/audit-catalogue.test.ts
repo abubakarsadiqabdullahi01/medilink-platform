@@ -117,6 +117,17 @@ for (const { path, sf } of parsed) {
         }
       }
 
+      // A bulk insert hides its kinds inside a callback this test does not follow, so one on
+      // this table is refused: spell each row out with `create`.
+      if (
+        ts.isPropertyAccessExpression(callee) &&
+        (callee.name.text === 'createMany' || callee.name.text === 'createManyAndReturn') &&
+        ts.isPropertyAccessExpression(callee.expression) &&
+        callee.expression.name.text === 'securityEvent'
+      ) {
+        unresolved.push(where);
+      }
+
       // prisma.securityEvent.create({ data: { kind: '…' } })
       if (
         ts.isPropertyAccessExpression(callee) &&

@@ -69,8 +69,10 @@ export const listAssignmentsSchema = z.object({
    * them; a shift's own detail page reads exactly one. */
   serviceRequestId: z.string().uuid().optional(),
   /**
-   * Extra per-row detail to join in, comma separated: `attendance`, `timesheet`.
-   * Asked for by the lists that used to fetch it once per row.
+   * Extra per-row detail to join in, comma separated: `attendance`, `timesheet`, `contact`.
+   * The first two are asked for by the lists that used to fetch them once per row. `contact`
+   * is the practitioner's phone number, released to a facility only inside the booking's
+   * contact window and only when asked for by name, because each release is recorded.
    */
   include: z
     .string()

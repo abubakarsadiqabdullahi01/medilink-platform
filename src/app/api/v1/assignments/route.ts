@@ -32,6 +32,9 @@ export async function GET(request: Request) {
         to: input.to,
         limit: input.limit,
         cursor: input.cursor,
+        // A number is released only to somebody who asked for it by name, and is recorded.
+        revealContactTo:
+          input.scopeType === 'FACILITY' && input.include.has('contact') ? session.userId : undefined,
       });
 
       // Joined here rather than in matching, which does not read attendance or

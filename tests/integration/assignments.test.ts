@@ -27,6 +27,7 @@ import {
   respondToInvitation,
 } from '@/modules/matching/application/assignment';
 import { GET as requestInvitationsRoute } from '@/app/api/v1/service-requests/[id]/invitations/route';
+import { GET as listAssignmentsRoute } from '@/app/api/v1/assignments/route';
 import { issueSession } from '@/modules/auth/application/session-service';
 import { notifyAssignmentConfirmed } from '@/modules/notifications/application/handlers';
 import { expireStartedRequests } from '@/modules/service-requests/application/expiry';
@@ -906,13 +907,22 @@ describe('the schedule list', () => {
     const soonUser = await practitioner('Bisi Adeyemi');
     await confirm(soon, soonUser.id);
 
-    const farRoster = await listAssignments({ scopeType: 'FACILITY', scopeId: far.facilityId });
+    // Asked for in both: the window decides, and asking does not open it.
+    const farRoster = await listAssignments({
+      scopeType: 'FACILITY',
+      scopeId: far.facilityId,
+      revealContactTo: far.schedulerId,
+    });
     expect(farRoster.assignments[0]).toMatchObject({
       practitionerName: 'Amina Yusuf',
       practitionerPhone: '',
     });
 
-    const soonRoster = await listAssignments({ scopeType: 'FACILITY', scopeId: soon.facilityId });
+    const soonRoster = await listAssignments({
+      scopeType: 'FACILITY',
+      scopeId: soon.facilityId,
+      revealContactTo: soon.schedulerId,
+    });
     expect(soonRoster.assignments[0]).toMatchObject({
       practitionerName: 'Bisi Adeyemi',
       practitionerPhone: soonUser.phone,
@@ -1196,5 +1206,196 @@ describe("a facility reading one shift's offers", () => {
     // Being offered the shift grants nothing over the facility's list of offers.
     await issueSession({ userId: user.id });
     expect((await callInvitations(first.requestId, first.facilityId)).status).toBe(403);
+  });
+});
+
+describe('who is shown a practitioner’s number, and the record of it (M07-05)', () => {
+  const HOUR = 60 * 60 * 1000;
+  const reveals = () =>
+    prisma.securityEvent.findMany({ where: { kind: 'contact.revealed' }, orderBy: { createdAt: 'asc' } });
+
+  /** A facility whose one shift starts `hoursAhead` from now, with somebody confirmed onto it. */
+  async function bookedIn(hoursAhead: number, name = 'Bisi Adeyemi') {
+    const startsAt = new Date(Date.now() + hoursAhead * HOUR);
+    const world = await buildWorld(1, { startsAt, endsAt: new Date(startsAt.getTime() + 8 * HOUR) });
+    const user = await practitioner(name);
+    await acceptedInvitation(world, user.id);
+    await confirmAssignment({
+      requestId: world.requestId,
+      facilityId: world.facilityId,
+      userId: user.id,
+      actorId: world.schedulerId,
+    });
+    const [row] = (await listAssignments({ scopeType: 'FACILITY', scopeId: world.facilityId })).assignments;
+    return { world, user, assignmentId: row!.id };
+  }
+
+  /** A second booking at the same facility, starting `hoursAhead` from now. */
+  async function alsoBooked(world: World, hoursAhead: number, name: string) {
+    const startsAt = new Date(Date.now() + hoursAhead * HOUR);
+    const request = await createServiceRequest({
+      facilityId: world.facilityId,
+      professionalCategoryId: world.categoryId,
+      shiftType: 'DAY',
+      startsAt,
+      endsAt: new Date(startsAt.getTime() + 8 * HOUR),
+      headcount: 1,
+      hourlyRateKobo: 500_000,
+      urgency: 'ROUTINE',
+      cancellationTerms: 'Either party may cancel up to 24 hours before the shift.',
+      actorId: world.schedulerId,
+    });
+    await publishServiceRequest({ requestId: request.id, facilityId: world.facilityId, actorId: world.schedulerId });
+    const user = await practitioner(name);
+    const [invitation] = await invitePractitioners({
+      requestId: request.id,
+      facilityId: world.facilityId,
+      userIds: [user.id],
+      actorId: world.schedulerId,
+    });
+    await respondToInvitation({ invitationId: invitation!.id, userId: user.id, decision: 'accept' });
+    await confirmAssignment({
+      requestId: request.id,
+      facilityId: world.facilityId,
+      userId: user.id,
+      actorId: world.schedulerId,
+    });
+    return user;
+  }
+
+  it('does not put the number on a roster nobody asked the number of, even inside the window', async () => {
+    const { world } = await bookedIn(24);
+
+    const roster = await listAssignments({ scopeType: 'FACILITY', scopeId: world.facilityId });
+
+    // The name and the shift are there; the number is not, and nothing was released to record.
+    expect(roster.assignments[0]).toMatchObject({ practitionerName: 'Bisi Adeyemi', practitionerPhone: '' });
+    expect(await reveals()).toHaveLength(0);
+  });
+
+  it('puts it on the roster of the person who asked, and a row says who, which booking, whose number and where', async () => {
+    const { world, user, assignmentId } = await bookedIn(24);
+
+    const roster = await listAssignments({
+      scopeType: 'FACILITY',
+      scopeId: world.facilityId,
+      revealContactTo: world.schedulerId,
+    });
+
+    expect(roster.assignments[0]?.practitionerPhone).toBe(user.phone);
+    const [row, ...rest] = await reveals();
+    expect(rest).toHaveLength(0);
+    expect(row).toMatchObject({
+      userId: world.schedulerId,
+      severity: 'info',
+      detail: { assignmentId, practitionerId: user.id, facilityId: world.facilityId },
+    });
+    // The number is not in the record: who saw it is the question, and the number is the answer.
+    expect(JSON.stringify(row)).not.toContain(user.phone);
+  });
+
+  it('writes a row for each number released and none for one held back', async () => {
+    const { world, user } = await bookedIn(24);
+    await alsoBooked(world, 24 * 14, 'Chidi Okeke');
+    const other = await alsoBooked(world, 30, 'Dayo Bello');
+
+    const roster = await listAssignments({
+      scopeType: 'FACILITY',
+      scopeId: world.facilityId,
+      revealContactTo: world.schedulerId,
+    });
+
+    expect(roster.assignments.map((row) => row.practitionerPhone).filter(Boolean).sort()).toEqual(
+      [user.phone, other.phone].sort(),
+    );
+    const rows = await reveals();
+    expect(rows.map((row) => (row.detail as { practitionerId: string }).practitionerId).sort()).toEqual(
+      [user.id, other.id].sort(),
+    );
+  });
+
+  it('records the release each time the number is shown, not once for good', async () => {
+    const { world } = await bookedIn(24);
+    const ask = () =>
+      listAssignments({ scopeType: 'FACILITY', scopeId: world.facilityId, revealContactTo: world.schedulerId });
+
+    await ask();
+    await ask();
+
+    expect(await reveals()).toHaveLength(2);
+  });
+
+  it('writes nothing for a cancelled booking, a booking not yet open or one long over', async () => {
+    const cancelled = await bookedIn(24, 'Cancelled Person');
+    await prisma.assignment.updateMany({ where: { facilityId: cancelled.world.facilityId }, data: { status: 'CANCELLED' } });
+    const early = await bookedIn(24 * 5, 'Early Person');
+    const over = await bookedIn(24, 'Finished Person');
+    await prisma.assignment.updateMany({
+      where: { facilityId: over.world.facilityId },
+      data: { startsAt: new Date(Date.now() - 72 * HOUR), endsAt: new Date(Date.now() - 64 * HOUR) },
+    });
+
+    for (const { world } of [cancelled, early, over]) {
+      const roster = await listAssignments({
+        scopeType: 'FACILITY',
+        scopeId: world.facilityId,
+        revealContactTo: world.schedulerId,
+      });
+      expect(roster.assignments[0]?.practitionerPhone).toBe('');
+    }
+    expect(await reveals()).toHaveLength(0);
+  });
+
+  it('is not recorded for a practitioner reading their own number', async () => {
+    const { world, user } = await bookedIn(24);
+
+    const mine = await listAssignments({ scopeType: 'SELF', scopeId: user.id, revealContactTo: world.schedulerId });
+
+    expect(mine.assignments[0]?.practitionerPhone).toBe(user.phone);
+    expect(await reveals()).toHaveLength(0);
+  });
+
+  it('releases nothing when the record cannot be written', async () => {
+    const { world } = await bookedIn(24);
+    const spy = vi.spyOn(prisma, '$transaction').mockRejectedValueOnce(new Error('disk full'));
+
+    await expect(
+      listAssignments({ scopeType: 'FACILITY', scopeId: world.facilityId, revealContactTo: world.schedulerId }),
+    ).rejects.toThrow('disk full');
+
+    spy.mockRestore();
+    expect(await reveals()).toHaveLength(0);
+  });
+
+  describe('through the route', () => {
+    const roster = async (world: World, query = '') => {
+      await issueSession({ userId: world.schedulerId });
+      const response = await listAssignmentsRoute(
+        new Request(`http://localhost/api/v1/assignments?scopeType=FACILITY&scopeId=${world.facilityId}${query}`),
+      );
+      expect(response.status).toBe(200);
+      return (await response.json()) as { assignments: { practitionerPhone: string }[] };
+    };
+
+    it('carries the number only when it is asked for by name, and records the person asking', async () => {
+      const { world, user } = await bookedIn(24);
+
+      expect((await roster(world)).assignments[0]?.practitionerPhone).toBe('');
+      expect(await reveals()).toHaveLength(0);
+
+      expect((await roster(world, '&include=contact')).assignments[0]?.practitionerPhone).toBe(user.phone);
+      const rows = await reveals();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.userId).toBe(world.schedulerId);
+    });
+
+    it('does not let asking for the other details bring the number with them', async () => {
+      const { world } = await bookedIn(24);
+
+      const body = await roster(world, '&include=attendance,timesheet');
+
+      expect(body.assignments[0]?.practitionerPhone).toBe('');
+      expect(await reveals()).toHaveLength(0);
+    });
   });
 });
