@@ -785,12 +785,26 @@ export async function cancelAssignment(input: CancelAssignmentParams): Promise<A
     const updated = await cancelConfirmedBooking(tx, existing, input);
     if (!updated) throw AssignmentErrors.invalidTransition('CANCELLED', 'CANCELLED');
 
-    // Cancelling frees a place, so a filled request opens again.
+    // Cancelling frees a place, so a filled request opens again. That is a change of state like
+    // the one that filled it, and it is audited like it (M17-01): who cancelled, and why.
     if (existing.serviceRequestId) {
-      await tx.serviceRequest.updateMany({
+      const reopened = await tx.serviceRequest.updateMany({
         where: { id: existing.serviceRequestId, status: 'FILLED' },
         data: { status: 'PUBLISHED' },
       });
+      if (reopened.count === 1) {
+        await recordAudit(tx, {
+          action: 'service_request.reopened',
+          entityType: 'service_requests.service_requests',
+          entityId: existing.serviceRequestId,
+          actorId: input.actorId,
+          scopeType: 'FACILITY',
+          scopeId: input.facilityId,
+          reason: input.reason,
+          before: { status: 'FILLED' },
+          after: { status: 'PUBLISHED' },
+        });
+      }
     }
 
     return toAssignmentView(updated);

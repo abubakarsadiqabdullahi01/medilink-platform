@@ -453,6 +453,21 @@ export async function releasePayout(input: {
       data: { status: 'RELEASED', releasedBy: input.actorId, releasedAt: new Date() },
     });
     if (claimed.count !== 1) throw PayoutErrors.wrongStatus(existing.status, 'RELEASED');
+
+    // Who authorised it, written with the claim and not after the send. What follows (the
+    // gateway's answer) is a second row in another transaction, and a process that stops between
+    // the two would otherwise leave a released payout with nothing on the trail saying by whom
+    // (M17-01).
+    await recordAudit(tx, {
+      action: 'payout.release_started',
+      entityType: 'billing.payouts',
+      entityId: existing.id,
+      actorId: input.actorId,
+      scopeType: 'SELF',
+      scopeId: existing.practitionerId,
+      before: { status: 'PREPARED' },
+      after: { status: 'RELEASED' },
+    });
   });
 
   let result;

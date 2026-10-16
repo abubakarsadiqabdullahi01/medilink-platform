@@ -7,6 +7,13 @@ vi.mock('next/headers', async () => {
   return { cookies: () => cookieJar };
 });
 
+// The gateway is the real one, watched: one case asks what the audit trail held at the moment
+// money was about to move.
+vi.mock('@/modules/billing-settlement/infrastructure/gateway', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@/modules/billing-settlement/infrastructure/gateway')>();
+  return { ...original, sendPayout: vi.fn(original.sendPayout) };
+});
+
 // The provider this file is about. Set on the object every module in this file reads,
 // because configuration is parsed once, before a test file's own code runs.
 vi.mock('@/lib/env', async (importOriginal) => {
@@ -21,6 +28,7 @@ vi.mock('@/lib/env', async (importOriginal) => {
 
 import { prisma } from '@/lib/db';
 import { EVENTS } from '@/lib/events';
+import { sendPayout } from '@/modules/billing-settlement/infrastructure/gateway';
 import { POST as cancelRoute } from '@/app/api/v1/payouts/[id]/cancel/route';
 import { POST as failRoute } from '@/app/api/v1/payouts/[id]/fail/route';
 import { POST as settleRoute } from '@/app/api/v1/payouts/[id]/settle/route';
@@ -81,7 +89,7 @@ async function finance() {
   return user;
 }
 
-async function released() {
+async function prepared() {
   const world: World = await buildWorld();
   await approved(world);
   const officer = await finance();
@@ -96,6 +104,11 @@ async function released() {
     payerName: 'The hospital',
   });
   const payout = await preparePayout({ practitionerId: world.practitionerId, actorId: officer.id });
+  return { world, officer, payout };
+}
+
+async function released() {
+  const { world, officer, payout } = await prepared();
   const sent = await releasePayout({ payoutId: payout.id, actorId: officer.id });
   return { world, officer, payout, sent };
 }
@@ -113,6 +126,47 @@ describe('releasing a payout by hand', () => {
     // Still owed: nothing has gone to the bank yet.
     expect(await amountOwed(world.practitionerId)).toBe(GROSS);
     expect(await prisma.outboxEvent.count({ where: { eventType: EVENTS.PayoutSettled } })).toBe(0);
+  });
+});
+
+describe('authorising a release', () => {
+  it('is on the audit trail before the gateway is asked, so a failure in between cannot lose who authorised it', async () => {
+    const { world, officer, payout } = await prepared();
+    const original = vi.mocked(sendPayout).getMockImplementation()!;
+    let heldAtSend: string[] = [];
+    vi.mocked(sendPayout).mockImplementationOnce(async (request) => {
+      heldAtSend = (
+        await prisma.auditLog.findMany({ where: { entityId: request.payoutId }, orderBy: { createdAt: 'asc' } })
+      ).map((row) => row.action);
+      return original(request);
+    });
+
+    await releasePayout({ payoutId: payout.id, actorId: officer.id });
+
+    expect(heldAtSend).toEqual(['payout.prepared', 'payout.release_started']);
+    const started = await prisma.auditLog.findFirstOrThrow({ where: { action: 'payout.release_started' } });
+    expect(started).toMatchObject({
+      entityType: 'billing.payouts',
+      entityId: payout.id,
+      actorId: officer.id,
+      scopeType: 'SELF',
+      scopeId: world.practitionerId,
+      before: { status: 'PREPARED' },
+      after: { status: 'RELEASED' },
+    });
+    // And what came of it is a second row, as before.
+    expect(await prisma.auditLog.count({ where: { entityId: payout.id, action: 'payout.released' } })).toBe(1);
+  });
+
+  it('writes nothing when the release is refused, because the payout was not claimed', async () => {
+    const { officer, payout } = await prepared();
+    await cancelPayout({ payoutId: payout.id, actorId: officer.id, reason: 'Wrong account' });
+
+    await expect(releasePayout({ payoutId: payout.id, actorId: officer.id })).rejects.toMatchObject({
+      code: 'payout_wrong_status',
+    });
+
+    expect(await prisma.auditLog.count({ where: { action: 'payout.release_started' } })).toBe(0);
   });
 });
 
