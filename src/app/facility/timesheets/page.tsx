@@ -140,7 +140,7 @@ export default function TimesheetsPage() {
         `status=${tab}`,
         // The timesheet and its revisions arrive with each row: one request for
         // the page, not one per shift.
-        'include=timesheet',
+        'include=timesheet,contact',
         `limit=${PAGE_SIZE}`,
         from ? `from=${from}` : '',
         to ? `to=${to}` : '',

@@ -15,6 +15,7 @@ import {
   type InvitationStatusValue,
 } from '../domain/assignment';
 import { isContactOpen } from '../domain/contact';
+import { currentTrace } from '@/lib/trace';
 import { initialsOf } from '@/lib/names';
 import type { AssignmentOutcomes } from '../domain/reliability';
 import { recordDeclineAsSuggestion } from '@/modules/suggestions/application/suggestion';
@@ -1212,6 +1213,13 @@ export interface ListAssignmentsQuery {
   to?: Date;
   limit?: number;
   cursor?: string;
+  /**
+   * Who the numbers are for. A facility's roster carries a practitioner's phone only when
+   * somebody is named here, so that each release is somebody's and is on record; a roster
+   * read for any other reason (a list of shifts, an approval screen) has no number in it.
+   * Ignored at SELF scope, where the number is the reader's own.
+   */
+  revealContactTo?: string;
 }
 
 export interface AssignmentQueueRow extends AssignmentView {
@@ -1280,24 +1288,77 @@ export async function listAssignments(query: ListAssignmentsQuery): Promise<Assi
 
   const page = rows.slice(0, limit);
   const now = new Date();
-  const assignments = page.map((row) => ({
-    ...toAssignmentView(row),
-    practitionerName: row.user.fullName,
-    // Their own number is always theirs. A facility sees it only around the shift.
-    practitionerPhone:
-      query.scopeType === 'SELF' ||
-      isContactOpen({ status: row.status, startsAt: row.startsAt, endsAt: row.endsAt, now })
-        ? row.user.phone
-        : '',
-    facilityName: row.serviceRequest.facility.name,
-    shiftType: row.serviceRequest.shiftType,
-    hourlyRateKobo: row.serviceRequest.hourlyRateKobo,
-  }));
+  const released: typeof page = [];
+  const assignments = page.map((row) => {
+    // Their own number is always theirs. A facility sees it only around the shift, and only
+    // when somebody asked for it, because what is released has to be recorded.
+    const own = query.scopeType === 'SELF';
+    const shown =
+      own ||
+      (Boolean(query.revealContactTo) &&
+        isContactOpen({ status: row.status, startsAt: row.startsAt, endsAt: row.endsAt, now }));
+    if (shown && !own) released.push(row);
+
+    return {
+      ...toAssignmentView(row),
+      practitionerName: row.user.fullName,
+      practitionerPhone: shown ? row.user.phone : '',
+      facilityName: row.serviceRequest.facility.name,
+      shiftType: row.serviceRequest.shiftType,
+      hourlyRateKobo: row.serviceRequest.hourlyRateKobo,
+    };
+  });
+
+  // Written before the numbers leave, so one cannot be shown that the record does not know of;
+  // if it cannot be written the roster is not returned.
+  if (released.length > 0) {
+    await recordContactReveals({
+      viewerId: query.revealContactTo!,
+      facilityId: query.scopeId,
+      assignments: released.map((row) => ({ assignmentId: row.id, practitionerId: row.userId })),
+    });
+  }
 
   return {
     assignments,
     nextCursor: rows.length > limit ? (assignments[assignments.length - 1]?.id ?? null) : null,
   };
+}
+
+/**
+ * That a facility user was shown a practitioner's phone number: who, which booking, whose number
+ * and where, a row for each. A read leaves no state change for the audit log to hold, so it is
+ * recorded the way the reading of a credential document is, in `security_events`. The number is
+ * not in the row: who saw it is the question, and the number is the answer.
+ *
+ * One row each time it is shown, not once for good. A practitioner who is harassed needs to know
+ * who could have had the number and when, and "first shown" would hide a later one.
+ */
+async function recordContactReveals(input: {
+  viewerId: string;
+  facilityId: string;
+  assignments: { assignmentId: string; practitionerId: string }[];
+}): Promise<void> {
+  const correlationId = currentTrace()?.correlationId;
+  // One round trip and all or none: a roster is never shown with only some of its releases
+  // recorded. Each row is spelled out with `create` so the catalogue test can find it.
+  await prisma.$transaction(
+    input.assignments.map((revealed) =>
+      prisma.securityEvent.create({
+        data: {
+          userId: input.viewerId,
+          kind: 'contact.revealed',
+          severity: 'info',
+          detail: {
+            assignmentId: revealed.assignmentId,
+            practitionerId: revealed.practitionerId,
+            facilityId: input.facilityId,
+            ...(correlationId ? { correlationId } : {}),
+          },
+        },
+      }),
+    ),
+  );
 }
 
 export interface StatusHistoryEntry {

@@ -214,6 +214,7 @@ export const ACTION_LABELS: Record<string, string> = {
   'consent.granted': 'Consent given',
   'consent.withdrawn': 'Consent withdrawn',
   'credential.document_accessed': 'Credential document viewed',
+  'contact.revealed': 'Phone number shown to a facility',
   'credential.document_confirmed': 'Credential document uploaded',
   'credential.document_upload_requested': 'Credential upload started',
   'credential.expired': 'Credential expired',

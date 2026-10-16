@@ -93,7 +93,9 @@ export default function RosterPage() {
         `scopeId=${facilityId}`,
         `status=${status}`,
         // Each row's attendance arrives with it, so the panels need no request of their own.
-        'include=attendance',
+        // Their numbers too, because this is where a ward manager reaches somebody (inside the
+        // window only, and each showing is recorded).
+        'include=attendance,contact',
         `limit=${PAGE_SIZE}`,
         applied ? `search=${encodeURIComponent(applied)}` : '',
         from ? `from=${from}` : '',

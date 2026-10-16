@@ -133,7 +133,7 @@ export default function ShiftDetailPage() {
     queryKey: ['shift-assignments', facilityId, requestId],
     queryFn: () =>
       api.get<{ assignments: Assignment[] }>(
-        `/api/v1/assignments?scopeType=FACILITY&scopeId=${facilityId}&serviceRequestId=${requestId}`,
+        `/api/v1/assignments?scopeType=FACILITY&scopeId=${facilityId}&serviceRequestId=${requestId}&include=contact`,
       ),
     enabled: Boolean(facilityId),
   });
