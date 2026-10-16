@@ -296,11 +296,16 @@ export async function notifyDisputeStage(
   requireDelivered(outcomes);
 }
 
-/** What a text carries of a reason somebody wrote, so one long note cannot become six messages. */
+/**
+ * What a text carries of a reason somebody wrote, so one long note cannot become six messages.
+ * The cut is marked with three full stops and not the ellipsis character: that one character is
+ * outside the GSM alphabet and turned the whole message into UCS-2, 301 places in five segments
+ * where the same words in the plain alphabet are two.
+ */
 const REASON_MAX = 140;
 function brief(text: string): string {
   const flat = text.replace(/\s+/g, ' ').trim();
-  return flat.length > REASON_MAX ? `${flat.slice(0, REASON_MAX - 1)}…` : flat;
+  return flat.length > REASON_MAX ? `${flat.slice(0, REASON_MAX - 3)}...` : flat;
 }
 
 /**
