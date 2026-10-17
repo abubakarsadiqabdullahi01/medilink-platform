@@ -120,6 +120,16 @@ export const AUDIT_CATALOGUE: Record<string, AuditAction> = {
     entity: 'identity.user_roles',
     what: 'A role was taken away from a person at a scope, with who did it, which role and the reason.',
   },
+  'role.changed': {
+    category: 'security',
+    entity: 'identity.user_roles',
+    what: 'A person’s role at a scope was changed to another in one step, with the role before and after, who did it and why; the old grant ends and the new one begins together.',
+  },
+  'access.emergency_revoked': {
+    category: 'security',
+    entity: 'identity.users',
+    what: 'All of a person’s access at a scope was removed at once, with who did it, the roles that ended and the reason; each role ending is also a role.revoked.',
+  },
   'facility.role_granted': {
     category: 'security',
     entity: 'identity.user_roles',

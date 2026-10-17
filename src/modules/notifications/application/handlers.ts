@@ -341,6 +341,63 @@ export async function notifyTimesheetRejected(payload: Record<string, unknown>):
 }
 
 /**
+ * All of somebody's access to a facility was removed at once: the person is told, and so is
+ * everybody else who can add and remove staff there (other than whoever did it), so that a removal
+ * cannot go unnoticed by the people who run the place.
+ *
+ * Neither text says why, or who was removed, or who did it. A text goes to a phone anybody may
+ * pick up, and the Staff page, signed in, is where those are read.
+ */
+export async function notifyStaffAccessRemoved(payload: Record<string, unknown>): Promise<void> {
+  const userId = String(payload.userId ?? '');
+  const facilityId = String(payload.facilityId ?? '');
+  const byUserId = String(payload.byUserId ?? '');
+  const removedAt = new Date(String(payload.removedAt ?? ''));
+  if (!userId || !facilityId || Number.isNaN(removedAt.getTime())) {
+    logger.warn('staff.access_removed event missing what it needs; skipping notification');
+    return;
+  }
+
+  const facility = await prisma.facility.findUnique({ where: { id: facilityId }, select: { name: true } });
+  if (!facility) {
+    logger.warn('staff.access_removed for a facility that no longer exists', { facilityId });
+    return;
+  }
+
+  const outcomes: NotifyOutcome[] = [];
+
+  // Only a message sent since the removal counts, so a person removed a second time is told again.
+  if (!(await alreadyNotified(userId, 'staff.access_removed', facilityId, removedAt))) {
+    outcomes.push(
+      await notify({
+        userId,
+        kind: 'staff.access_removed',
+        body: `Your access to ${facility.name} on Medilink was removed. If you think this is a mistake, speak to the people who run ${facility.name}. Medilink.`,
+        relatedType: 'facilities.facilities',
+        relatedId: facilityId,
+      }),
+    );
+  }
+
+  const owners = await usersHoldingFacilityPermission(facilityId, 'role.grant');
+  for (const owner of owners) {
+    if (owner.id === byUserId || owner.id === userId) continue;
+    if (await alreadyNotified(owner.id, 'staff.access_removed_owners', facilityId, removedAt)) continue;
+    outcomes.push(
+      await notify({
+        userId: owner.id,
+        kind: 'staff.access_removed_owners',
+        body: `Somebody's access to ${facility.name} on Medilink was removed just now. Open Medilink and look under Staff to see who. Medilink.`,
+        relatedType: 'facilities.facilities',
+        relatedId: facilityId,
+      }),
+    );
+  }
+
+  requireDelivered(outcomes);
+}
+
+/**
  * An invoice that is ready, told to the people at the facility who can read it.
  * Sent when it is issued, not when the draft is raised: a draft is still being
  * checked and is not yet a bill.

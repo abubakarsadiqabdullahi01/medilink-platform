@@ -159,6 +159,22 @@ export const MESSAGES: MessageKind[] = [
     names: 'The facility’s name and the shift’s window. Never the reason the facility gave: that is read on their sheet in the app.',
   },
   {
+    kind: 'staff.access_removed',
+    trigger: { event: 'StaffAccessRemoved' },
+    to: 'The person whose access to a facility was removed',
+    when: 'All of somebody’s access to a facility is removed at once. Taking away one role, the ordinary way to remove somebody, sends nothing.',
+    once: 'Once per removal; a redelivered event sends nothing more.',
+    names: 'The facility’s name. Never why, and never who did it.',
+  },
+  {
+    kind: 'staff.access_removed_owners',
+    trigger: { event: 'StaffAccessRemoved' },
+    to: 'Everybody else who can add and remove staff at that facility, other than whoever did it',
+    when: 'All of somebody’s access to the facility is removed at once.',
+    once: 'Once per person per removal; a redelivered event sends nothing more.',
+    names: 'The facility’s name. Never who was removed, who did it, or why: the Staff page shows who.',
+  },
+  {
     kind: 'dispute.opened',
     trigger: { event: 'DisputeOpened' },
     to: 'The other side of the case, and everyone who holds `dispute.manage` across the platform. Not the person who opened it.',
@@ -391,6 +407,7 @@ export const EVENT_COVERAGE: Record<EventKey, EventCoverage> = {
   DisputeWithdrawn: { kinds: ['dispute.withdrawn'] },
   ClinicalIncidentReported: { kinds: ['incident.severe'] },
   SuggestionAnswered: { kinds: ['suggestion.answered'] },
+  StaffAccessRemoved: { kinds: ['staff.access_removed', 'staff.access_removed_owners'] },
 };
 
 const TRIGGER_LABEL = (trigger: MessageKind['trigger']): string =>

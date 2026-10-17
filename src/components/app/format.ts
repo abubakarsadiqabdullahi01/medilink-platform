@@ -292,6 +292,8 @@ export const ACTION_LABELS: Record<string, string> = {
   'retention.purged': 'Old data deleted',
   'role.granted': 'Access granted',
   'role.revoked': 'Access removed',
+  'role.changed': 'Role changed',
+  'access.emergency_revoked': 'All access removed',
   'sanction_list.entries_added': 'Sanctions list entries added',
   'sanction_list.entry_removed': 'Sanctions list entry removed',
   'service_request.cancelled': 'Shift cancelled',

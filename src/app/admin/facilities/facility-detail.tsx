@@ -17,6 +17,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
 import { Detail, DetailGrid, PageHeader } from '@/components/app/page-shell';
 import { DocumentDialog } from '@/components/app/document-dialog';
+import { StaffManager } from '@/components/app/staff-manager';
+import { FACILITY_STAFF_ROLES } from '@/lib/ui/staff-roles';
 import { actionLabel, formatAgo, formatDate, formatWhen } from '@/components/app/format';
 
 /**
@@ -180,6 +182,7 @@ export function FacilityDetail({ facility, onBack }: { facility: Facility; onBac
         <Tabs defaultValue="details">
           <TabsList>
             <TabsTrigger value="details">Details</TabsTrigger>
+            <TabsTrigger value="staff">Staff</TabsTrigger>
             <TabsTrigger value="history">History</TabsTrigger>
           </TabsList>
 
@@ -358,6 +361,22 @@ export function FacilityDetail({ facility, onBack }: { facility: Facility; onBac
                 </CardContent>
               </Card>
             ) : null}
+          </TabsContent>
+
+          {/* Medilink's view of who can act for the facility. Mounted only when opened, because
+              reading the list asks for a password: nobody should meet that prompt for a tab
+              they did not open. This is where an owner who is the problem is dealt with. */}
+          <TabsContent value="staff" className="space-y-4 pt-5">
+            <p className="text-sm text-muted-foreground">
+              Who can act for this facility. Medilink may remove a facility&apos;s last owner, which its
+              own people may not, and every change is recorded with who made it and why.
+            </p>
+            <StaffManager
+              scopeType="FACILITY"
+              scopeId={facility.id}
+              roles={FACILITY_STAFF_ROLES}
+              signupPath="/register?as=staff"
+            />
           </TabsContent>
 
           <TabsContent value="history" className="pt-5">
