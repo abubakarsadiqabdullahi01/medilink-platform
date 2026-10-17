@@ -373,6 +373,34 @@ describe('running a match', () => {
     expect(excluded(result.body)[0]?.reasons).toContain('unavailable');
   });
 
+  it('says part, not none, for a practitioner who offered only part of the shift', async () => {
+    const world = await buildWorld();
+    const partly = await eligiblePractitioner(world, { available: false });
+    // Free for the first half of the shift and no more.
+    await addSlot({
+      userId: partly.id,
+      kind: 'ONE_OFF',
+      startsAt: new Date(SHIFT_START.getTime() - 60 * 60 * 1000),
+      endsAt: new Date(SHIFT_START.getTime() + 4 * 60 * 60 * 1000),
+    });
+    const noneAtAll = await eligiblePractitioner(world, { available: false });
+    // Free the week before, which is nothing of this shift.
+    await addSlot({
+      userId: noneAtAll.id,
+      kind: 'ONE_OFF',
+      startsAt: new Date(SHIFT_START.getTime() - 7 * 24 * 60 * 60 * 1000),
+      endsAt: new Date(SHIFT_START.getTime() - 6 * 24 * 60 * 60 * 1000),
+    });
+    await issueSession({ userId: world.schedulerId });
+
+    const result = await callMatch(world.requestId, world.facilityId);
+
+    // Anonymous, and counted by the reason: one of each, and no way to say which is which.
+    expect(ranked(result.body)).toHaveLength(0);
+    expect(excluded(result.body).map((row) => row.reasons).sort()).toEqual([['partly_available'], ['unavailable']]);
+    expect(JSON.stringify(excluded(result.body))).not.toContain(partly.id);
+  });
+
   it('excludes a practitioner without the requested specialty', async () => {
     const world = await buildWorld({ specialtyRequired: true });
     await eligiblePractitioner(world);

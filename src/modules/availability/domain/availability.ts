@@ -119,7 +119,12 @@ export function mergeWindows(windows: TimeWindow[]): TimeWindow[] {
 
 export interface AvailabilityVerdict {
   available: boolean;
-  reason: 'available' | 'blocked' | 'not_offered';
+  /**
+   * Why not, in the three ways that mean something to the person asking: they blocked the time,
+   * they offered none of it, or they offered part of it. The last is told apart from the second
+   * because it is the one a facility can do something about, by shortening or splitting the shift.
+   */
+  reason: 'available' | 'blocked' | 'not_offered' | 'partly_offered';
 }
 
 /**
@@ -149,8 +154,12 @@ export function availabilityFor(
       candidate.endsAt.getTime() >= window.endsAt.getTime(),
   );
 
-  return covering
-    ? { available: true, reason: 'available' }
+  if (covering) return { available: true, reason: 'available' };
+
+  // Some of what they offered falls inside the shift, but no stretch of it covers the whole.
+  // Touching is not overlapping: a slot that ends the moment the shift starts offers none of it.
+  return offered.some((candidate) => overlaps(candidate, window))
+    ? { available: false, reason: 'partly_offered' }
     : { available: false, reason: 'not_offered' };
 }
 

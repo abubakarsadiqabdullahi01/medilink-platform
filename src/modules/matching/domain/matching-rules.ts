@@ -61,7 +61,11 @@ export const EXCLUSION_RULES: Record<ExclusionReason, ExclusionRule> = {
   },
   unavailable: {
     about: 'their time',
-    rule: 'They have not offered the whole shift: no availability they set covers it from its start to its end, or they have offered none.',
+    rule: 'None of the availability they set touches the shift, or they have offered none. A slot that ends the moment the shift starts offers none of it.',
+  },
+  partly_available: {
+    about: 'their time',
+    rule: 'What they offered covers part of the shift but no stretch of it covers the whole, from its start to its end: half a night shift is not a night shift. Told apart from `unavailable` because it is the one a facility can do something about, by shortening or splitting the shift.',
   },
   blocked: {
     about: 'their time',
@@ -77,6 +81,56 @@ export const EXCLUSION_RULES: Record<ExclusionReason, ExclusionRule> = {
   },
 };
 
+/**
+ * What a facility is told for each reason: a short name for a badge and one sentence, in words a
+ * ward manager would use. It is the audience that matters. A facility is told why its pool is
+ * thin and never whose diary it is, so the words for the three availability reasons say that
+ * the time was marked unavailable, offered not at all or offered in part, and never what for or
+ * which days somebody works. `matching-rules.test.ts` holds both to that.
+ */
+export const EXCLUSION_WORDS: Record<ExclusionReason, { label: string; says: string }> = {
+  category_mismatch: {
+    label: 'Other profession',
+    says: 'Registered in a different profession from the one this shift asks for.',
+  },
+  specialty_mismatch: {
+    label: 'Different specialty',
+    says: 'Does not hold the specialty this shift asks for.',
+  },
+  level_mismatch: {
+    label: 'Different level',
+    says: 'Is not recorded at the level this shift asks for.',
+  },
+  supervision_required: {
+    label: 'Needs supervision',
+    says: 'Works under supervision, and this shift does not say anybody is there to supervise them.',
+  },
+  not_eligible: {
+    label: 'Not yet cleared',
+    says: 'Has not finished what Medilink needs before somebody can be offered work, such as a checked licence or identity.',
+  },
+  unavailable: {
+    label: 'Not offering this time',
+    says: 'Has not offered any of this shift as time they can work.',
+  },
+  partly_available: {
+    label: 'Free for part of it',
+    says: 'Has offered part of the shift but not all of it, so shortening or splitting the shift would bring them in.',
+  },
+  blocked: {
+    label: 'Marked unavailable',
+    says: 'Has marked this time as unavailable. Medilink does not show why.',
+  },
+  already_assigned: {
+    label: 'Already booked',
+    says: 'Is already confirmed on another shift at this time.',
+  },
+  travel_preference: {
+    label: 'Prefers to stay closer',
+    says: 'Has said they only work close to home, and this facility is further than that.',
+  },
+};
+
 /** The order the table is read in: what a request asks for first, then the person, their time, their wishes. */
 const EXCLUSION_ORDER: ExclusionReason[] = [
   'category_mismatch',
@@ -85,6 +139,7 @@ const EXCLUSION_ORDER: ExclusionReason[] = [
   'supervision_required',
   'not_eligible',
   'unavailable',
+  'partly_available',
   'blocked',
   'already_assigned',
   'travel_preference',
@@ -296,7 +351,8 @@ function workedExample(): string {
 
 export function renderMatchingRules(): string {
   const exclusions = EXCLUSION_ORDER.map(
-    (reason) => `| \`${reason}\` | ${EXCLUSION_RULES[reason].about} | ${EXCLUSION_RULES[reason].rule} |`,
+    (reason) =>
+      `| \`${reason}\` | ${EXCLUSION_RULES[reason].about} | ${EXCLUSION_RULES[reason].rule} | ${EXCLUSION_WORDS[reason].label} |`,
   );
 
   return [
@@ -317,11 +373,11 @@ export function renderMatchingRules(): string {
     '',
     'A person is excluded if **any** of these applies. All the reasons that apply are recorded, not only the first, so that “why did nobody match?” has a whole answer.',
     '',
-    '| Reason | About | Applies when |',
-    '| --- | --- | --- |',
+    '| Reason | About | Applies when | Shown to a facility as |',
+    '| --- | --- | --- | --- |',
     ...exclusions,
     '',
-    'A facility is shown the reasons but not whose they are: whose diary is full is that person’s business. A practitioner who is ranked is shown to the facility by initials only, with no phone number, until a booking exists.',
+    'A facility is shown the reasons, counted, with the short name in the last column and a sentence under it, but not whose they are: whose diary is full is that person’s business. A practitioner who is ranked is shown to the facility by initials only, with no phone number, until a booking exists.',
     '',
     '## How the rest are ranked',
     '',

@@ -117,6 +117,10 @@ describe('hard filters', () => {
     );
   });
 
+  it('says partly available, and not unavailable, for somebody who offered only part of the shift', () => {
+    expect(exclusionsFor(REQUEST, candidate({ availability: 'partly_offered' }))).toEqual(['partly_available']);
+  });
+
   it('excludes somebody already working then', () => {
     expect(exclusionsFor(REQUEST, candidate({ hasConflictingAssignment: true }))).toContain(
       'already_assigned',

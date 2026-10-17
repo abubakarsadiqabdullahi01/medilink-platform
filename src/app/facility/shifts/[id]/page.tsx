@@ -20,6 +20,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
 import { Detail, DetailGrid, EmptyState, PageHeader } from '@/components/app/page-shell';
 import { formatNaira, formatWhen } from '@/components/app/format';
+import { EXCLUSION_WORDS } from '@/modules/matching/domain/matching-rules';
+import type { ExclusionReason } from '@/modules/matching/domain/engine';
 
 interface ServiceRequest {
   id: string;
@@ -435,13 +437,23 @@ export default function ShiftDetailPage() {
                   <summary className="cursor-pointer text-sm text-muted-foreground">
                     {matchRun.excluded.length} left out, and why
                   </summary>
-                  <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-                    {Object.entries(countReasons(matchRun.excluded)).map(([reason, count]) => (
-                      <Badge key={reason} variant="secondary">
-                        {humanise(reason)} · {count}
-                      </Badge>
-                    ))}
-                  </div>
+                  {/* The reason counted, and what it means in a ward manager's words. For somebody
+                      who offered part of the shift, that is the one thing here worth acting on. */}
+                  <ul className="mt-3 space-y-2">
+                    {Object.entries(countReasons(matchRun.excluded)).map(([reason, count]) => {
+                      const words = EXCLUSION_WORDS[reason as ExclusionReason];
+                      return (
+                        <li key={reason} className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                          <Badge variant="secondary">
+                            {words?.label ?? humanise(reason)} · {count}
+                          </Badge>
+                          {words ? (
+                            <span className="text-xs text-muted-foreground">{words.says}</span>
+                          ) : null}
+                        </li>
+                      );
+                    })}
+                  </ul>
                   <p className="mt-2 text-xs text-muted-foreground">
                     People are not named here: this list explains why the pool is the size it is,
                     not who is busy or unverified.

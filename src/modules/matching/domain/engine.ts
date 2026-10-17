@@ -15,13 +15,14 @@ export type ExclusionReason =
   | 'level_mismatch'
   | 'supervision_required'
   | 'unavailable'
+  | 'partly_available'
   | 'blocked'
   | 'already_assigned'
   | 'travel_preference';
 
 export type ProximityTier = 'SAME_LGA' | 'SAME_STATE' | 'ELSEWHERE';
 export type TravelPreferenceValue = 'SAME_LGA' | 'SAME_STATE' | 'ANYWHERE';
-export type AvailabilityOutcome = 'available' | 'blocked' | 'not_offered';
+export type AvailabilityOutcome = 'available' | 'blocked' | 'not_offered' | 'partly_offered';
 
 /**
  * Weights, out of 100. They are here rather than in a config table on
@@ -180,6 +181,7 @@ export function exclusionsFor(
 
   if (candidate.availability === 'blocked') reasons.push('blocked');
   else if (candidate.availability === 'not_offered') reasons.push('unavailable');
+  else if (candidate.availability === 'partly_offered') reasons.push('partly_available');
 
   if (candidate.hasConflictingAssignment) reasons.push('already_assigned');
 

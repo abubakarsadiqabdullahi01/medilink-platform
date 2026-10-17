@@ -19,7 +19,7 @@ import {
   type RequestInput,
 } from './engine';
 import { reliabilityFrom } from './reliability';
-import { EXCLUSION_RULES, clearCandidate, renderMatchingRules } from './matching-rules';
+import { EXCLUSION_RULES, EXCLUSION_WORDS, clearCandidate, renderMatchingRules } from './matching-rules';
 
 /**
  * M07-03: how matching ranks and excludes people, written down once and held to the engine.
@@ -67,6 +67,7 @@ describe('the reasons for exclusion', () => {
     supervision_required: { request: { supervisionAvailable: false }, candidate: { supervised: true } },
     not_eligible: { candidate: { eligible: false } },
     unavailable: { candidate: { availability: 'not_offered' } },
+    partly_available: { candidate: { availability: 'partly_offered' } },
     blocked: { candidate: { availability: 'blocked' } },
     already_assigned: { candidate: { hasConflictingAssignment: true } },
     travel_preference: { candidate: { travelPreference: 'SAME_LGA', proximity: 'SAME_STATE' } },
@@ -102,7 +103,13 @@ describe('the reasons for exclusion', () => {
         proximity: 'ELSEWHERE',
       }),
     );
-    expect(everything.sort()).toEqual(Object.keys(ONLY).filter((reason) => reason !== 'unavailable').sort());
+    // One availability verdict is passed in, so only one of blocked, unavailable and partly
+    // available can be reported for somebody.
+    expect(everything.sort()).toEqual(
+      Object.keys(ONLY)
+        .filter((reason) => reason !== 'unavailable' && reason !== 'partly_available')
+        .sort(),
+    );
   });
 
   it('treats a request that names no specialty or level as accepting any', () => {
@@ -127,6 +134,50 @@ describe('the reasons for exclusion', () => {
     // One availability verdict is passed in, and it is `blocked` ahead of `not_offered`:
     // availability.test.ts holds the order; the engine reports whichever it is given.
     expect(exclusionsFor(REQUEST, clearCandidate({ availability: 'blocked' }))).toEqual(['blocked']);
+  });
+});
+
+describe('the words a facility is given for each reason', () => {
+  const reasons = Object.keys(EXCLUSION_RULES) as ExclusionReason[];
+
+  it('are there for every reason, as a short name and a sentence', () => {
+    expect(Object.keys(EXCLUSION_WORDS).sort()).toEqual([...reasons].sort());
+    for (const reason of reasons) {
+      const { label, says } = EXCLUSION_WORDS[reason];
+      expect(label.length, reason).toBeGreaterThan(2);
+      expect(label.length, `${reason}: a name fits in a badge`).toBeLessThanOrEqual(32);
+      expect(says.length, reason).toBeGreaterThan(25);
+      expect(says.endsWith('.'), `${reason}: end the sentence`).toBe(true);
+    }
+  });
+
+  it('give each reason its own name, so two badges never read alike', () => {
+    const labels = reasons.map((reason) => EXCLUSION_WORDS[reason].label);
+    expect(new Set(labels).size).toBe(labels.length);
+  });
+
+  it('tell the three availability reasons apart in words a ward manager would use', () => {
+    expect(EXCLUSION_WORDS.blocked.label).toMatch(/unavailable|blocked/i);
+    expect(EXCLUSION_WORDS.unavailable.says).toMatch(/not offered|has not offered|no availability/i);
+    expect(EXCLUSION_WORDS.partly_available.says).toMatch(/part of the shift/i);
+    expect(EXCLUSION_WORDS.partly_available.says).toMatch(/shorten|split/i);
+  });
+
+  it('keep a practitioner’s private routine out of what a facility reads', () => {
+    // A block is leave, training or whatever the person did not want to say, and a facility is
+    // told only that the time was marked unavailable, never what for or which days they work.
+    for (const reason of ['blocked', 'unavailable', 'partly_available'] as const) {
+      expect(EXCLUSION_WORDS[reason].says, reason).not.toMatch(
+        /leave|training|away|sick|ill\b|holiday|family|funeral|church|mosque|monday|tuesday|wednesday|thursday|friday|saturday|sunday/i,
+      );
+    }
+  });
+
+  it('are on the page, beside each reason', () => {
+    const page = renderMatchingRules();
+    for (const reason of reasons) {
+      expect(page, reason).toContain(EXCLUSION_WORDS[reason].label);
+    }
   });
 });
 
