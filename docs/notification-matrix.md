@@ -6,7 +6,7 @@ It answers “why was nobody told?” for each thing the platform does. A test h
 
 ## How a message goes
 
-- **One channel today: SMS.** Every message is also kept as a row in the person’s in-app inbox, which is the same text and is what the bell shows. There is no email, push or WhatsApp (`NOT-09`) and no preference to switch a message off (`NOT-08`): every message below is sent to everyone it names.
+- **One channel today: SMS.** Every message is also kept as a row in the person’s in-app inbox, which is the same text and is what the bell shows. The one exception is the invitation text (`staff.invited`), which goes to a number that may have no account: it is recorded on the invitation instead, with whether the gateway took it. There is no email, push or WhatsApp (`NOT-09`) and no preference to switch a message off (`NOT-08`): every message below is sent to everyone it names.
 - **A text that does not go is retried.** An event’s handler throws when a text failed, after trying everybody, so the outbox retries the event with backoff and parks it as a dead letter an operator can see. A scheduled job fails the same way and its next run reaches whoever was missed. A second gateway takes over when the first fails, if one is configured.
 - **Once is once.** Each message is checked against what the person has already been sent before it goes, so a redelivered event or a second run of a job sends nothing more.
 - **Names, not arguments.** Every text goes to a phone anybody may pick up, so none carries a patient, a clinical summary, a person’s full name where initials do, or what was argued in a dispute.
@@ -33,6 +33,9 @@ It answers “why was nobody told?” for each thing the platform does. A test h
 | `timesheet.rejected` | The facility sends their hours back. | The practitioner the record is about | Once per rejection. | The facility’s name and the shift’s window. Never the reason the facility gave: that is read on their sheet in the app. | `timesheet.rejected` |
 | `staff.access_removed` | All of somebody’s access to a facility is removed at once. Taking away one role, the ordinary way to remove somebody, sends nothing. | The person whose access to a facility was removed | Once per removal; a redelivered event sends nothing more. | The facility’s name. Never why, and never who did it. | `staff.access_removed` |
 | `staff.access_removed_owners` | All of somebody’s access to the facility is removed at once. | Everybody else who can add and remove staff at that facility, other than whoever did it | Once per person per removal; a redelivered event sends nothing more. | The facility’s name. Never who was removed, who did it, or why: the Staff page shows who. | `staff.access_removed` |
+| `staff.invited` | A facility invites somebody to work for it. Not if the invitation was answered, cancelled or ran out before the worker ran. | The number a facility invited, which may belong to nobody registered yet | Once per invitation; a redelivered event sends nothing more. A text the gateway refused is retried until it goes. | The facility’s name and the role, in fixed words: nothing the facility typed, no link and no number. The one message not kept in an inbox, since the number may have no account; the invitation records whether it went. | `staff.invited` |
+| `staff.invitation_accepted` | The person invited accepts, and the role is given. | The person who sent the invitation | Once per invitation. | The facility’s name and the role. Never who accepted: the Staff page shows who joined. | `staff.invitation_answered` |
+| `staff.invitation_declined` | The person invited declines. | The person who sent the invitation | Once per invitation. | The facility’s name and the role. Never who declined. | `staff.invitation_answered` |
 | `dispute.opened` | A dispute is opened over a shift. | The other side of the case, and everyone who holds `dispute.manage` across the platform. Not the person who opened it. | Once per person per case. | The shift’s window. Never the reason argued. | `dispute.opened` |
 | `dispute.under_review` | An officer starts reviewing it. | Both sides of the case | Once per person per case. | The shift. Not what was argued or the officer’s notes. | `dispute.under_review` |
 | `dispute.resolved` | An officer decides it. | Both sides of the case | Once per person per case. | The outcome, and a pointer to the reasons, which are in the app. | `dispute.resolved` |
@@ -75,6 +78,8 @@ It answers “why was nobody told?” for each thing the platform does. A test h
 | `timesheet.approved` | `timesheet.approved` | Completes the assignment first, so a failure to tell anyone cannot leave an approved shift unfinished. |
 | `timesheet.rejected` | `timesheet.rejected` |  |
 | `staff.access_removed` | `staff.access_removed`, `staff.access_removed_owners` |  |
+| `staff.invited` | `staff.invited` |  |
+| `staff.invitation_answered` | `staff.invitation_accepted`, `staff.invitation_declined` |  |
 | `timesheet.recalculated` | `timesheet.recalculated` |  |
 | `invoice.created` | Nobody | A draft is the administrator’s working copy and nobody else has seen it; issuing it is what tells the facility. |
 | `invoice.issued` | `invoice.issued` |  |

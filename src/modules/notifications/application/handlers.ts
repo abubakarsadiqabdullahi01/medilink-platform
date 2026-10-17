@@ -1,10 +1,14 @@
 import { prisma } from '@/lib/db';
+import { recordAudit } from '@/lib/audit';
 import { logger } from '@/lib/logger';
 import { watWindow } from '@/lib/wat';
 import {
   usersHoldingFacilityPermission,
   usersHoldingPlatformPermission,
 } from '@/modules/auth/application/grants';
+import { attemptSms } from '@/lib/sms';
+import { toSmsText } from '@/lib/sms-text';
+import { invitationText } from '@/modules/auth/domain/staff-invitation';
 import { notify, requireDelivered, type NotifyOutcome } from './notify';
 
 /**
@@ -395,6 +399,104 @@ export async function notifyStaffAccessRemoved(payload: Record<string, unknown>)
   }
 
   requireDelivered(outcomes);
+}
+
+/**
+ * The text that tells somebody a facility has invited them to work for it.
+ *
+ * Unlike every other message it goes to a number, not to an account: the person may not have
+ * registered yet, so there is no inbox to record it in, and what the gateway said is kept on the
+ * invitation instead. It is sent once, and not at all if the invitation was answered, cancelled or
+ * has run out before the worker got to it. A refusal by the gateway fails the event so it is
+ * retried, with the reason on the invitation for whoever looks.
+ *
+ * The words are fixed and carry the facility's name and the role; nothing a person typed freely
+ * goes to a stranger's phone, and there is no link, so the text cannot be forwarded as a way in.
+ */
+export async function notifyStaffInvited(payload: Record<string, unknown>): Promise<void> {
+  const invitationId = String(payload.invitationId ?? '');
+  if (!invitationId) {
+    logger.warn('staff.invited event missing the invitation; skipping notification');
+    return;
+  }
+
+  const invitation = await prisma.staffInvitation.findUnique({
+    where: { id: invitationId },
+    include: { facility: { select: { name: true } } },
+  });
+  if (!invitation) {
+    logger.warn('staff.invited for an invitation that no longer exists', { invitationId });
+    return;
+  }
+  // Answered, cancelled or lapsed since: a text now would invite somebody to something that is gone.
+  if (invitation.status !== 'PENDING' || invitation.expiresAt.getTime() <= Date.now()) return;
+  // Once is once: a redelivered event sends nothing more.
+  if (invitation.smsSentAt) return;
+
+  const body = toSmsText(invitationText({ facilityName: invitation.facility.name, roleKey: invitation.roleKey }));
+  const attempt = await attemptSms({ to: invitation.phone, body });
+
+  const reason = attempt.reason ?? 'The SMS was not delivered.';
+  await prisma.$transaction(async (tx) => {
+    await tx.staffInvitation.update({
+      where: { id: invitation.id },
+      data: attempt.delivered ? { smsSentAt: new Date(), smsFailureReason: null } : { smsFailureReason: reason },
+    });
+    await recordAudit(tx, {
+      action: attempt.delivered ? 'staff_invitation.text_sent' : 'staff_invitation.text_failed',
+      entityType: 'identity.staff_invitations',
+      entityId: invitation.id,
+      actorType: 'worker',
+      scopeType: 'FACILITY',
+      scopeId: invitation.facilityId,
+      after: attempt.delivered ? { delivered: true } : { delivered: false, reason },
+    });
+  });
+
+  const kind = 'staff.invited';
+  logger.info('staff invitation texted', { kind, delivered: attempt.delivered });
+  requireDelivered([{ sent: attempt.delivered, reason: attempt.delivered ? null : (attempt.reason ?? null) }]);
+}
+
+/**
+ * The person who sent an invitation, told how it was answered. Neither text names who answered or
+ * says why: it goes to a phone anybody may pick up, and the Staff page shows who joined.
+ */
+export async function notifyStaffInvitationAnswered(payload: Record<string, unknown>): Promise<void> {
+  const invitationId = String(payload.invitationId ?? '');
+  const decision = String(payload.decision ?? '');
+  if (!invitationId || (decision !== 'accepted' && decision !== 'declined')) {
+    logger.warn('staff.invitation_answered event missing what it needs; skipping notification');
+    return;
+  }
+
+  const invitation = await prisma.staffInvitation.findUnique({
+    where: { id: invitationId },
+    include: { facility: { select: { name: true } } },
+  });
+  if (!invitation) {
+    logger.warn('staff.invitation_answered for an invitation that no longer exists', { invitationId });
+    return;
+  }
+
+  const kind = decision === 'accepted' ? 'staff.invitation_accepted' : 'staff.invitation_declined';
+  if (await alreadyNotified(invitation.invitedBy, kind, invitation.id)) return;
+
+  const role = invitation.roleKey === 'facility_owner' ? 'an owner' : 'a facility administrator';
+  const body =
+    decision === 'accepted'
+      ? `Your invitation to join ${invitation.facility.name} as ${role} on Medilink was accepted. Open Medilink and look under Staff to see who. Medilink.`
+      : `Your invitation to join ${invitation.facility.name} as ${role} on Medilink was declined. Medilink.`;
+
+  requireDelivered([
+    await notify({
+      userId: invitation.invitedBy,
+      kind,
+      body,
+      relatedType: 'identity.staff_invitations',
+      relatedId: invitation.id,
+    }),
+  ]);
 }
 
 /**

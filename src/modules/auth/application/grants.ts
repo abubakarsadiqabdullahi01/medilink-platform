@@ -95,7 +95,7 @@ export function grantableRoles(): { key: string; permissions: Permission[] }[] {
  * which looks exactly like a grant that silently failed, and cost a day the
  * first time it happened.
  */
-async function ensureRole(tx: Tx, key: string) {
+export async function ensureRole(tx: Tx, key: string) {
   const permissions = ROLE_PERMISSIONS[key];
   if (!permissions) throw GrantErrors.unknownRole(key);
 
@@ -322,12 +322,12 @@ export function holdsPlatformAuthority(grants: { permission: string; scopeType: 
 }
 
 /** One lock per scope, so two people changing who can appoint at the same facility are taken one at a time. */
-async function lockScope(tx: Tx, scope: { type: string; id?: string | null }): Promise<void> {
+export async function lockScope(tx: Tx, scope: { type: string; id?: string | null }): Promise<void> {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`staff-access:${scope.type}:${scope.id ?? ''}`}, 0))`;
 }
 
 /** Accounts that can sign in: an owner who cannot is an owner nobody can ask. */
-const CAN_SIGN_IN: Prisma.UserWhereInput = { deletedAt: null, status: { in: ['ACTIVE', 'UNDER_REVIEW'] } };
+export const CAN_SIGN_IN: Prisma.UserWhereInput = { deletedAt: null, status: { in: ['ACTIVE', 'UNDER_REVIEW'] } };
 
 /**
  * Somebody other than `userId` who holds a permission over the scope and can sign in.

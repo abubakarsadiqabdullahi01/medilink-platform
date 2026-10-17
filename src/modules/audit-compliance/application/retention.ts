@@ -70,6 +70,23 @@ export async function purgeExpiredData(input: { now?: Date } = {}): Promise<Purg
     ).count,
   );
 
+  // Ended, not merely old: an invitation still waiting is somebody's to answer. Answered and
+  // cancelled ones carry the day they ended; one that ran out unanswered ended on its date.
+  const invitationsBefore = cutoff(now, 'staff_invitations');
+  record(
+    'staff_invitations',
+    (
+      await prisma.staffInvitation.deleteMany({
+        where: {
+          OR: [
+            { respondedAt: { lt: invitationsBefore } },
+            { respondedAt: null, expiresAt: { lt: invitationsBefore } },
+          ],
+        },
+      })
+    ).count,
+  );
+
   const files = await deleteAbandonedUploads(now);
   record('abandoned_uploads', files.deleted);
 

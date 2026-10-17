@@ -12,6 +12,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PageHeader } from '@/components/app/page-shell';
+import { MyInvitations } from '@/components/app/my-invitations';
 import { FacilityAgreements } from './facility-agreements';
 
 /** The shape of /api/v1/dashboard/facility; a section is absent when the caller may not see it. */
@@ -155,6 +156,9 @@ export default function FacilityDashboard() {
         title={facility.data?.name ?? 'Your facility'}
         description="What this facility has open, and what is waiting on somebody here."
       />
+
+      {/* Invited to a facility, and not yet part of one, is where an account created for this lands. */}
+      <MyInvitations />
 
       {unverified ? (
         <Alert variant={facility.data?.status === 'PENDING' ? 'warning' : 'destructive'} className="mb-6">

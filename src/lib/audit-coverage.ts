@@ -28,6 +28,7 @@ export const AUDITED_MODELS: Readonly<Record<string, string>> = {
   Permission: 'identity.permissions',
   RolePermission: 'identity.role_permissions',
   UserRole: 'identity.user_roles',
+  StaffInvitation: 'identity.staff_invitations',
   Session: 'identity.sessions',
   Device: 'identity.devices',
   OtpCode: 'identity.otp_codes',

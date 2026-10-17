@@ -283,3 +283,95 @@ describe('running on a schedule', () => {
     expect(typeof jobs['retention.purge_sweep']).toBe('function');
   });
 });
+
+describe('invitations to work for a facility', () => {
+  async function invitation(
+    facilityId: string,
+    invitedBy: string,
+    input: { status: 'PENDING' | 'ACCEPTED' | 'DECLINED' | 'CANCELLED' | 'EXPIRED'; respondedAt?: Date; expiresAt: Date },
+  ) {
+    invitationCounter += 1;
+    return prisma.staffInvitation.create({
+      data: {
+        facilityId,
+        phone: `+23480555${String(invitationCounter).padStart(5, '0')}`,
+        roleKey: 'facility_administrator',
+        invitedBy,
+        status: input.status,
+        respondedAt: input.respondedAt,
+        expiresAt: input.expiresAt,
+        createdAt: daysAgo(200),
+      },
+    });
+  }
+  let invitationCounter = 0;
+
+  async function facilityAndInviter() {
+    const { createFacility } = await import('@/modules/facilities/application/facility');
+    const { createFacilityType, createState, ensureRole } = await import('./support/fixtures');
+    const { ROLE_PERMISSIONS } = await import('@/lib/authz/permissions');
+    await ensureRole('facility_owner', ROLE_PERMISSIONS.facility_owner ?? []);
+    const owner = await createUser({ fullName: 'Owner' });
+    const operations = await createUser({ fullName: 'Operations' });
+    const facility = await createFacility({
+      name: 'Retention Test Hospital',
+      facilityTypeId: (await createFacilityType()).id,
+      cacNumber: `RC${700_000 + Math.floor(Math.random() * 99_999)}`,
+      stateId: (await createState()).id,
+      addressLine: '1 Hospital Road',
+      contactPhone: '+2348031234567',
+      representativeUserId: owner.id,
+      actorId: operations.id,
+    });
+    return { facilityId: facility.id, ownerId: owner.id };
+  }
+
+  const days = purgeDaysFor('staff_invitations');
+
+  it('removes ones that ended more than the period ago, however they ended, with their numbers', async () => {
+    const { facilityId, ownerId } = await facilityAndInviter();
+    const answered = await invitation(facilityId, ownerId, {
+      status: 'ACCEPTED',
+      respondedAt: daysAgo(days + 1),
+      expiresAt: daysAgo(days - 5),
+    });
+    const declined = await invitation(facilityId, ownerId, {
+      status: 'DECLINED',
+      respondedAt: daysAgo(days + 5),
+      expiresAt: daysAgo(days),
+    });
+    const cancelled = await invitation(facilityId, ownerId, {
+      status: 'CANCELLED',
+      respondedAt: daysAgo(days + 2),
+      expiresAt: daysAgo(days - 3),
+    });
+    const lapsed = await invitation(facilityId, ownerId, { status: 'EXPIRED', expiresAt: daysAgo(days + 1) });
+    // Never marked, so still "pending" on the table, and long past its date.
+    const unmarked = await invitation(facilityId, ownerId, { status: 'PENDING', expiresAt: daysAgo(days + 1) });
+
+    const report = await purgeExpiredData({ now: NOW });
+
+    expect(report.deleted.staff_invitations).toBe(5);
+    for (const row of [answered, declined, cancelled, lapsed, unmarked]) {
+      expect(await prisma.staffInvitation.findUnique({ where: { id: row.id } })).toBeNull();
+    }
+  });
+
+  it('keeps one still waiting, and ones that ended inside the period', async () => {
+    const { facilityId, ownerId } = await facilityAndInviter();
+    const waiting = await invitation(facilityId, ownerId, { status: 'PENDING', expiresAt: daysAgo(-3) });
+    const recent = await invitation(facilityId, ownerId, {
+      status: 'ACCEPTED',
+      respondedAt: daysAgo(days - 1),
+      expiresAt: daysAgo(days - 7),
+    });
+    const justExpired = await invitation(facilityId, ownerId, { status: 'EXPIRED', expiresAt: daysAgo(days - 1) });
+
+    const report = await purgeExpiredData({ now: NOW });
+
+    expect(report.deleted.staff_invitations).toBeUndefined();
+    for (const row of [waiting, recent, justExpired]) {
+      expect(await prisma.staffInvitation.findUnique({ where: { id: row.id } })).not.toBeNull();
+    }
+  });
+});

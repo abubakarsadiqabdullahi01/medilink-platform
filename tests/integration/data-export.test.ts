@@ -252,6 +252,16 @@ async function plant(): Promise<Planted> {
   await prisma.notificationMessage.create({
     data: { userId: stranger.id, channel: 'SMS', kind: 'timesheet.approved', recipient: '+234803***0002', body: 'MARK-B-MESSAGE', sentAt: new Date() },
   });
+  // Invitations to work for a facility: one to the practitioner's number, one to the stranger's, and
+  // one the practitioner sent to somebody else.
+  const waits = new Date(Date.now() + 7 * 24 * 3_600_000);
+  await prisma.staffInvitation.createMany({
+    data: [
+      { facilityId: world.facilityId, phone: practitioner.phone, roleKey: 'facility_administrator', invitedBy: world.reviewerId, expiresAt: waits },
+      { facilityId: world.facilityId, phone: stranger.phone, roleKey: 'facility_administrator', invitedBy: world.reviewerId, expiresAt: waits },
+      { facilityId: world.facilityId, phone: '+2348037770123', roleKey: 'facility_owner', invitedBy: practitioner.id, expiresAt: waits },
+    ],
+  });
   await prisma.suggestion.create({ data: { raisedBy: practitioner.id, area: 'OTHER', body: 'MARK-A-SUGGESTION' } });
   await prisma.suggestion.create({ data: { raisedBy: stranger.id, area: 'OTHER', body: 'MARK-B-SUGGESTION' } });
   await prisma.securityEvent.create({ data: { userId: practitioner.id, kind: 'credential.document_accessed', detail: { note: 'MARK-A-EVENT' } } });
@@ -337,6 +347,7 @@ describe('what the export holds', () => {
       'securityEvents',
       'consent',
       'dataSubjectRequests',
+      'staffInvitations',
     ];
     for (const key of filled) expect(size(data[key]), key).toBeGreaterThan(0);
     expect((data.availability as { slots: unknown[] }).slots.length).toBeGreaterThan(0);
@@ -396,6 +407,33 @@ describe('what the export holds', () => {
       reason: 'MARK-A-SUSPENSION-REASON',
       liftedReason: 'MARK-A-LIFTED-REASON',
     });
+  });
+});
+
+describe('invitations to work for a facility', () => {
+  it('returns the ones sent to the person’s number and the ones they sent, and no one else’s', async () => {
+    const { world, stranger } = await plant();
+    const data = await exportSubjectData(world.practitionerId);
+
+    expect(data.staffInvitations).toHaveLength(2);
+    const toYou = data.staffInvitations.find((entry) => entry.toYou)!;
+    const bySent = data.staffInvitations.find((entry) => entry.sentByYou)!;
+    expect(toYou).toMatchObject({ roleKey: 'facility_administrator', status: 'PENDING', sentByYou: false });
+    expect(bySent).toMatchObject({ roleKey: 'facility_owner', toYou: false });
+    // The stranger's invitation is the stranger's.
+    expect(JSON.stringify(data.staffInvitations)).not.toContain(stranger.phone);
+  });
+
+  it('shows the number of somebody the person invited only masked, and the person’s own number not at all', async () => {
+    const { world } = await plant();
+    const data = await exportSubjectData(world.practitionerId);
+    const practitioner = await prisma.user.findUniqueOrThrow({ where: { id: world.practitionerId } });
+
+    const serialised = JSON.stringify(data.staffInvitations);
+    expect(serialised).not.toContain('8037770123');
+    expect(data.staffInvitations.find((entry) => entry.sentByYou)!.numberInvited).toMatch(/\*/);
+    expect(data.staffInvitations.find((entry) => entry.toYou)).not.toHaveProperty('numberInvited');
+    expect(serialised).not.toContain(practitioner.phone);
   });
 });
 

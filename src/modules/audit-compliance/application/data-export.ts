@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/db';
+import { maskPhone } from '@/lib/phone';
 import { DataSubjectErrors } from './data-subject';
 import { EXCLUSIONS, EXPORT_SECTIONS } from '../domain/export-coverage';
 
@@ -323,6 +324,7 @@ export async function exportSubjectData(userId: string) {
     notifications,
     suggestions,
     securityEvents,
+    staffInvitations,
   ] = await Promise.all([
     // The label and platform, never the push token: that is the means of sending
     // a notification to the phone, not a fact about the person.
@@ -531,6 +533,22 @@ export async function exportSubjectData(userId: string) {
       select: { kind: true, severity: true, createdAt: true },
       orderBy: { createdAt: 'asc' },
     }),
+    // Invitations to work for a facility that were sent to this number, and those this person sent.
+    // The number of somebody they invited is shown masked: it is theirs, not this person's.
+    prisma.staffInvitation.findMany({
+      where: { OR: [{ phone: user.phone }, { invitedBy: userId }] },
+      select: {
+        phone: true,
+        invitedBy: true,
+        roleKey: true,
+        status: true,
+        expiresAt: true,
+        respondedAt: true,
+        createdAt: true,
+        facility: { select: { name: true } },
+      },
+      orderBy: { createdAt: 'asc' },
+    }),
   ]);
 
   return {
@@ -611,6 +629,14 @@ export async function exportSubjectData(userId: string) {
     notifications,
     suggestions,
     securityEvents,
+    staffInvitations: staffInvitations.map(({ phone, invitedBy, facility, ...row }) => ({
+      ...row,
+      facility: facility.name,
+      toYou: phone === user.phone,
+      sentByYou: invitedBy === userId,
+      // Masked: for an invitation sent to somebody else, the number is theirs.
+      ...(phone === user.phone ? {} : { numberInvited: maskPhone(phone) }),
+    })),
   };
 }
 

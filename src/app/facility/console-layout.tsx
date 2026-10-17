@@ -19,6 +19,7 @@ import { buttonVariants } from '@/components/ui/button';
 import { SessionProvider, useScopeIds, useSession, type SessionState } from '@/lib/ui/session';
 import { ConsoleShell, type NavSection } from '@/components/app/console-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { MyInvitations } from '@/components/app/my-invitations';
 import { FacilitySwitcher } from './facility-switcher';
 
 /**
@@ -113,19 +114,24 @@ function Guard({ children }: { children: React.ReactNode }) {
   // guard, or signing up would require the grant that signing up produces.
   if (anyFacility.length === 0 && pathname !== '/facility/register') {
     return (
-      <Alert variant="warning">
-        <AlertDescription className="space-y-3">
-          <p>
-            This account is not attached to a facility yet. If you work at a hospital that already
-            uses Medilink, ask its owner to add you from their <strong>Staff</strong> page using
-            your number, <span className="font-mono">{session.user.phone}</span>. If you are
-            registering a hospital, start here.
-          </p>
-          <Link href="/facility/register" className={cn(buttonVariants({ size: 'sm' }))}>
-            Register a facility
-          </Link>
-        </AlertDescription>
-      </Alert>
+      <>
+        {/* An invitation sent to this number is the way in for somebody joining a hospital that already
+            uses Medilink, so it is the first thing here. */}
+        <MyInvitations />
+        <Alert variant="warning">
+          <AlertDescription className="space-y-3">
+            <p>
+              This account is not attached to a facility yet. If you work at a hospital that already
+              uses Medilink, ask its owner to invite you from their <strong>Staff</strong> page using
+              your number, <span className="font-mono">{session.user.phone}</span>: the invitation
+              appears here. If you are registering a hospital, start here.
+            </p>
+            <Link href="/facility/register" className={cn(buttonVariants({ size: 'sm' }))}>
+              Register a facility
+            </Link>
+          </AlertDescription>
+        </Alert>
+      </>
     );
   }
 

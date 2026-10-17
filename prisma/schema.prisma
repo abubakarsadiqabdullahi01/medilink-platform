@@ -57,6 +57,7 @@ model User {
   checkInEvents     CheckInEvent[]
   blockedPeriods    BlockedPeriod[]
   professionalRegistrations ProfessionalRegistration[]
+  staffInvitationsSent      StaffInvitation[] @relation("StaffInvitationInviter")
 
   @@map("users")
   @@schema("identity")
@@ -145,6 +146,56 @@ enum ScopeType {
   BRANCH
   DEPARTMENT
   SELF
+
+  @@schema("identity")
+}
+
+// An invitation to work for a facility, answered by the person invited (M04-06). Bound to the
+// number the facility typed, not to an account: the person may not have registered yet, and the
+// one who answers is whoever signs in with that number once it is verified. Accepting creates the
+// grant; nothing here confers access by itself.
+//
+// One live invitation per facility, number and role is a partial unique index over rows still
+// PENDING, added in migrations/20261017100000_staff_invitations. Prisma cannot express it.
+model StaffInvitation {
+  id          String   @id @default(uuid()) @db.Uuid
+  facilityId  String   @map("facility_id") @db.Uuid
+  // E.164, as normalised. The number an invitation is for is the only thing that says who may
+  // answer it, so it is held whole; lists show it masked. Purged after the invitation has ended.
+  phone       String
+  roleKey     String   @map("role_key")
+  invitedBy   String   @map("invited_by") @db.Uuid
+  status      StaffInvitationStatus @default(PENDING)
+  expiresAt   DateTime @map("expires_at")
+  respondedAt DateTime? @map("responded_at")
+  // Who answered it: the person invited, or whoever cancelled it. Null for one that lapsed.
+  respondedBy String?  @map("responded_by") @db.Uuid
+  // The grant accepting created. Null until it is accepted.
+  grantId     String?  @map("grant_id") @db.Uuid
+  // The invitation text goes to a number that may have no account, so there is no inbox row to
+  // record it in: what the gateway said is kept here.
+  smsSentAt        DateTime? @map("sms_sent_at")
+  smsFailureReason String?   @map("sms_failure_reason")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  facility Facility @relation(fields: [facilityId], references: [id], onDelete: Restrict)
+  inviter  User     @relation("StaffInvitationInviter", fields: [invitedBy], references: [id], onDelete: Restrict)
+
+  @@index([facilityId, status, createdAt])
+  @@index([phone, status])
+  @@index([phone, createdAt])
+  @@index([invitedBy, createdAt])
+  @@map("staff_invitations")
+  @@schema("identity")
+}
+
+enum StaffInvitationStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  CANCELLED
+  EXPIRED
 
   @@schema("identity")
 }
@@ -676,6 +727,7 @@ model Facility {
   incidents       ClinicalIncident[]
   rateCards       RateCard[]
   invoices        Invoice[]
+  staffInvitations StaffInvitation[]
 
   facilityType FacilityType @relation(fields: [facilityTypeId], references: [id])
   state        State        @relation(fields: [stateId], references: [id])

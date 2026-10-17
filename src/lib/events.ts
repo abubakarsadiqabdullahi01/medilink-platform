@@ -21,6 +21,8 @@ export const EVENTS = {
   TimesheetApproved: 'timesheet.approved',
   TimesheetRejected: 'timesheet.rejected',
   StaffAccessRemoved: 'staff.access_removed',
+  StaffInvited: 'staff.invited',
+  StaffInvitationAnswered: 'staff.invitation_answered',
   TimesheetRecalculated: 'timesheet.recalculated',
   InvoiceCreated: 'invoice.created',
   InvoiceIssued: 'invoice.issued',

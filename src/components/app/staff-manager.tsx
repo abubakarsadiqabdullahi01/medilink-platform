@@ -3,7 +3,7 @@
 import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { CircleCheck, LockKeyhole, Search, TriangleAlert, UserPlus, Users } from 'lucide-react';
+import { CircleCheck, LockKeyhole, Mail, Search, TriangleAlert, UserPlus, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { api, ApiError, errorMessage } from '@/lib/ui/api';
 import { useSession } from '@/lib/ui/session';
@@ -40,6 +40,19 @@ interface Grant {
   roleKey: string;
   grantedAt: string;
   revokedAt: string | null;
+}
+
+interface Invitation {
+  id: string;
+  /** Masked: the facility typed it and can recognise it. */
+  phone: string;
+  roleKey: string;
+  status: 'PENDING' | 'ACCEPTED' | 'DECLINED' | 'CANCELLED' | 'EXPIRED';
+  invitedBy: { id: string; fullName: string };
+  createdAt: string;
+  expiresAt: string;
+  respondedAt: string | null;
+  text: 'waiting' | 'sent' | 'failed';
 }
 
 interface FoundUser {
@@ -110,6 +123,49 @@ export function StaffManager({
   const past = (grants.data?.grants ?? []).filter(
     (grant) => grant.revokedAt && roles.some((role) => role.key === grant.roleKey),
   );
+
+  // ---- inviting somebody to a facility, who answers it themselves
+  const isFacility = scopeType === 'FACILITY' && Boolean(scopeId);
+  // Medilink's own people may still add somebody directly while onboarding a hospital.
+  const holdsPlatform = session.grants.some(
+    (grant) => grant.permission === 'role.grant' && grant.scopeType === 'PLATFORM',
+  );
+  const invitationsKey = ['staff-invitations', scopeId ?? 'none'];
+  const invitations = useQuery({
+    queryKey: invitationsKey,
+    queryFn: () => api.get<{ invitations: Invitation[] }>(`/api/v1/staff-invitations?facilityId=${scopeId}`),
+    enabled: isFacility,
+    retry: false,
+  });
+  const [invitePhone, setInvitePhone] = useState('');
+  const [inviteRole, setInviteRole] = useState<string>(roles[0]?.key ?? '');
+
+  const invite = useMutation({
+    mutationFn: () =>
+      api.post('/api/v1/staff-invitations', {
+        facilityId: scopeId,
+        phone: invitePhone.trim(),
+        roleKey: inviteRole,
+      }),
+    onSuccess: () => {
+      toast.success('Invitation sent', {
+        description: 'They get one text. Nothing changes until they say yes, and it lasts a week.',
+      });
+      setInvitePhone('');
+      void queryClient.invalidateQueries({ queryKey: invitationsKey });
+    },
+    onError: (error) => onFailure(error, 'Could not send the invitation'),
+  });
+
+  const cancelInvite = useMutation({
+    mutationFn: (target: Invitation) =>
+      api.post(`/api/v1/staff-invitations/${target.id}/cancel`, { facilityId: scopeId }),
+    onSuccess: () => {
+      toast.success('Invitation cancelled');
+      void queryClient.invalidateQueries({ queryKey: invitationsKey });
+    },
+    onError: (error) => onFailure(error, 'Could not cancel the invitation'),
+  });
 
   // ---- adding somebody
   const [phone, setPhone] = useState('');
@@ -220,6 +276,7 @@ export function StaffManager({
         purpose="Changing who has access is protected."
         onConfirmed={() => {
           void queryClient.invalidateQueries({ queryKey: queueKey });
+          void queryClient.invalidateQueries({ queryKey: invitationsKey });
           retry.current?.();
           retry.current = null;
         }}
@@ -249,11 +306,87 @@ export function StaffManager({
         </Card>
       ) : (
         <>
+          {isFacility ? (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-sm">
+                  <Mail className="size-4 text-muted-foreground" aria-hidden="true" />
+                  Invite someone
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  They get one text and say yes or no themselves; nothing changes until they do. They
+                  do not need an account yet: if they have not registered, they can do it at{' '}
+                  <span className="font-mono">{signupPath}</span> with this number and the invitation
+                  will be waiting.
+                </p>
+                <form
+                  className="space-y-4"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    if (invitePhone.trim() && inviteRole) guarded(() => invite.mutate());
+                  }}
+                >
+                  <div className="space-y-1.5">
+                    <Label htmlFor="invite-phone">Their phone number</Label>
+                    <Input
+                      id="invite-phone"
+                      inputMode="tel"
+                      placeholder="0803 123 4567"
+                      value={invitePhone}
+                      onChange={(event) => setInvitePhone(event.target.value)}
+                    />
+                  </div>
+
+                  <fieldset className="space-y-2">
+                    <legend className="mb-1 text-sm font-medium">What they would be able to do</legend>
+                    {roles.map((role) => (
+                      <button
+                        key={role.key}
+                        type="button"
+                        onClick={() => setInviteRole(role.key)}
+                        aria-pressed={inviteRole === role.key}
+                        className={cn(
+                          'flex w-full gap-3 rounded-lg border p-3 text-left transition-colors',
+                          inviteRole === role.key ? 'border-primary bg-accent/50' : 'hover:border-primary/40',
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            'mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border',
+                            inviteRole === role.key ? 'border-primary bg-primary' : 'border-input',
+                          )}
+                          aria-hidden="true"
+                        >
+                          {inviteRole === role.key ? (
+                            <CircleCheck className="size-3 text-primary-foreground" />
+                          ) : null}
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block text-sm font-medium">{role.label}</span>
+                          <span className="mt-0.5 block text-xs text-muted-foreground">
+                            {role.description}
+                          </span>
+                        </span>
+                      </button>
+                    ))}
+                  </fieldset>
+
+                  <Button type="submit" disabled={!invitePhone.trim() || !inviteRole} loading={invite.isPending}>
+                    Send invitation as {labelOf(inviteRole).toLowerCase()}
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {!isFacility || holdsPlatform ? (
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-sm">
                 <UserPlus className="size-4 text-muted-foreground" aria-hidden="true" />
-                Give someone access
+                {isFacility ? 'Add someone directly (Medilink only)' : 'Give someone access'}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -353,6 +486,31 @@ export function StaffManager({
               ) : null}
             </CardContent>
           </Card>
+          ) : null}
+
+          {isFacility ? (
+            <section className="space-y-3">
+              <h2 className="flex items-center gap-2 text-sm font-medium">
+                <Mail className="size-4 text-muted-foreground" aria-hidden="true" />
+                Invitations
+              </h2>
+              {invitations.isPending ? (
+                <QueueSkeleton rows={1} />
+              ) : invitations.isError ? (
+                <Alert variant="destructive">
+                  <TriangleAlert />
+                  <AlertDescription>The invitations could not be loaded.</AlertDescription>
+                </Alert>
+              ) : (
+                <InvitationList
+                  rows={invitations.data?.invitations ?? []}
+                  labelOf={labelOf}
+                  cancelling={cancelInvite.isPending}
+                  onCancel={(row) => guarded(() => cancelInvite.mutate(row))}
+                />
+              )}
+            </section>
+          ) : null}
 
           <section className="space-y-3">
             <h2 className="flex items-center gap-2 text-sm font-medium">
@@ -575,5 +733,91 @@ export function StaffManager({
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+const INVITATION_STATUS: Record<Invitation['status'], string> = {
+  PENDING: 'Waiting for an answer',
+  ACCEPTED: 'Accepted',
+  DECLINED: 'Declined',
+  CANCELLED: 'Cancelled',
+  EXPIRED: 'Ran out',
+};
+
+/**
+ * What this facility has sent. The ones still waiting come first and can be cancelled; the rest
+ * are kept below as a record of what became of them. The text's delivery is said plainly: a
+ * failed one is retried, and the person who sent it should know the invitation may not have
+ * reached anyone yet.
+ */
+function InvitationList({
+  rows,
+  labelOf,
+  cancelling,
+  onCancel,
+}: {
+  rows: Invitation[];
+  labelOf: (key: string) => string;
+  cancelling: boolean;
+  onCancel: (row: Invitation) => void;
+}) {
+  const waiting = rows.filter((row) => row.status === 'PENDING');
+  const earlier = rows.filter((row) => row.status !== 'PENDING');
+
+  return (
+    <>
+      {waiting.length === 0 ? (
+        <EmptyState icon={<Mail />} title="Nothing waiting" description="Invite someone above." />
+      ) : (
+        <div className="space-y-2">
+          {waiting.map((row) => (
+            <Card key={row.id}>
+              <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
+                <div className="min-w-0">
+                  <p className="font-medium">
+                    <span className="font-mono">{row.phone}</span>
+                  </p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {labelOf(row.roleKey)} · sent {formatDate(row.createdAt)} by {row.invitedBy.fullName} ·
+                    answer by {formatDate(row.expiresAt)}
+                  </p>
+                  <p
+                    className={cn(
+                      'mt-1 text-xs',
+                      row.text === 'failed' ? 'text-destructive-text' : 'text-muted-foreground',
+                    )}
+                  >
+                    {row.text === 'sent'
+                      ? 'The text was sent.'
+                      : row.text === 'failed'
+                        ? 'The text has not reached them yet. It is being tried again.'
+                        : 'The text is about to be sent.'}
+                  </p>
+                </div>
+                <Button variant="outline" size="sm" loading={cancelling} onClick={() => onCancel(row)}>
+                  Cancel
+                </Button>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {earlier.length > 0 ? (
+        <details className="rounded-md border px-4 py-3 text-sm">
+          <summary className="cursor-pointer text-muted-foreground">
+            Earlier invitations ({earlier.length})
+          </summary>
+          <ul className="mt-3 space-y-2">
+            {earlier.map((row) => (
+              <li key={row.id} className="text-xs text-muted-foreground">
+                <span className="font-mono text-foreground">{row.phone}</span> · {labelOf(row.roleKey)} ·{' '}
+                {INVITATION_STATUS[row.status]} · sent {formatDate(row.createdAt)}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+    </>
   );
 }

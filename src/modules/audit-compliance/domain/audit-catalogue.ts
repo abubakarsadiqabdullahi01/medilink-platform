@@ -130,6 +130,46 @@ export const AUDIT_CATALOGUE: Record<string, AuditAction> = {
     entity: 'identity.users',
     what: 'All of a person’s access at a scope was removed at once, with who did it, the roles that ended and the reason; each role ending is also a role.revoked.',
   },
+  'staff_invitation.created': {
+    category: 'security',
+    entity: 'identity.staff_invitations',
+    what: 'A facility invited somebody to work for it, with who sent it, the role and when it runs out. The number invited is not in the row.',
+  },
+  'staff_invitation.cancelled': {
+    category: 'security',
+    entity: 'identity.staff_invitations',
+    what: 'A facility withdrew an invitation nobody had answered, with who did it.',
+  },
+  'staff_invitation.accepted': {
+    category: 'security',
+    entity: 'identity.staff_invitations',
+    what: 'The person invited accepted, and the role was given: the grant it made is in the same transaction, as role.granted naming the invitation and who sent it.',
+  },
+  'staff_invitation.declined': {
+    category: 'security',
+    entity: 'identity.staff_invitations',
+    what: 'The person invited declined, with who answered and when. Nothing is given.',
+  },
+  'staff_invitation.withdrawn': {
+    category: 'security',
+    entity: 'identity.staff_invitations',
+    what: 'An acceptance was refused because whoever sent the invitation no longer held the authority to give that role, and the invitation was ended; nothing was given.',
+  },
+  'staff_invitation.expired': {
+    category: 'security',
+    entity: 'identity.staff_invitations',
+    what: 'An invitation that had run out was marked so, the next time somebody looked at it, tried to answer it or invited the same number again.',
+  },
+  'staff_invitation.text_sent': {
+    category: 'security',
+    entity: 'identity.staff_invitations',
+    what: 'The invitation text was taken by the SMS gateway, written by the worker. It records that the text went; the number it went to is not in the row.',
+  },
+  'staff_invitation.text_failed': {
+    category: 'security',
+    entity: 'identity.staff_invitations',
+    what: 'The gateway did not take the invitation text, with the reason it gave, written by the worker on each failed try until one goes.',
+  },
   'facility.role_granted': {
     category: 'security',
     entity: 'identity.user_roles',
