@@ -164,6 +164,52 @@ export function StaffManager({
     onError: (error) => onFailure(error, 'Could not remove access'),
   });
 
+  // ---- changing somebody's role, in one step
+  const [changing, setChanging] = useState<Grant | null>(null);
+  const [newRoleKey, setNewRoleKey] = useState('');
+  const [changeReason, setChangeReason] = useState('');
+
+  const change = useMutation({
+    mutationFn: (target: Grant) =>
+      api.post(`/api/v1/grants/${target.id}/change-role`, {
+        scopeType,
+        scopeId,
+        roleKey: newRoleKey,
+        reason: changeReason.trim(),
+      }),
+    onSuccess: (_data, target) => {
+      toast.success(`${target.fullName} is now ${labelOf(newRoleKey).toLowerCase()}`, {
+        description: 'The old role ended as the new one began, so there was no gap.',
+      });
+      setChanging(null);
+      setNewRoleKey('');
+      setChangeReason('');
+      void queryClient.invalidateQueries({ queryKey: queueKey });
+    },
+    onError: (error) => onFailure(error, 'Could not change the role'),
+  });
+
+  // ---- removing everything somebody has here, at once
+  const [removingAll, setRemovingAll] = useState<Grant | null>(null);
+  const [emergencyReason, setEmergencyReason] = useState('');
+
+  const removeAll = useMutation({
+    mutationFn: (target: Grant) =>
+      api.post('/api/v1/grants/remove-access', {
+        userId: target.userId,
+        scopeType,
+        scopeId,
+        reason: emergencyReason.trim(),
+      }),
+    onSuccess: (_data, target) => {
+      toast.success(`${target.fullName} no longer has any access here`);
+      setRemovingAll(null);
+      setEmergencyReason('');
+      void queryClient.invalidateQueries({ queryKey: queueKey });
+    },
+    onError: (error) => onFailure(error, 'Could not remove their access'),
+  });
+
   const locked = grants.isError && isStepUpRequired(grants.error);
 
   return (
@@ -336,9 +382,33 @@ export function StaffManager({
                           {labelOf(row.roleKey)} · since {formatDate(row.grantedAt)}
                         </p>
                       </div>
-                      <Button variant="outline" size="sm" onClick={() => setRevoking(row)}>
-                        Remove access
-                      </Button>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setChanging(row);
+                            setNewRoleKey('');
+                            setChangeReason('');
+                          }}
+                        >
+                          Change role
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => setRevoking(row)}>
+                          Remove access
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="text-destructive"
+                          onClick={() => {
+                            setRemovingAll(row);
+                            setEmergencyReason('');
+                          }}
+                        >
+                          Remove all access now
+                        </Button>
+                      </div>
                     </CardContent>
                   </Card>
                 ))}
@@ -364,6 +434,108 @@ export function StaffManager({
           </section>
         </>
       )}
+
+      <Dialog open={Boolean(changing)} onOpenChange={(next) => !next && setChanging(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Change {changing?.fullName}&apos;s role</DialogTitle>
+            <DialogDescription>
+              Now {changing ? labelOf(changing.roleKey).toLowerCase() : ''}. The old role ends as the
+              new one begins, so they are never without access in between. You can only give a role
+              you hold yourself.
+            </DialogDescription>
+          </DialogHeader>
+          <fieldset className="space-y-2">
+            <legend className="mb-1 text-sm font-medium">Their new role</legend>
+            {roles
+              .filter((role) => role.key !== changing?.roleKey)
+              .map((role) => (
+                <button
+                  key={role.key}
+                  type="button"
+                  onClick={() => setNewRoleKey(role.key)}
+                  aria-pressed={newRoleKey === role.key}
+                  className={cn(
+                    'flex w-full gap-3 rounded-lg border p-3 text-left transition-colors',
+                    newRoleKey === role.key ? 'border-primary bg-accent/50' : 'hover:border-primary/40',
+                  )}
+                >
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium">{role.label}</span>
+                    <span className="mt-0.5 block text-xs text-muted-foreground">{role.description}</span>
+                  </span>
+                </button>
+              ))}
+          </fieldset>
+          <div className="space-y-1.5">
+            <Label htmlFor="change-reason">Why</Label>
+            <Textarea
+              id="change-reason"
+              rows={2}
+              placeholder="Now deputy to the medical director, moved to the night rota…"
+              value={changeReason}
+              onChange={(event) => setChangeReason(event.target.value)}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setChanging(null)}>
+              Leave it as it is
+            </Button>
+            <Button
+              disabled={!newRoleKey || changeReason.trim().length < MIN_REVOKE_REASON}
+              loading={change.isPending}
+              onClick={() => {
+                const target = changing;
+                if (target) guarded(() => change.mutate(target));
+              }}
+            >
+              Change role
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(removingAll)} onOpenChange={(next) => !next && setRemovingAll(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove all of {removingAll?.fullName}&apos;s access now</DialogTitle>
+            <DialogDescription>
+              Every role they hold {scopeType === 'FACILITY' ? 'at this facility' : 'on the platform'}{' '}
+              ends at once, on their next request. What they hold anywhere else is not touched.
+              {scopeType === 'FACILITY'
+                ? ' They, and the other people who can manage staff here, are told by text.'
+                : ''}{' '}
+              Use this when removing one role at a time is the risk.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label htmlFor="emergency-reason">Why</Label>
+            <Textarea
+              id="emergency-reason"
+              rows={3}
+              placeholder="Left without notice and still has the keys, account may be in somebody else’s hands…"
+              value={emergencyReason}
+              onChange={(event) => setEmergencyReason(event.target.value)}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRemovingAll(null)}>
+              Keep their access
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={emergencyReason.trim().length < MIN_REVOKE_REASON}
+              loading={removeAll.isPending}
+              onClick={() => {
+                const target = removingAll;
+                if (target) guarded(() => removeAll.mutate(target));
+              }}
+            >
+              Remove all access now
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={Boolean(revoking)} onOpenChange={(next) => !next && setRevoking(null)}>
         <DialogContent>

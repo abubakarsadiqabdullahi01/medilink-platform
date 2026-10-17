@@ -20,6 +20,7 @@ export const EVENTS = {
   TimesheetSubmitted: 'timesheet.submitted',
   TimesheetApproved: 'timesheet.approved',
   TimesheetRejected: 'timesheet.rejected',
+  StaffAccessRemoved: 'staff.access_removed',
   TimesheetRecalculated: 'timesheet.recalculated',
   InvoiceCreated: 'invoice.created',
   InvoiceIssued: 'invoice.issued',

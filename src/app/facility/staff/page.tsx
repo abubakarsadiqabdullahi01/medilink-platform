@@ -2,7 +2,8 @@
 
 import { useFacility, useFacilityId } from '@/lib/ui/facility';
 import { PageHeader, QueueSkeleton } from '@/components/app/page-shell';
-import { StaffManager, type StaffRole } from '@/components/app/staff-manager';
+import { StaffManager } from '@/components/app/staff-manager';
+import { FACILITY_STAFF_ROLES } from '@/lib/ui/staff-roles';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
 /**
@@ -10,21 +11,6 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
  * bundle and not the administrator's, so an administrator never sees this
  * page, and the server would refuse them if they found it.
  */
-const ROLES: StaffRole[] = [
-  {
-    key: 'facility_administrator',
-    label: 'Facility administrator',
-    description:
-      'Runs the hospital day to day: publishes and staffs shifts, records attendance, approves timesheets, reports incidents. Cannot add staff or answer disputes.',
-  },
-  {
-    key: 'facility_owner',
-    label: 'Owner',
-    description:
-      'Everything an administrator can do, plus adding and removing staff and answering disputes. Give this only to the person accountable for the hospital.',
-  },
-];
-
 export default function FacilityStaffPage() {
   const facilityId = useFacilityId();
   const facility = useFacility(facilityId);
@@ -50,7 +36,7 @@ export default function FacilityStaffPage() {
         <StaffManager
           scopeType="FACILITY"
           scopeId={facilityId}
-          roles={ROLES}
+          roles={FACILITY_STAFF_ROLES}
           signupPath="/register?as=staff"
         />
       ) : (

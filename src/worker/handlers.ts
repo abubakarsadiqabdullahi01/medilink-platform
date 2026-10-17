@@ -12,6 +12,7 @@ import {
   notifyPayoutAccountSubmitted,
   notifyPayoutSettled,
   notifyTimesheetRejected,
+  notifyStaffAccessRemoved,
 } from '../modules/notifications/application/handlers';
 import {
   notifyCredentialExpired,
@@ -105,6 +106,7 @@ export const handlers: Record<string, EventHandler> = {
 
   // Hours sent back, bills and payments: told to whoever has to act on them or is owed them.
   [EVENTS.TimesheetRejected]: (payload) => notifyTimesheetRejected(payload),
+  [EVENTS.StaffAccessRemoved]: (payload) => notifyStaffAccessRemoved(payload),
   [EVENTS.InvoiceIssued]: (payload) => notifyInvoiceIssued(payload),
   [EVENTS.PayoutSettled]: (payload) => notifyPayoutSettled(payload),
   [EVENTS.PayoutAccountSubmitted]: (payload) => notifyPayoutAccountSubmitted(payload),

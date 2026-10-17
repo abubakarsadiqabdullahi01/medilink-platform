@@ -1,6 +1,6 @@
 import { handleGuardedRequest } from '@/lib/http/guarded-handler';
 import { revokeGrantSchema } from '@/modules/auth/presentation/grant-schemas';
-import { revokeGrant } from '@/modules/auth/application/grants';
+import { holdsPlatformAuthority, revokeGrant } from '@/modules/auth/application/grants';
 import { loadGrants, type Grant } from '@/lib/authz/guard';
 
 /**
@@ -23,16 +23,18 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
       schema: revokeGrantSchema,
       permission: 'role.grant',
       scope: (input) => ({ type: input.scopeType, id: input.scopeId }),
-      action: async ({ input, session }) =>
-        revokeGrant({
+      action: async ({ input, session }) => {
+        const grants = await loadGrants(session.userId);
+        return revokeGrant({
           scope: { type: input.scopeType, id: input.scopeId },
           grantId: input.id,
           actorId: session.userId,
           reason: input.reason,
-          actorPermissions: (await loadGrants(session.userId)).map(
-            (grant: Grant) => grant.permission,
-          ),
-        }),
+          actorPermissions: grants.map((grant: Grant) => grant.permission),
+          // Only Medilink may remove a facility's last owner.
+          actorIsPlatform: holdsPlatformAuthority(grants),
+        });
+      },
     },
     params,
   );

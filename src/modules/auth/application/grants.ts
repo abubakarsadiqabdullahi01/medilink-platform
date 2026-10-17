@@ -1,5 +1,8 @@
+import type { Prisma } from '@prisma/client';
 import { prisma, type Tx } from '@/lib/db';
 import { recordAudit } from '@/lib/audit';
+import { EVENTS } from '@/lib/events';
+import { publishEvent } from '@/lib/outbox';
 import { HttpError } from '@/lib/http/errors';
 import { PERMISSIONS, ROLE_PERMISSIONS, type Permission } from '@/lib/authz/permissions';
 
@@ -50,6 +53,13 @@ export const GrantErrors = {
       `You cannot revoke ${roleKey} at platform scope — they hold exactly what you hold, and removing an equal is not yours to do. Ask a super administrator.`,
       403,
     ),
+  lastFacilityOwner: () =>
+    new HttpError(
+      'last_facility_owner',
+      'This is the only person who can add and remove staff here, and nobody else could once they were gone. Appoint another owner first, or ask Medilink to step in.',
+      409,
+    ),
+  sameRole: () => new HttpError('same_role', 'They already hold that role.', 409),
   lastPlatformAdministrator: () =>
     new HttpError(
       'last_platform_administrator',
@@ -303,6 +313,80 @@ async function assertNotTheLastWhoCanAppoint(grant: {
   if (others === 0) throw GrantErrors.lastPlatformAdministrator();
 }
 
+/**
+ * Whether somebody's authority to manage access is Medilink's, a PLATFORM grant, and not a
+ * facility's. Only Medilink may remove a facility's last owner.
+ */
+export function holdsPlatformAuthority(grants: { permission: string; scopeType: string }[]): boolean {
+  return grants.some((grant) => grant.permission === 'role.grant' && grant.scopeType === 'PLATFORM');
+}
+
+/** One lock per scope, so two people changing who can appoint at the same facility are taken one at a time. */
+async function lockScope(tx: Tx, scope: { type: string; id?: string | null }): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`staff-access:${scope.type}:${scope.id ?? ''}`}, 0))`;
+}
+
+/** Accounts that can sign in: an owner who cannot is an owner nobody can ask. */
+const CAN_SIGN_IN: Prisma.UserWhereInput = { deletedAt: null, status: { in: ['ACTIVE', 'UNDER_REVIEW'] } };
+
+/**
+ * Somebody other than `userId` who holds a permission over the scope and can sign in.
+ */
+async function othersHolding(
+  tx: Tx,
+  scope: { type: string; id?: string | null },
+  permission: string,
+  userId: string,
+): Promise<number> {
+  return tx.userRole.count({
+    where: {
+      scopeType: scope.type as GrantScope,
+      scopeId: scope.id ?? null,
+      revokedAt: null,
+      userId: { not: userId },
+      user: CAN_SIGN_IN,
+      role: { permissions: { some: { permission: { key: permission } } } },
+    },
+  });
+}
+
+/**
+ * A facility may not lose the last person who can add and remove its staff.
+ *
+ * Once nobody there holds `role.grant` the hospital can no longer appoint or remove anybody, and
+ * only Medilink can put that right: the platform check above has protected the platform's own
+ * last administrator since Stage 4, and the same lockout was open one level down. The one who
+ * removes the last owner may be that owner (stepping down) or the other owner at the same moment,
+ * which is why this is done under the scope's lock.
+ *
+ * Medilink is exempt. It is who steps in when the owner is the problem, an account taken over or
+ * somebody who has left and kept the keys, and a rule that stopped it removing the last owner
+ * would leave the hospital in the hands of the person it is trying to remove.
+ */
+async function assertScopeKeepsAnAppointer(
+  tx: Tx,
+  input: {
+    scope: { type: string; id?: string | null };
+    userId: string;
+    /** The roles the person is losing here. */
+    losing: string[];
+    /** The roles they keep or are given in their place. */
+    keeping?: string[];
+    actorIsPlatform?: boolean;
+  },
+): Promise<void> {
+  if (input.actorIsPlatform) return;
+  if (input.scope.type === 'PLATFORM' || input.scope.type === 'SELF') return;
+
+  const carries = (roleKey: string) => ROLE_PERMISSIONS[roleKey]?.includes('role.grant') ?? false;
+  if (!input.losing.some(carries)) return;
+  if ((input.keeping ?? []).some(carries)) return;
+
+  if ((await othersHolding(tx, input.scope, 'role.grant', input.userId)) === 0) {
+    throw GrantErrors.lastFacilityOwner();
+  }
+}
+
 export async function revokeGrant(input: {
   grantId: string;
   /**
@@ -317,6 +401,8 @@ export async function revokeGrant(input: {
   reason: string;
   /** What the revoking actor holds, for the check above. */
   actorPermissions: readonly Permission[];
+  /** Whether the actor's authority is Medilink's, which may remove a facility's last owner. */
+  actorIsPlatform?: boolean;
 }): Promise<GrantView> {
   const existing = await prisma.userRole.findUnique({
     where: { id: input.grantId },
@@ -338,6 +424,14 @@ export async function revokeGrant(input: {
   });
 
   return prisma.$transaction(async (tx: Tx) => {
+    await lockScope(tx, input.scope);
+    await assertScopeKeepsAnAppointer(tx, {
+      scope: input.scope,
+      userId: existing.userId,
+      losing: [existing.role.key],
+      actorIsPlatform: input.actorIsPlatform,
+    });
+
     const revoked = await tx.userRole.update({
       where: { id: input.grantId },
       data: { revokedAt: new Date() },
@@ -365,6 +459,220 @@ export async function revokeGrant(input: {
       grantedAt: revoked.createdAt,
       revokedAt: revoked.revokedAt,
     };
+  });
+}
+
+/**
+ * Changing somebody's role is one act, not a removal followed by a grant.
+ *
+ * Done as two calls it leaves a gap, the person with no access at all between them, and two rows
+ * in the record that nobody can tell are one decision. Here the old role ends and the new one
+ * begins in the same transaction, the record says `role.changed` with both, and every rule that
+ * applies to granting and to revoking applies: nobody gives a role they do not hold, nobody
+ * changes platform authority they do not hold, and a facility's last owner cannot be made
+ * something else.
+ */
+export async function changeGrantRole(input: {
+  grantId: string;
+  newRoleKey: string;
+  scope: { type: GrantScope; id?: string };
+  actorId: string;
+  reason: string;
+  actorPermissions: readonly Permission[];
+  actorIsPlatform?: boolean;
+}): Promise<GrantView> {
+  const existing = await prisma.userRole.findUnique({
+    where: { id: input.grantId },
+    include: { role: true, user: true },
+  });
+  if (!existing || existing.revokedAt) throw GrantErrors.grantNotFound();
+
+  const sameScope =
+    existing.scopeType === input.scope.type && (existing.scopeId ?? null) === (input.scope.id ?? null);
+  if (!sameScope) throw GrantErrors.grantNotFound();
+
+  const permissions = ROLE_PERMISSIONS[input.newRoleKey];
+  if (!permissions) throw GrantErrors.unknownRole(input.newRoleKey);
+  if (existing.role.key === input.newRoleKey) throw GrantErrors.sameRole();
+
+  const held = new Set<string>(input.actorPermissions);
+  if (permissions.some((permission) => !held.has(permission))) throw GrantErrors.cannotEscalate();
+  assertMayRevoke(existing.role.key, existing.scopeType, input.actorPermissions);
+
+  return prisma.$transaction(async (tx: Tx) => {
+    await lockScope(tx, input.scope);
+
+    const alreadyHolds = await tx.userRole.findFirst({
+      where: {
+        userId: existing.userId,
+        scopeType: existing.scopeType,
+        scopeId: existing.scopeId,
+        revokedAt: null,
+        role: { key: input.newRoleKey },
+      },
+    });
+    if (alreadyHolds) throw GrantErrors.alreadyGranted();
+
+    await assertScopeKeepsAnAppointer(tx, {
+      scope: input.scope,
+      userId: existing.userId,
+      losing: [existing.role.key],
+      keeping: [input.newRoleKey],
+      actorIsPlatform: input.actorIsPlatform,
+    });
+    // Platform authority: the last account that can appoint cannot be made something that cannot.
+    if (
+      existing.scopeType === 'PLATFORM' &&
+      ROLE_PERMISSIONS[existing.role.key]?.includes('config.manage') &&
+      !permissions.includes('config.manage') &&
+      (await othersHolding(tx, input.scope, 'config.manage', existing.userId)) === 0
+    ) {
+      throw GrantErrors.lastPlatformAdministrator();
+    }
+
+    const now = new Date();
+    await tx.userRole.update({ where: { id: existing.id }, data: { revokedAt: now } });
+    const role = await ensureRole(tx, input.newRoleKey);
+    const created = await tx.userRole.create({
+      data: {
+        userId: existing.userId,
+        roleId: role.id,
+        scopeType: existing.scopeType,
+        scopeId: existing.scopeId,
+        grantedBy: input.actorId,
+      },
+    });
+
+    await recordAudit(tx, {
+      action: 'role.changed',
+      entityType: 'identity.user_roles',
+      entityId: created.id,
+      actorId: input.actorId,
+      scopeType: existing.scopeType === 'SELF' ? 'SELF' : existing.scopeType,
+      scopeId: existing.scopeId ?? existing.userId,
+      reason: input.reason,
+      before: { roleKey: existing.role.key, grantId: existing.id },
+      after: { roleKey: input.newRoleKey, grantId: created.id, userId: existing.userId, permissions },
+    });
+
+    return {
+      id: created.id,
+      userId: existing.userId,
+      fullName: existing.user.fullName,
+      roleKey: input.newRoleKey,
+      scopeType: created.scopeType,
+      scopeId: created.scopeId,
+      grantedAt: created.createdAt,
+      revokedAt: null,
+    };
+  });
+}
+
+/**
+ * Taking all of somebody's access to a facility away at once, for when waiting to do it role by
+ * role is the risk: somebody who left and kept the keys, an account that may be in somebody
+ * else's hands.
+ *
+ * Every grant they hold over that scope ends in one transaction, or none does; what they hold
+ * elsewhere is not touched, because it is somebody else's to give and take. Access is read from
+ * the database on every request, so it is gone on their next one. The record carries each role
+ * ending as `role.revoked` and the removal as a whole as `access.emergency_revoked`, and at a
+ * facility the person and the facility's other owners are told, so a removal cannot go
+ * unnoticed by the people who run the place.
+ */
+export async function revokeAllAccess(input: {
+  userId: string;
+  scope: { type: GrantScope; id?: string };
+  actorId: string;
+  reason: string;
+  actorPermissions: readonly Permission[];
+  actorIsPlatform?: boolean;
+}): Promise<{ revoked: GrantView[] }> {
+  return prisma.$transaction(async (tx: Tx) => {
+    await lockScope(tx, input.scope);
+
+    const held = await tx.userRole.findMany({
+      where: {
+        userId: input.userId,
+        scopeType: input.scope.type,
+        scopeId: input.scope.id ?? null,
+        revokedAt: null,
+      },
+      include: { role: true, user: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    // "Nothing here", not "forbidden": nobody learns who holds access somewhere they may not look.
+    if (held.length === 0) throw GrantErrors.grantNotFound();
+
+    for (const grant of held) assertMayRevoke(grant.role.key, grant.scopeType, input.actorPermissions);
+    if (
+      input.scope.type === 'PLATFORM' &&
+      held.some((grant) => ROLE_PERMISSIONS[grant.role.key]?.includes('config.manage')) &&
+      (await othersHolding(tx, input.scope, 'config.manage', input.userId)) === 0
+    ) {
+      throw GrantErrors.lastPlatformAdministrator();
+    }
+    await assertScopeKeepsAnAppointer(tx, {
+      scope: input.scope,
+      userId: input.userId,
+      losing: held.map((grant) => grant.role.key),
+      actorIsPlatform: input.actorIsPlatform,
+    });
+
+    const now = new Date();
+    const scopeType = input.scope.type === 'SELF' ? 'SELF' : input.scope.type;
+    const revoked: GrantView[] = [];
+    for (const grant of held) {
+      await tx.userRole.update({ where: { id: grant.id }, data: { revokedAt: now } });
+      await recordAudit(tx, {
+        action: 'role.revoked',
+        entityType: 'identity.user_roles',
+        entityId: grant.id,
+        actorId: input.actorId,
+        scopeType,
+        scopeId: grant.scopeId ?? grant.userId,
+        reason: `Emergency removal of all access: ${input.reason}`,
+        before: { roleKey: grant.role.key, revokedAt: null },
+        after: { roleKey: grant.role.key, revokedAt: now },
+      });
+      revoked.push({
+        id: grant.id,
+        userId: grant.userId,
+        fullName: grant.user.fullName,
+        roleKey: grant.role.key,
+        scopeType: grant.scopeType,
+        scopeId: grant.scopeId,
+        grantedAt: grant.createdAt,
+        revokedAt: now,
+      });
+    }
+
+    await recordAudit(tx, {
+      action: 'access.emergency_revoked',
+      entityType: 'identity.users',
+      entityId: input.userId,
+      actorId: input.actorId,
+      scopeType,
+      scopeId: input.scope.id ?? input.userId,
+      reason: input.reason,
+      after: { grantsEnded: held.length, roles: held.map((grant) => grant.role.key) },
+    });
+
+    if (input.scope.type === 'FACILITY' && input.scope.id) {
+      await publishEvent(tx, {
+        eventType: EVENTS.StaffAccessRemoved,
+        aggregateType: 'identity.users',
+        aggregateId: input.userId,
+        payload: {
+          userId: input.userId,
+          facilityId: input.scope.id,
+          byUserId: input.actorId,
+          removedAt: now.toISOString(),
+        },
+      });
+    }
+
+    return { revoked };
   });
 }
 

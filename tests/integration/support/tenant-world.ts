@@ -58,6 +58,8 @@ export interface Tenant {
 
   /** A colleague's access to this hospital, which an owner may revoke. */
   staffGrantId: string;
+  /** Another colleague's, for the route that changes a role: the revoke above ends its grant first. */
+  roleChangeGrantId: string;
   credentialId: string;
   /** A credential type nobody has submitted yet, for a fresh submission. */
   docTypeId: string;
@@ -106,6 +108,14 @@ async function buildTenant(label: string): Promise<Tenant> {
   const colleague = await createUser({ fullName: `${label} Colleague` });
   const staffGrant = await grant({
     userId: colleague.id,
+    roleKey: 'facility_administrator',
+    permissions: ROLE_PERMISSIONS.facility_administrator ?? [],
+    scopeType: 'FACILITY',
+    scopeId: facility.id,
+  });
+  const secondColleague = await createUser({ fullName: `${label} Second Colleague` });
+  const roleChangeGrant = await grant({
+    userId: secondColleague.id,
     roleKey: 'facility_administrator',
     permissions: ROLE_PERMISSIONS.facility_administrator ?? [],
     scopeType: 'FACILITY',
@@ -425,6 +435,7 @@ async function buildTenant(label: string): Promise<Tenant> {
     invoiceId: invoice.id,
     payoutId: payout.id,
     staffGrantId: staffGrant.id,
+    roleChangeGrantId: roleChangeGrant.id,
     credentialId: credential.id,
     docTypeId: docType.id,
     queriedCredentialId: queried.id,

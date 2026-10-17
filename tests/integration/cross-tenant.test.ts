@@ -402,6 +402,16 @@ const CASES: Case[] = [
     body: { scopeType: 'FACILITY', scopeId: c.declare, reason: 'Left the hospital in March.' },
   })),
 
+  onFacility('grants/[id]/change-role', 'POST', (c) => ({
+    ...ID(c.t.roleChangeGrantId),
+    body: {
+      scopeType: 'FACILITY',
+      scopeId: c.declare,
+      roleKey: 'facility_owner',
+      reason: 'Promoting somebody at another hospital.',
+    },
+  })),
+
   // ── incidents ────────────────────────────────────────────────────────────
   onPlatform('incidents/[id]/close', 'POST', (c) => ({
     ...ID(c.t.incidentId),
@@ -653,6 +663,20 @@ const SCOPED: ScopedCase[] = [
 
 /** What must be refused when the caller names somebody else's facility in the body of a write. */
 const SCOPED_WRITES: ScopedCase[] = [
+  {
+    route: 'grants/remove-access',
+    method: 'POST',
+    role: 'owner',
+    request: (c) => ({
+      body: {
+        // The other hospital's owner: somebody who certainly holds access at the facility named.
+        userId: c.t.ownerId,
+        scopeType: 'FACILITY',
+        scopeId: c.declare,
+        reason: 'Removing somebody from a hospital that is not mine.',
+      },
+    }),
+  },
   {
     route: 'grants',
     method: 'POST',

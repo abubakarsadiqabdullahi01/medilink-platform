@@ -31,6 +31,8 @@ It answers “why was nobody told?” for each thing the platform does. A test h
 | `timesheet.approved` | The facility approves their hours. | The practitioner the record is about | Once per shift. | The facility’s name and the shift’s window. No figures. | `timesheet.approved` |
 | `timesheet.recalculated` | Approval works their sheet out again and the figures changed. | The practitioner the record is about | Once per recalculation. | That it happened and the shift as scheduled. No figures. | `timesheet.recalculated` |
 | `timesheet.rejected` | The facility sends their hours back. | The practitioner the record is about | Once per rejection. | The facility’s name and the shift’s window. Never the reason the facility gave: that is read on their sheet in the app. | `timesheet.rejected` |
+| `staff.access_removed` | All of somebody’s access to a facility is removed at once. Taking away one role, the ordinary way to remove somebody, sends nothing. | The person whose access to a facility was removed | Once per removal; a redelivered event sends nothing more. | The facility’s name. Never why, and never who did it. | `staff.access_removed` |
+| `staff.access_removed_owners` | All of somebody’s access to the facility is removed at once. | Everybody else who can add and remove staff at that facility, other than whoever did it | Once per person per removal; a redelivered event sends nothing more. | The facility’s name. Never who was removed, who did it, or why: the Staff page shows who. | `staff.access_removed` |
 | `dispute.opened` | A dispute is opened over a shift. | The other side of the case, and everyone who holds `dispute.manage` across the platform. Not the person who opened it. | Once per person per case. | The shift’s window. Never the reason argued. | `dispute.opened` |
 | `dispute.under_review` | An officer starts reviewing it. | Both sides of the case | Once per person per case. | The shift. Not what was argued or the officer’s notes. | `dispute.under_review` |
 | `dispute.resolved` | An officer decides it. | Both sides of the case | Once per person per case. | The outcome, and a pointer to the reasons, which are in the app. | `dispute.resolved` |
@@ -72,6 +74,7 @@ It answers “why was nobody told?” for each thing the platform does. A test h
 | `timesheet.submitted` | `timesheet.submitted` |  |
 | `timesheet.approved` | `timesheet.approved` | Completes the assignment first, so a failure to tell anyone cannot leave an approved shift unfinished. |
 | `timesheet.rejected` | `timesheet.rejected` |  |
+| `staff.access_removed` | `staff.access_removed`, `staff.access_removed_owners` |  |
 | `timesheet.recalculated` | `timesheet.recalculated` |  |
 | `invoice.created` | Nobody | A draft is the administrator’s working copy and nobody else has seen it; issuing it is what tells the facility. |
 | `invoice.issued` | `invoice.issued` |  |
