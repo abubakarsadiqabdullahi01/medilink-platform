@@ -15,19 +15,20 @@ Matching answers one question for one shift: **who could work it, in what order,
 
 A person is excluded if **any** of these applies. All the reasons that apply are recorded, not only the first, so that “why did nobody match?” has a whole answer.
 
-| Reason | About | Applies when |
-| --- | --- | --- |
-| `category_mismatch` | the shift | Their profession is not the one the request asks for. The pool is already limited to the request’s profession, so this is a second check behind that filter. |
-| `specialty_mismatch` | the shift | The request names a specialty and theirs is different or not recorded. A request that names none accepts any. |
-| `level_mismatch` | the shift | The request names a level and the level recorded against their registration is different, or none has been recorded. Nobody is assumed to be at a level nobody recorded for them. A request that names none accepts any. |
-| `supervision_required` | the shift | Their registration category says they work under supervision and the shift does not say anybody is there to supervise them. |
-| `not_eligible` | the person | They do not pass the eligibility rule: an account that can be used, a profile, a verified identity that matches their name, an active registration checked recently enough, every credential the profession requires, and a clear screening. The rule is one function, `isEligibleForMatching`, called here and not restated. |
-| `unavailable` | their time | They have not offered the whole shift: no availability they set covers it from its start to its end, or they have offered none. |
-| `blocked` | their time | A period they blocked (leave, training, away) overlaps any part of the shift. This is checked before availability, so somebody who is blocked and has also offered nothing is reported as blocked, not unavailable. |
-| `already_assigned` | their time | They hold a confirmed assignment that overlaps any part of the shift. A cancelled one does not count. |
-| `travel_preference` | their wishes | Their own travel preference rules the shift out: “same local government area” and the facility is in another, or “same state” and the facility is in another state. “Anywhere” never excludes. |
+| Reason | About | Applies when | Shown to a facility as |
+| --- | --- | --- | --- |
+| `category_mismatch` | the shift | Their profession is not the one the request asks for. The pool is already limited to the request’s profession, so this is a second check behind that filter. | Other profession |
+| `specialty_mismatch` | the shift | The request names a specialty and theirs is different or not recorded. A request that names none accepts any. | Different specialty |
+| `level_mismatch` | the shift | The request names a level and the level recorded against their registration is different, or none has been recorded. Nobody is assumed to be at a level nobody recorded for them. A request that names none accepts any. | Different level |
+| `supervision_required` | the shift | Their registration category says they work under supervision and the shift does not say anybody is there to supervise them. | Needs supervision |
+| `not_eligible` | the person | They do not pass the eligibility rule: an account that can be used, a profile, a verified identity that matches their name, an active registration checked recently enough, every credential the profession requires, and a clear screening. The rule is one function, `isEligibleForMatching`, called here and not restated. | Not yet cleared |
+| `unavailable` | their time | None of the availability they set touches the shift, or they have offered none. A slot that ends the moment the shift starts offers none of it. | Not offering this time |
+| `partly_available` | their time | What they offered covers part of the shift but no stretch of it covers the whole, from its start to its end: half a night shift is not a night shift. Told apart from `unavailable` because it is the one a facility can do something about, by shortening or splitting the shift. | Free for part of it |
+| `blocked` | their time | A period they blocked (leave, training, away) overlaps any part of the shift. This is checked before availability, so somebody who is blocked and has also offered nothing is reported as blocked, not unavailable. | Marked unavailable |
+| `already_assigned` | their time | They hold a confirmed assignment that overlaps any part of the shift. A cancelled one does not count. | Already booked |
+| `travel_preference` | their wishes | Their own travel preference rules the shift out: “same local government area” and the facility is in another, or “same state” and the facility is in another state. “Anywhere” never excludes. | Prefers to stay closer |
 
-A facility is shown the reasons but not whose they are: whose diary is full is that person’s business. A practitioner who is ranked is shown to the facility by initials only, with no phone number, until a booking exists.
+A facility is shown the reasons, counted, with the short name in the last column and a sentence under it, but not whose they are: whose diary is full is that person’s business. A practitioner who is ranked is shown to the facility by initials only, with no phone number, until a booking exists.
 
 ## How the rest are ranked
 

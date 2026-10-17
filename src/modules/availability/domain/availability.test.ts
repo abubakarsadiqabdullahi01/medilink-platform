@@ -142,10 +142,38 @@ describe('availabilityFor', () => {
     });
   });
 
-  it('refuses a shift only partly covered', () => {
-    // Half a night shift is not a night shift.
+  it('refuses a shift only partly covered, and says it was part of it that was offered', () => {
+    // Half a night shift is not a night shift, but it is not nothing either: a facility that
+    // is told "part" can shorten or split the shift, and one told "none" cannot.
     const morningOnly = recurring({ endMinute: 12 * 60 });
-    expect(availabilityFor([morningOnly], [], shift).reason).toBe('not_offered');
+    expect(availabilityFor([morningOnly], [], shift)).toEqual({ available: false, reason: 'partly_offered' });
+  });
+
+  it('says part, not none, when the slots leave a gap inside the shift', () => {
+    const morning = recurring({ startMinute: 8 * 60, endMinute: 11 * 60 });
+    const afternoon = recurring({ startMinute: 13 * 60, endMinute: 18 * 60 });
+    expect(availabilityFor([morning, afternoon], [], shift).reason).toBe('partly_offered');
+  });
+
+  it('says part for a one-off slot that starts after the shift does', () => {
+    const lateStart = oneOff('2026-09-14T12:00:00Z', '2026-09-14T20:00:00Z');
+    expect(availabilityFor([lateStart], [], shift).reason).toBe('partly_offered');
+  });
+
+  it('says none for a slot that only touches the shift, because nothing of it is offered', () => {
+    // 08:00 to 10:00 WAT ends the instant the shift (10:00 to 16:00 WAT) starts.
+    const endsAsItStarts = recurring({ startMinute: 8 * 60, endMinute: 10 * 60 });
+    expect(availabilityFor([endsAsItStarts], [], shift).reason).toBe('not_offered');
+  });
+
+  it('says none for slots on another day', () => {
+    expect(availabilityFor([recurring({ dayOfWeek: 2 })], [], shift).reason).toBe('not_offered');
+  });
+
+  it('lets a block beat a partly offered shift, as it beats a fully offered one', () => {
+    const morningOnly = recurring({ endMinute: 12 * 60 });
+    const block = { startsAt: new Date('2026-09-14T13:00:00Z'), endsAt: new Date('2026-09-14T14:00:00Z') };
+    expect(availabilityFor([morningOnly], [block], shift).reason).toBe('blocked');
   });
 
   it('accepts a shift covered by two adjoining slots', () => {

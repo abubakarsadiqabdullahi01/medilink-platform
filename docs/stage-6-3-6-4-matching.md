@@ -18,7 +18,7 @@ queries as it scores.
 
 Two phases, both recorded:
 
-**Hard filters**, each producing a named reason (nine, listed in
+**Hard filters**, each producing a named reason (listed in
 [`matching-rules.md`](matching-rules.md)). All of them are reported, not just
 the first: an operations officer asking "why did nobody match?" wants the
 whole picture.
