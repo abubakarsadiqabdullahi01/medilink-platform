@@ -21,8 +21,16 @@ const alertVariants = cva(
 const Alert = React.forwardRef<
   HTMLDivElement,
   React.HTMLAttributes<HTMLDivElement> & VariantProps<typeof alertVariants>
->(({ className, variant, ...props }, ref) => (
-  <div ref={ref} role="alert" className={cn(alertVariants({ variant }), className)} {...props} />
+>(({ className, variant, role, ...props }, ref) => (
+  // Only a failure interrupts. A warning or a note that is simply on the page when it loads is
+  // read in its turn ("status"), not shouted over whatever the person was in the middle of;
+  // a caller whose message really is urgent can still pass `role="alert"`.
+  <div
+    ref={ref}
+    role={role ?? (variant === 'destructive' ? 'alert' : 'status')}
+    className={cn(alertVariants({ variant }), className)}
+    {...props}
+  />
 ));
 Alert.displayName = 'Alert';
 

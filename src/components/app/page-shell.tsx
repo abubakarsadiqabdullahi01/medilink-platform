@@ -1,28 +1,98 @@
+import Link from 'next/link';
 import type { ReactNode } from 'react';
+import { ArrowLeft } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card } from '@/components/ui/card';
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from '@/components/ui/breadcrumb';
 
+export interface Crumb {
+  label: string;
+  /** Omitted on the page you are on. */
+  href?: string;
+}
+
+/**
+ * The top of every page, the same on all of them.
+ *
+ * `breadcrumbs` is for a page that is somewhere *inside* another — a shift inside Shifts, a
+ * record inside a queue. On a wide screen it is the usual trail. On a phone a trail of three
+ * wraps over two lines and each crumb is a thin target, so it becomes one large "back to"
+ * link to the parent, which is what somebody standing in a corridor wants.
+ *
+ * `action` is the page's one primary action. A page with two competing primary buttons has
+ * not decided what it is for.
+ */
 export function PageHeader({
   title,
   description,
   action,
+  breadcrumbs,
+  meta,
 }: {
   title: string;
   description?: string;
   action?: ReactNode;
+  breadcrumbs?: Crumb[];
+  /** A status or a reference shown beside the title: a badge, a record number. */
+  meta?: ReactNode;
 }) {
+  const parent = breadcrumbs && breadcrumbs.length > 1 ? breadcrumbs[breadcrumbs.length - 2] : undefined;
+
   return (
-    <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
-      <div className="min-w-0">
-        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-        {description ? (
-          <p className="mt-1.5 max-w-3xl text-sm leading-relaxed text-muted-foreground">
-            {description}
-          </p>
-        ) : null}
+    <header className="mb-6">
+      {breadcrumbs && breadcrumbs.length > 0 ? (
+        <>
+          {parent?.href ? (
+            <Link
+              href={parent.href}
+              className="mb-2 inline-flex min-h-11 items-center gap-1.5 text-sm font-medium text-primary underline-offset-4 hover:underline sm:hidden"
+            >
+              <ArrowLeft className="size-4" aria-hidden="true" /> {parent.label}
+            </Link>
+          ) : null}
+          <Breadcrumb className="mb-2 hidden sm:block">
+            <BreadcrumbList>
+              {breadcrumbs.map((crumb, index) => {
+                const last = index === breadcrumbs.length - 1;
+                return (
+                  <BreadcrumbItem key={`${crumb.label}-${index}`}>
+                    {last || !crumb.href ? (
+                      <BreadcrumbPage>{crumb.label}</BreadcrumbPage>
+                    ) : (
+                      <BreadcrumbLink asChild>
+                        <Link href={crumb.href}>{crumb.label}</Link>
+                      </BreadcrumbLink>
+                    )}
+                    {last ? null : <BreadcrumbSeparator />}
+                  </BreadcrumbItem>
+                );
+              })}
+            </BreadcrumbList>
+          </Breadcrumb>
+        </>
+      ) : null}
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <h1 className="text-balance text-2xl font-semibold leading-tight tracking-tight">{title}</h1>
+            {meta}
+          </div>
+          {description ? (
+            <p className="mt-1.5 max-w-3xl text-base leading-relaxed text-muted-foreground">
+              {description}
+            </p>
+          ) : null}
+        </div>
+        {action ? <div className="shrink-0">{action}</div> : null}
       </div>
-      {action ? <div className="shrink-0">{action}</div> : null}
     </header>
   );
 }
@@ -39,12 +109,15 @@ export function EmptyState({
   title,
   description,
   compact = false,
+  action,
 }: {
   icon?: ReactNode;
   title: string;
   description?: string;
   /** For a list that sits under a form on the same page, where a tall empty box pushes the next step off screen. */
   compact?: boolean;
+  /** What to do about it: the first shift to publish, the filter to clear. */
+  action?: ReactNode;
 }) {
   return (
     <Card
@@ -57,9 +130,10 @@ export function EmptyState({
       <div>
         <p className="font-medium">{title}</p>
         {description ? (
-          <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">{description}</p>
+          <p className="mx-auto mt-1 max-w-sm text-sm leading-relaxed text-muted-foreground">{description}</p>
         ) : null}
       </div>
+      {action}
     </Card>
   );
 }

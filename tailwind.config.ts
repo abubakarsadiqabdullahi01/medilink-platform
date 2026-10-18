@@ -64,6 +64,13 @@ export default {
   				'1': 'hsl(var(--chart-1))',
   				'2': 'hsl(var(--chart-2))'
   			},
+  			brand: {
+  				deep: 'hsl(var(--brand-deep))',
+  				deeper: 'hsl(var(--brand-deeper))',
+  				glow: 'hsl(var(--brand-glow))',
+  				tint: 'hsl(var(--brand-tint))',
+  				wash: 'hsl(var(--brand-wash))'
+  			},
   			sidebar: {
   				DEFAULT: 'hsl(var(--sidebar-background))',
   				foreground: 'hsl(var(--sidebar-foreground))',
@@ -82,6 +89,10 @@ export default {
   		fontSize: {
   			xs: ['0.875rem', { lineHeight: '1.3rem' }],
   			sm: ['1rem', { lineHeight: '1.5rem' }]
+  		},
+  		boxShadow: {
+  			card: 'var(--elevation-card)',
+  			float: 'var(--elevation-float)'
   		},
   		borderRadius: {
   			lg: 'var(--radius)',
