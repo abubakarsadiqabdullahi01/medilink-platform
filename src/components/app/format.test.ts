@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { expiryOf, formatDate, parseNairaToKobo, recordLabel } from './format';
+import {
+  expiryOf,
+  formatClock,
+  formatDate,
+  formatNaira,
+  formatNairaTight,
+  formatShiftWindow,
+  parseNairaToKobo,
+  recordLabel,
+} from './format';
 
 describe('recordLabel', () => {
   it('turns the tables the audit trail actually writes into nouns', () => {
@@ -84,5 +93,39 @@ describe('parseNairaToKobo', () => {
     for (const bad of ['', 'abc', '-5', '1.234', '1.2.3', '12e3', '₦']) {
       expect(parseNairaToKobo(bad), bad).toBeNull();
     }
+  });
+});
+
+describe('formatNairaTight', () => {
+  it('drops the kobo only when there are none, and never rounds', () => {
+    expect(formatNairaTight(4_800_000)).toBe('₦48,000');
+    expect(formatNairaTight(4_800_050)).toBe('₦48,000.50');
+    expect(formatNairaTight(0)).toBe('₦0');
+    expect(formatNairaTight(null)).toBe('—');
+    // The exact figure is always recoverable: tight and full agree on the value.
+    expect(formatNaira(4_800_050)).toContain('48,000.50');
+  });
+});
+
+describe('formatShiftWindow', () => {
+  it('writes a day shift as one day, in Lagos time', () => {
+    // 08:00–20:00 WAT is 07:00–19:00 UTC.
+    expect(formatShiftWindow('2026-10-21T07:00:00Z', '2026-10-21T19:00:00Z')).toBe('Wed, 21 Oct · 08:00–20:00');
+  });
+
+  it('writes a night shift with both days, so it does not appear to end before it starts', () => {
+    // 20:00 WAT Wed to 08:00 WAT Thu.
+    expect(formatShiftWindow('2026-10-21T19:00:00Z', '2026-10-22T07:00:00Z')).toBe(
+      'Wed, 21 Oct 20:00 – Thu, 22 Oct 08:00',
+    );
+  });
+
+  it('puts a shift at 00:30 WAT on its own day, not the day before in UTC', () => {
+    expect(formatShiftWindow('2026-10-20T23:30:00Z', '2026-10-21T07:30:00Z')).toBe('Wed, 21 Oct · 00:30–08:30');
+  });
+
+  it('is a dash for nothing, and the clock is a clock', () => {
+    expect(formatShiftWindow(null, null)).toBe('—');
+    expect(formatClock('2026-10-21T13:45:00Z')).toBe('14:45');
   });
 });

@@ -24,6 +24,7 @@ import {
   ScrollText,
   Stethoscope,
   Sun,
+  Type,
   UserRound,
   X,
 } from 'lucide-react';
@@ -37,6 +38,7 @@ import { api } from '@/lib/ui/api';
 import { useSession } from '@/lib/ui/session';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -119,6 +121,21 @@ export function ConsoleShell({
       ),
     }))
     .filter((section) => section.items.length > 0);
+
+  /**
+   * Which item is "here". Exact match alone left a shift's own page highlighting nothing, so
+   * the longest item that is the path or a parent of it wins. An overview at the console's root
+   * (`/facility`) is the parent of everything and so matches only itself.
+   */
+  const activeHref = visible
+    .flatMap((section) => section.items)
+    .map((item) => item.href)
+    .filter(
+      (href) =>
+        pathname === href ||
+        (href.split('/').filter(Boolean).length > 1 && pathname.startsWith(`${href}/`)),
+    )
+    .sort((a, b) => b.length - a.length)[0];
 
   async function signOut() {
     await api.post('/api/v1/auth/logout').catch(() => undefined);
@@ -226,13 +243,14 @@ export function ConsoleShell({
           </p>
           <ul className="space-y-0.5">
             {section.items.map((item) => {
-              const active = pathname === item.href;
+              const active = item.href === activeHref;
               const Icon = item.icon;
               return (
                 <li key={item.href}>
                   <Link
                     href={item.href}
                     onClick={() => setOpen(false)}
+                    aria-current={active ? 'page' : undefined}
                     // Hover and keyboard focus both count: somebody tabbing
                     // through the sidebar is as likely to open the page as
                     // somebody pointing at it, and they are the ones for whom
@@ -240,7 +258,7 @@ export function ConsoleShell({
                     onMouseEnter={item.prefetch ? () => prefetch(item.prefetch!) : undefined}
                     onFocus={item.prefetch ? () => prefetch(item.prefetch!) : undefined}
                     className={cn(
-                      'flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors',
+                      'flex min-h-11 items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors',
                       active
                         ? 'bg-primary text-primary-foreground shadow-sm'
                         : 'text-foreground/80 hover:bg-accent hover:text-accent-foreground',
@@ -306,7 +324,7 @@ export function ConsoleShell({
       ) : null}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-40 flex h-14 items-center gap-3 border-b bg-background/85 px-4 backdrop-blur sm:px-6">
+        <header className="sticky top-0 z-40 flex h-14 items-center gap-3 border-b bg-background px-4 sm:px-6">
           <Button
             ref={openerRef}
             variant="ghost"
@@ -323,14 +341,67 @@ export function ConsoleShell({
 
           <div className="ml-auto flex items-center gap-1">
             <NotificationBell />
-            <TextSizeControl />
-            <Button variant="ghost" size="icon" onClick={toggleTheme} aria-label="Toggle theme">
-              {dark ? <Sun /> : <Moon />}
-            </Button>
+            {/* Text size and theme sit in the bar from tablet width up. On a phone the bar is
+                already a hamburger, a title, a bell and an avatar: three more 44px controls
+                made it 377px in a 358px column and truncated the console's own name. They are
+                one button there, with the projector size left out because a phone is not one. */}
+            <div className="hidden items-center gap-1 sm:flex">
+              <TextSizeControl />
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={toggleTheme}
+                aria-label={dark ? 'Switch to the light theme' : 'Switch to the dark theme'}
+              >
+                {dark ? <Sun /> : <Moon />}
+              </Button>
+            </div>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="sm:hidden"
+                  aria-label="Text size and theme"
+                >
+                  <Type />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-64 space-y-4">
+                <div className="space-y-1.5">
+                  <p className="text-sm font-medium">Text size</p>
+                  <TextSizeControl />
+                </div>
+                <div className="space-y-1.5">
+                  <p className="text-sm font-medium">Theme</p>
+                  <div role="group" aria-label="Theme" className="flex gap-2">
+                    <Button
+                      variant={dark ? 'outline' : 'default'}
+                      className="flex-1"
+                      aria-pressed={!dark}
+                      onClick={() => dark && toggleTheme()}
+                    >
+                      <Sun /> Light
+                    </Button>
+                    <Button
+                      variant={dark ? 'default' : 'outline'}
+                      className="flex-1"
+                      aria-pressed={dark}
+                      onClick={() => !dark && toggleTheme()}
+                    >
+                      <Moon /> Dark
+                    </Button>
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent">
+                <button
+                  className="flex min-h-11 items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent"
+                  aria-label={`Account menu for ${session.user.fullName}`}
+                >
                   <Avatar name={session.user.fullName} src={avatarSrc} size="sm" />
                   <span className="hidden sm:inline">{session.user.fullName}</span>
                 </button>

@@ -4,6 +4,7 @@ import { ArrowLeft } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card } from '@/components/ui/card';
+import { DocumentTitle } from '@/components/app/document-title';
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -48,6 +49,7 @@ export function PageHeader({
 
   return (
     <header className="mb-6">
+      <DocumentTitle title={title} />
       {breadcrumbs && breadcrumbs.length > 0 ? (
         <>
           {parent?.href ? (

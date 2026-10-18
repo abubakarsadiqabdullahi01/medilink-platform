@@ -38,6 +38,10 @@ export interface CredentialSubmission {
   credentialTypeId: string;
   status: string;
   reviewNotes?: string | null;
+  /** Worked out from the review date when none was read from the document. */
+  expiresAt?: string | null;
+  /** The date printed on the document, a Lagos calendar date, when an officer read one. */
+  documentExpiresOn?: string | null;
 }
 
 /**

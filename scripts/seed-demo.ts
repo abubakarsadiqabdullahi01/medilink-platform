@@ -940,7 +940,20 @@ async function clear(): Promise<void> {
   // Acceptances are Restrict against the version, and anybody — not only a
   // demo account — may have accepted one while clicking around.
   await prisma.agreementAcceptance.deleteMany({ where: { versionId: { in: versionIds } } });
+  // A payout account is Restrict against its owner, and the seed gives some of them one. Without
+  // this a second run stopped here with a foreign-key error, so "re-runnable" was not true.
+  if (userIds.length > 0) await prisma.payoutAccount.deleteMany({ where: { userId: { in: userIds } } });
   if (userIds.length > 0) await prisma.user.deleteMany({ where: { id: { in: userIds } } });
+  // The demo's doctor levels are defined last (see "Defining demo levels"), and once a profession
+  // has levels every shift for it must name one — so a second run, which writes its history
+  // first, failed on the first historic shift. Taking them away with the people who held them is
+  // what makes the second run the same as the first.
+  await prisma.cadreLevel.deleteMany({
+    where: { name: { in: ['House officer', 'Medical officer', 'Registrar', 'Consultant'] } },
+  });
+  await prisma.registrationCategory.deleteMany({
+    where: { name: { in: ['Full registration', 'Provisional registration'] } },
+  });
   await prisma.agreementVersion.deleteMany({ where: { id: { in: versionIds } } });
 
   await prisma.screeningResult.deleteMany({ where: { matchedEntry: { owner: SANCTIONS_OWNER } } });

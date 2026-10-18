@@ -45,11 +45,25 @@ const TONE_MARK: Record<
 };
 
 /** Three to five tiles in a row, wrapping by the room they have rather than by the screen. */
-export function MetricGrid({ children, className }: { children: ReactNode; className?: string }) {
+export function MetricGrid({
+  children,
+  className,
+  compact = false,
+}: {
+  children: ReactNode;
+  className?: string;
+  /** Narrower tiles, so a phone shows two across: for four short figures, not for sentences. */
+  compact?: boolean;
+}) {
   return (
     <div
       className={cn(
-        'grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(100%,14rem),1fr))]',
+        'grid gap-3 sm:gap-4',
+        // Compact is two across until there is room for four, not "as many as fit": four
+        // squeezed tiles at 1024px each held a seven-figure amount in 133px.
+        compact
+          ? 'grid-cols-2 xl:grid-cols-4'
+          : '[grid-template-columns:repeat(auto-fit,minmax(min(100%,14rem),1fr))]',
         className,
       )}
     >
@@ -74,6 +88,8 @@ export function MetricTile({
   icon,
   loading = false,
   error = false,
+  compact = false,
+  className,
 }: {
   label: string;
   value: ReactNode;
@@ -84,6 +100,9 @@ export function MetricTile({
   loading?: boolean;
   /** A failed fetch is not zero, and must not look like it. */
   error?: boolean;
+  /** For a tile in a two-across grid on a phone. */
+  compact?: boolean;
+  className?: string;
 }) {
   const mark = TONE_MARK[tone];
   const Icon = mark.icon ?? icon;
@@ -98,7 +117,9 @@ export function MetricTile({
   return (
     <Card
       className={cn(
-        'relative flex flex-col gap-1.5 p-5',
+        'relative flex flex-col gap-1.5',
+        compact ? 'p-4' : 'p-5',
+        className,
         mark.border,
         href && 'transition-colors focus-within:ring-2 focus-within:ring-ring hover:bg-accent/40',
       )}
@@ -122,7 +143,12 @@ export function MetricTile({
           <CircleAlert className="size-4" aria-hidden="true" /> Could not load
         </p>
       ) : (
-        <p className="tabular text-3xl font-semibold leading-tight tracking-tight">
+        <p
+          className={cn(
+            'tabular font-semibold leading-tight tracking-tight [overflow-wrap:anywhere]',
+            compact ? 'text-2xl' : 'text-3xl',
+          )}
+        >
           <span className="sr-only">{mark.word}</span>
           {value}
         </p>
@@ -281,7 +307,7 @@ export function DashboardSection({
 }) {
   return (
     <section aria-labelledby={id}>
-      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+      <div className="mb-3 flex min-h-11 flex-wrap items-center justify-between gap-x-4 gap-y-1">
         <div className="min-w-0">
           <h2 id={id} className="text-lg font-semibold tracking-tight">
             {title}

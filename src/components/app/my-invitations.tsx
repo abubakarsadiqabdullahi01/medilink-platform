@@ -3,8 +3,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { Mail } from 'lucide-react';
+import { Mail, TriangleAlert } from 'lucide-react';
 import { api, errorMessage } from '@/lib/ui/api';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { formatDate } from '@/components/app/format';
@@ -30,7 +31,7 @@ const roleLabel = (key: string) =>
  * accepting asks the server, which checks again that whoever sent it can still give that role. It
  * draws nothing when there is nothing waiting, so it can sit at the top of any console's home.
  */
-export function MyInvitations() {
+export function MyInvitations({ className = 'mb-6' }: { className?: string }) {
   const queryClient = useQueryClient();
   const router = useRouter();
   const key = ['staff-invitations', 'mine'];
@@ -43,7 +44,9 @@ export function MyInvitations() {
 
   const answer = useMutation({
     mutationFn: (input: { invitation: MyInvitation; decision: 'accept' | 'decline' }) =>
-      api.post(`/api/v1/staff-invitations/${input.invitation.id}/respond`, { decision: input.decision }),
+      api.post(`/api/v1/staff-invitations/${input.invitation.id}/respond`, {
+        decision: input.decision,
+      }),
     onSuccess: async (_data, { invitation, decision }) => {
       if (decision === 'accept') {
         toast.success(`You now work for ${invitation.facilityName}`, {
@@ -65,10 +68,31 @@ export function MyInvitations() {
   });
 
   const rows = waiting.data?.invitations ?? [];
+
+  // Hiding a failed fetch hid an invitation somebody was waiting on: "none" and "could not find
+  // out" are different facts, and only one of them is safe to act on.
+  if (waiting.isError && rows.length === 0) {
+    return (
+      <Alert variant="warning" className={className}>
+        <TriangleAlert />
+        <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+          <span>Your invitations to work at a facility could not be loaded.</span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void waiting.refetch()}
+            loading={waiting.isFetching}
+          >
+            Try again
+          </Button>
+        </AlertDescription>
+      </Alert>
+    );
+  }
   if (rows.length === 0) return null;
 
   return (
-    <section aria-label="Invitations" className="mb-6 space-y-2">
+    <section aria-label="Invitations" className={`${className} space-y-2`}>
       {rows.map((invitation) => (
         <Card key={invitation.id} className="border-primary/40">
           <CardContent className="flex flex-wrap items-center justify-between gap-4 py-4">
@@ -78,7 +102,8 @@ export function MyInvitations() {
               </span>
               <div className="min-w-0">
                 <p className="font-medium">
-                  {invitation.facilityName} has invited you to join as {roleLabel(invitation.roleKey)}
+                  {invitation.facilityName} has invited you to join as{' '}
+                  {roleLabel(invitation.roleKey)}
                 </p>
                 <p className="mt-0.5 text-sm text-muted-foreground">
                   Sent by {invitation.invitedByName}. Answer by {formatDate(invitation.expiresAt)}.
@@ -90,12 +115,22 @@ export function MyInvitations() {
               <Button
                 variant="outline"
                 disabled={answer.isPending}
+                loading={
+                  answer.isPending &&
+                  answer.variables?.invitation.id === invitation.id &&
+                  answer.variables?.decision === 'decline'
+                }
                 onClick={() => answer.mutate({ invitation, decision: 'decline' })}
               >
                 Decline
               </Button>
               <Button
-                loading={answer.isPending && answer.variables?.invitation.id === invitation.id}
+                loading={
+                  answer.isPending &&
+                  answer.variables?.invitation.id === invitation.id &&
+                  answer.variables?.decision === 'accept'
+                }
+                disabled={answer.isPending}
                 onClick={() => answer.mutate({ invitation, decision: 'accept' })}
               >
                 Accept

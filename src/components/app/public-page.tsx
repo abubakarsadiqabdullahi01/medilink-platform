@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { ArrowLeft, Stethoscope } from 'lucide-react';
+import { DocumentTitle } from '@/components/app/document-title';
 import { TextSizeControl } from '@/components/app/text-size-control';
 
 /**
@@ -16,6 +17,7 @@ export function PublicPage({
 }) {
   return (
     <div className="min-h-dvh bg-background">
+      <DocumentTitle title={title} />
       <header className="border-b">
         <div className="mx-auto flex h-16 max-w-3xl items-center justify-between gap-4 px-5">
           <Link href="/" className="flex items-center gap-2 font-semibold text-primary" aria-label="Medilink home">

@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { ChevronDown, Stethoscope, type LucideIcon } from 'lucide-react';
+import { DocumentTitle } from '@/components/app/document-title';
 import { TextSizeControl } from '@/components/app/text-size-control';
 
 export interface AuthPoint {
@@ -37,6 +38,7 @@ export function AuthShell({
   const Icon = aside?.icon;
   return (
     <div className="min-h-dvh lg:grid lg:grid-cols-2">
+      <DocumentTitle title={title} />
       <div className="flex min-h-dvh flex-col">
         <header className="flex h-16 shrink-0 items-center justify-between gap-3 px-4 sm:px-6">
           <Link

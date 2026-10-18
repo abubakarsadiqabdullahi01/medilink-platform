@@ -18,6 +18,16 @@ export function formatWhen(value: string | Date | null | undefined): string {
   });
 }
 
+/** "21 Oct": the day without the year, for something within the next few weeks. */
+export function formatShortDate(value: string | Date | null | undefined): string {
+  if (!value) return '—';
+  return new Date(value).toLocaleDateString('en-NG', {
+    timeZone: 'Africa/Lagos',
+    day: 'numeric',
+    month: 'short',
+  });
+}
+
 export function formatDate(value: string | Date | null | undefined): string {
   if (!value) return '—';
   return new Date(value).toLocaleDateString('en-NG', {
@@ -46,7 +56,47 @@ export function expiryOf(row: {
   }
   if (!row.expiresAt) return null;
   const date = formatDate(row.expiresAt);
-  return { date, fromDocument: false, text: `${date} (an estimate, no date was read from the document)` };
+  return {
+    date,
+    fromDocument: false,
+    text: `${date} (an estimate, no date was read from the document)`,
+  };
+}
+
+const SHIFT_DAY = new Intl.DateTimeFormat('en-NG', {
+  timeZone: 'Africa/Lagos',
+  weekday: 'short',
+  day: 'numeric',
+  month: 'short',
+});
+const SHIFT_TIME = new Intl.DateTimeFormat('en-NG', {
+  timeZone: 'Africa/Lagos',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+});
+
+/**
+ * A shift as people say it: "Sun, 18 Oct · 10:00–18:00". One day when it starts and ends on the
+ * same Lagos date, both days when it runs past midnight — a night shift must not read as ending
+ * eight hours before it began.
+ */
+export function formatShiftWindow(
+  startsAt: string | Date | null | undefined,
+  endsAt: string | Date | null | undefined,
+): string {
+  if (!startsAt || !endsAt) return '—';
+  const start = new Date(startsAt);
+  const end = new Date(endsAt);
+  if (SHIFT_DAY.format(start) === SHIFT_DAY.format(end)) {
+    return `${SHIFT_DAY.format(start)} · ${SHIFT_TIME.format(start)}–${SHIFT_TIME.format(end)}`;
+  }
+  return `${SHIFT_DAY.format(start)} ${SHIFT_TIME.format(start)} – ${SHIFT_DAY.format(end)} ${SHIFT_TIME.format(end)}`;
+}
+
+/** Just the clock, in Lagos: "14:45". */
+export function formatClock(value: string | Date | null | undefined): string {
+  return value ? SHIFT_TIME.format(new Date(value)) : '—';
 }
 
 /** "3 hours ago", for a queue where age is the thing you are scanning for. */
@@ -77,10 +127,14 @@ export function formatAgo(value: string | Date | null | undefined): string {
       return formatter.format(future ? value_ : -value_, unit);
     }
     divisor = limit;
-    unit = name === 'second' ? 'minute' : name === 'minute' ? 'hour' : name === 'hour' ? 'day' : 'month';
+    unit =
+      name === 'second' ? 'minute' : name === 'minute' ? 'hour' : name === 'hour' ? 'day' : 'month';
   }
 
-  return formatter.format(future ? Math.round(abs / 31536000) : -Math.round(abs / 31536000), 'year');
+  return formatter.format(
+    future ? Math.round(abs / 31536000) : -Math.round(abs / 31536000),
+    'year',
+  );
 }
 
 /**
@@ -107,6 +161,24 @@ export function formatNaira(kobo: number | null | undefined): string {
     style: 'currency',
     currency: 'NGN',
     minimumFractionDigits: 2,
+  }).format(kobo / 100);
+}
+
+/**
+ * Naira with the kobo left off when there are none: "₦48,000" rather than "₦48,000.00".
+ *
+ * For a glance — a tile, a summary line — where two zeros are noise and a seven-figure amount has
+ * to fit in half a phone. It is never a rounding: a figure with kobo keeps both decimals, so what
+ * is shown is always exactly what is owed. Anywhere an amount is decided on, use `formatNaira`.
+ */
+export function formatNairaTight(kobo: number | null | undefined): string {
+  if (kobo === null || kobo === undefined) return '—';
+  const fraction = kobo % 100 === 0 ? 0 : 2;
+  return new Intl.NumberFormat('en-NG', {
+    style: 'currency',
+    currency: 'NGN',
+    minimumFractionDigits: fraction,
+    maximumFractionDigits: fraction,
   }).format(kobo / 100);
 }
 
@@ -146,7 +218,9 @@ export function shortId(id: string | null | undefined): string {
 export function recordLabel(entityType: string | null | undefined): string {
   if (!entityType) return 'Record';
 
-  const table = entityType.includes('.') ? entityType.slice(entityType.indexOf('.') + 1) : entityType;
+  const table = entityType.includes('.')
+    ? entityType.slice(entityType.indexOf('.') + 1)
+    : entityType;
   const words = table.replace(/_/g, ' ');
   const singular = singularise(words);
 
