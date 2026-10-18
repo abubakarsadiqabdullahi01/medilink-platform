@@ -12,6 +12,7 @@ import {
   markAssignmentCompleted,
 } from '@/modules/matching/application/assignment';
 import { termsOfBooking } from '@/modules/rates-contracts/application/rate-card';
+import { holidayDatesFor } from '@/modules/rates-contracts/application/holiday';
 import { priceStoredTimesheet } from '@/modules/rates-contracts/domain/pricing';
 import { getServiceRequest } from '@/modules/service-requests/application/request';
 import { AttendanceError, AttendanceErrors } from '@/modules/attendance/domain/errors';
@@ -21,7 +22,7 @@ import {
   IllegalAttendanceTransition,
   type AttendanceState,
 } from '@/modules/attendance/domain/state-machine';
-import { computeTimesheet, watDateOf, TimesheetError } from '../domain/hours';
+import { computeTimesheet, TimesheetError } from '../domain/hours';
 
 /**
  * Steps 7.4, 7.5 and 7.6: the hours a shift comes to, who approved them, and
@@ -58,24 +59,6 @@ function guardTransition(from: AttendanceState, to: AttendanceState): void {
     }
     throw error;
   }
-}
-
-/** Every WAT calendar date the shift touches, so the holiday lookup is one query. */
-async function holidayDatesFor(from: Date, to: Date): Promise<Set<string>> {
-  const dates = new Set<string>();
-  const dayMs = 24 * 60 * 60 * 1000;
-  for (let at = from.getTime() - dayMs; at <= to.getTime() + dayMs; at += dayMs) {
-    dates.add(watDateOf(new Date(at)));
-  }
-
-  const rows = await prisma.publicHoliday.findMany({
-    where: { date: { gte: new Date(from.getTime() - dayMs), lte: new Date(to.getTime() + dayMs) } },
-    select: { date: true },
-  });
-
-  // `date` is a DATE column, so it comes back as midnight UTC; the WAT
-  // calendar day it names is the date as written, not as shifted.
-  return new Set(rows.map((row) => row.date.toISOString().slice(0, 10)));
 }
 
 async function loadContext(assignmentId: string) {

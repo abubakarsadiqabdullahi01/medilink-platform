@@ -5,6 +5,8 @@ import { publishEvent } from '@/lib/outbox';
 import { EVENTS } from '@/lib/events';
 import { HttpError } from '@/lib/http/errors';
 import { rateTermsFor } from '@/modules/rates-contracts/application/rate-card';
+import { describeShiftEstimate } from '@/modules/rates-contracts/application/estimate';
+import type { DescribedEstimate } from '@/modules/rates-contracts/domain/estimate';
 import { assertAgreementsAccepted } from '@/modules/audit-compliance/application/consent';
 import {
   DEFAULT_INVITATION_HOURS,
@@ -1078,6 +1080,11 @@ export interface InvitationQueueRow extends InvitationView {
   levelName: string | null;
   /** Whether somebody is there to supervise. */
   supervisionAvailable: boolean;
+  /**
+   * What they would be paid, in words, before they say yes (M11-04). Only for an offer still open to
+   * answer; null for one already answered, and for a shift that cannot be priced.
+   */
+  estimate: DescribedEstimate | null;
 }
 
 /**
@@ -1102,6 +1109,7 @@ export async function listInvitationsFor(userId: string): Promise<InvitationQueu
         where: { id: { in: requestIds }, deletedAt: null },
         select: {
           id: true,
+          facilityId: true,
           professionalCategoryId: true,
           specialtyId: true,
           shiftType: true,
@@ -1119,6 +1127,34 @@ export async function listInvitationsFor(userId: string): Promise<InvitationQueu
       })
     : [];
   const byId = new Map(requests.map((request) => [request.id, request]));
+
+  // What each open offer would pay, worked out once per shift however many offers point at it.
+  const estimates = new Map<string, Promise<DescribedEstimate | null>>();
+  const estimateFor = (request: (typeof requests)[number]) => {
+    const key = request.id;
+    if (!estimates.has(key)) {
+      estimates.set(
+        key,
+        describeShiftEstimate({
+          facilityId: request.facilityId,
+          startsAt: request.startsAt,
+          endsAt: request.endsAt,
+          hourlyRateKobo: request.hourlyRateKobo,
+          audience: 'practitioner',
+        }),
+      );
+    }
+    return estimates.get(key)!;
+  };
+  const estimateOf = new Map<string, DescribedEstimate | null>();
+  await Promise.all(
+    rows
+      .filter((row) => row.status === 'INVITED')
+      .map(async (row) => {
+        const request = byId.get(row.serviceRequestId);
+        if (request) estimateOf.set(row.id, await estimateFor(request));
+      }),
+  );
 
   return rows.flatMap((row) => {
     const request = byId.get(row.serviceRequestId);
@@ -1142,6 +1178,7 @@ export async function listInvitationsFor(userId: string): Promise<InvitationQueu
         notes: request.notes,
         addressLine: request.facility.addressLine,
         headcount: request.headcount,
+        estimate: estimateOf.get(row.id) ?? null,
       },
     ];
   });

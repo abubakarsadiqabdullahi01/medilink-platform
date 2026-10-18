@@ -9,7 +9,8 @@ import { ArrowLeft, Sparkles, TriangleAlert, UserCheck, UserPlus } from 'lucide-
 import { cn } from '@/lib/utils';
 import { api, errorMessage } from '@/lib/ui/api';
 import { useFacilityId } from '@/lib/ui/facility';
-import { useSession } from '@/lib/ui/session';
+import { useScopeIds, useSession } from '@/lib/ui/session';
+import { useShiftEstimate } from '@/lib/ui/estimate';
 import { nameOf, useReference } from '@/lib/ui/reference';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -20,6 +21,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
 import { Detail, DetailGrid, EmptyState, PageHeader } from '@/components/app/page-shell';
 import { formatNaira, formatWhen } from '@/components/app/format';
+import { ShiftEstimate } from '@/components/app/shift-estimate';
 import { EXCLUSION_WORDS } from '@/modules/matching/domain/matching-rules';
 import type { ExclusionReason } from '@/modules/matching/domain/engine';
 
@@ -129,6 +131,18 @@ export default function ShiftDetailPage() {
         `/api/v1/service-requests/${requestId}?facilityId=${facilityId}`,
       ),
     enabled: Boolean(facilityId),
+  });
+
+  // What it comes to, before anybody is offered or confirmed onto it (M11-04). The preview is
+  // guarded on publishing for the facility, which an administrator of the platform does not hold.
+  const canEstimate = useScopeIds('service_request.publish', 'FACILITY').includes(facilityId ?? '');
+  const estimate = useShiftEstimate({
+    facilityId,
+    startsAt: shift.data ? new Date(shift.data.startsAt) : null,
+    endsAt: shift.data ? new Date(shift.data.endsAt) : null,
+    hourlyRateKobo: shift.data?.hourlyRateKobo ?? 0,
+    headcount: shift.data?.headcount ?? 1,
+    allowed: canEstimate,
   });
 
   const assignments = useQuery({
@@ -258,6 +272,7 @@ export default function ShiftDetailPage() {
                   </span>
                 </Detail>
               </DetailGrid>
+              {estimate ? <ShiftEstimate estimate={estimate} className="mt-4" /> : null}
               {shift.data.notes ? (
                 <p className="mt-4 rounded-md bg-muted px-3 py-2 text-sm">{shift.data.notes}</p>
               ) : null}
@@ -469,6 +484,7 @@ export default function ShiftDetailPage() {
                 <CardTitle className="text-sm">Ready to confirm</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
+                {estimate ? <p className="pb-1 text-sm text-muted-foreground">{estimate.headline}.</p> : null}
                 {invitations
                   .filter((row) => row.status === 'ACCEPTED')
                   .map((row) => (
