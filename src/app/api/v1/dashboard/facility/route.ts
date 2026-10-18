@@ -16,6 +16,8 @@ const SECTIONS: Permission[] = [
   'attendance.record',
   'timesheet.approve',
   'invoice.read',
+  // Who may act for this facility: the owner's section, and the only one an owner alone might hold.
+  'role.grant',
 ];
 
 /**

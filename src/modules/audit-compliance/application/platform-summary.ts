@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db';
+import { systemStatus } from './system-status';
 
 /**
  * What the platform dashboard shows, computed in the database.
@@ -35,8 +36,52 @@ export interface QueueSummary {
   oldest: Date | null;
 }
 
+/**
+ * What else an officer should not have to open another page to learn. Each block is present only
+ * for a caller who holds the permission the page it summarises requires, so none of them is a
+ * second door onto anything. They are additions: no field above or below changed shape.
+ */
+export interface PrivacySummary {
+  /** Requests received or being worked: the queue at /admin/data-requests. */
+  open: number;
+  /** Past the date the law gives for answering. */
+  overdue: number;
+  oldest: Date | null;
+  /** The nearest deadline of any open request, overdue ones included. */
+  nextDue: Date | null;
+  /** Erasures ask for the password again before they are carried out. */
+  erasures: number;
+}
+
+export interface HealthSummary {
+  status: 'ok' | 'degraded';
+  /** How many things the System page lists as wrong. */
+  problems: number;
+  deadLetter: number;
+  /** Texts a gateway took and then reported it could not deliver, in the last day. */
+  failedTexts24h: number;
+}
+
+export interface MoneySummary {
+  /** The nightly check that the books add up. A failed run is how a difference is recorded. */
+  reconciliation: { lastRunAt: Date | null; lastStatus: 'SUCCEEDED' | 'FAILED' | null; lastError: string | null };
+  /**
+   * The three below are the money acts, so they need `payout.manage` and are absent without it:
+   * "none waiting" and "not yours to see" must not look alike.
+   */
+  /** Invoices raised and not yet issued. */
+  draftInvoices?: QueueSummary;
+  /** Payouts prepared and waiting for somebody else to release them. */
+  payoutsPrepared?: QueueSummary;
+  /** Payouts released, waiting for the bank transfer to be recorded. */
+  payoutsReleased?: QueueSummary;
+}
+
 export interface PlatformSummary {
   queues: Partial<Record<QueueKey, QueueSummary>>;
+  privacy?: PrivacySummary;
+  health?: HealthSummary;
+  money?: MoneySummary;
   incidentSeverity: { severity: string; count: number }[];
   worstIncident: { severity: string; category: string; summary: string; reportedAt: Date } | null;
   growth: { month: string; facilities: number; practitioners: number; usage: number }[];
@@ -153,6 +198,12 @@ export async function platformSummary(permissions: ReadonlySet<string>): Promise
         : Promise.resolve([]),
     ]);
 
+  const [privacy, health, money] = await Promise.all([
+    can('audit.read') ? privacySummary() : undefined,
+    can('audit.read') ? healthSummary() : undefined,
+    can('invoice.read') ? moneySummary(can('payout.manage')) : undefined,
+  ]);
+
   const queues: PlatformSummary['queues'] = {};
   visible.forEach((key, index) => {
     const row = queueRows[index]?.[0];
@@ -176,6 +227,9 @@ export async function platformSummary(permissions: ReadonlySet<string>): Promise
   const worst = worstRows[0];
   return {
     queues,
+    ...(privacy ? { privacy } : {}),
+    ...(health ? { health } : {}),
+    ...(money ? { money } : {}),
     incidentSeverity: severityRows,
     worstIncident: worst
       ? {
@@ -189,5 +243,78 @@ export async function platformSummary(permissions: ReadonlySet<string>): Promise
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([month, value]) => ({ month, ...value })),
     recent: recent.map((row) => ({ id: row.id, action: row.action, createdAt: row.created_at })),
+  };
+}
+
+
+/** The data-request queue's own definition of open: received, or somebody has taken it up. */
+async function privacySummary(): Promise<PrivacySummary> {
+  const [row] = await prisma.$queryRaw<
+    { open: number; overdue: number; oldest: Date | null; next_due: Date | null; erasures: number }[]
+  >`
+    SELECT count(*)::int AS open,
+           count(*) FILTER (WHERE due_by < now())::int AS overdue,
+           min(received_at) AS oldest,
+           min(due_by) AS next_due,
+           count(*) FILTER (WHERE kind = 'ERASURE')::int AS erasures
+    FROM consent.data_subject_requests
+    WHERE status IN ('RECEIVED', 'IN_PROGRESS')`;
+  return {
+    open: row?.open ?? 0,
+    overdue: row?.overdue ?? 0,
+    oldest: row?.oldest ?? null,
+    nextDue: row?.next_due ?? null,
+    erasures: row?.erasures ?? 0,
+  };
+}
+
+/** Counts from the System page's own reading, not a second opinion on what is wrong. */
+async function healthSummary(): Promise<HealthSummary> {
+  const status = await systemStatus();
+  return {
+    status: status.status,
+    problems: status.problems.length,
+    deadLetter: status.outbox.deadLetter,
+    failedTexts24h: status.messages.failedAfterAccepted24h,
+  };
+}
+
+async function moneySummary(canManage: boolean): Promise<MoneySummary> {
+  const [job, drafts, prepared, released] = await Promise.all([
+    prisma.scheduledJob.findUnique({
+      where: { key: 'billing.reconciliation_sweep' },
+      select: { lastRunAt: true, lastStatus: true, lastError: true },
+    }),
+    canManage
+      ? prisma.$queryRaw<{ count: number; oldest: Date | null }[]>`
+          SELECT count(*)::int AS count, min(created_at) AS oldest
+          FROM billing.invoices WHERE status = 'DRAFT'`
+      : undefined,
+    canManage
+      ? prisma.$queryRaw<{ count: number; oldest: Date | null }[]>`
+          SELECT count(*)::int AS count, min(created_at) AS oldest
+          FROM billing.payouts WHERE status = 'PREPARED'`
+      : undefined,
+    canManage
+      ? prisma.$queryRaw<{ count: number; oldest: Date | null }[]>`
+          SELECT count(*)::int AS count, min(released_at) AS oldest
+          FROM billing.payouts WHERE status = 'RELEASED'`
+      : undefined,
+  ]);
+  const queue = (rows: { count: number; oldest: Date | null }[] | undefined): QueueSummary | undefined =>
+    rows ? { count: rows[0]?.count ?? 0, oldest: rows[0]?.oldest ?? null } : undefined;
+  const draftInvoices = queue(drafts);
+  const payoutsPrepared = queue(prepared);
+  const payoutsReleased = queue(released);
+  return {
+    reconciliation: {
+      lastRunAt: job?.lastRunAt ?? null,
+      lastStatus: job?.lastStatus ?? null,
+      // Enough to say what, never the whole message: a handler's error can run to a stack trace.
+      lastError: job?.lastError ? job.lastError.slice(0, 200) : null,
+    },
+    ...(draftInvoices ? { draftInvoices } : {}),
+    ...(payoutsPrepared ? { payoutsPrepared } : {}),
+    ...(payoutsReleased ? { payoutsReleased } : {}),
   };
 }

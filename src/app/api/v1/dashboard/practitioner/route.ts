@@ -10,6 +10,8 @@ import { getEligibility } from '@/modules/practitioners/application/eligibility'
 import { getAvailability } from '@/modules/availability/application/availability';
 import { listSubmissions } from '@/modules/credentials/application/submission';
 import { listAssignments, listInvitationsFor } from '@/modules/matching/application/assignment';
+import { attendanceForAssignments } from '@/modules/attendance/application/attendance';
+import { earningsSummary } from '@/modules/billing-settlement/application/payout';
 
 /**
  * GET /api/v1/dashboard/practitioner — everything the overview draws, in one
@@ -26,6 +28,11 @@ import { listAssignments, listInvitationsFor } from '@/modules/matching/applicat
  *
  * `profile` is null, not an error, for somebody who has not created one: that
  * is the normal state of a newcomer.
+ *
+ * Two sections were added for the overview that asks "what do I do now?": each confirmed
+ * shift carries its attendance (so "check in" and "hours to submit" need no second request),
+ * and `earnings` carries what is owed, on its way and paid. Both are the caller's own records
+ * under the permission their own pages already require; no existing field changed.
  */
 export async function GET(request: Request) {
   return timed(request, () => overview(request));
@@ -44,11 +51,13 @@ async function overview(request: Request): Promise<Response> {
     const availabilityAllowed = may('availability.read');
     const documentsAllowed = may('credential.document.read');
     const workAllowed = may('service_request.read');
+    // The same permission the Earnings page's own endpoint asks for, at the same scope.
+    const earningsAllowed = may('invoice.read');
     if (!profileAllowed && !availabilityAllowed && !documentsAllowed && !workAllowed) {
       throw new HttpError('forbidden', 'You do not have access to this.', 403);
     }
 
-    const [profile, eligibility, availability, documents, invitations, assignments] = await Promise.all([
+    const [profile, eligibility, availability, documents, invitations, assignments, earnings] = await Promise.all([
       profileAllowed
         ? getOwnProfile(userId).catch((error: unknown) => {
             if (error instanceof HttpError && error.status === 404) return null;
@@ -62,7 +71,14 @@ async function overview(request: Request): Promise<Response> {
       workAllowed
         ? listAssignments({ scopeType: 'SELF', scopeId: userId, status: 'CONFIRMED', limit: 200 })
         : undefined,
+      earningsAllowed ? earningsSummary(userId) : undefined,
     ]);
+
+    // Joined here, as `GET /assignments?include=attendance` does it: one query for the whole page
+    // rather than one per shift. It is what lets the overview say "check in" and "submit your hours".
+    const attendance = assignments
+      ? await attendanceForAssignments(assignments.assignments.map((row) => row.id))
+      : null;
 
     return ok(
       {
@@ -71,7 +87,15 @@ async function overview(request: Request): Promise<Response> {
         ...(availability ? { availability } : {}),
         ...(documents ? { submissions: documents.submissions } : {}),
         ...(invitations ? { invitations } : {}),
-        ...(assignments ? { assignments: assignments.assignments } : {}),
+        ...(assignments
+          ? {
+              assignments: assignments.assignments.map((row) => ({
+                ...row,
+                attendance: attendance?.get(row.id) ?? null,
+              })),
+            }
+          : {}),
+        ...(earnings ? { earnings } : {}),
       },
       context,
     );

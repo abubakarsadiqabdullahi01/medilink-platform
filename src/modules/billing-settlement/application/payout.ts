@@ -755,3 +755,37 @@ export async function listPayouts(practitionerId: string): Promise<PayoutView[]>
   });
   return rows.map(toView);
 }
+
+
+/**
+ * A practitioner's money in one glance, for the dashboard: what the ledger says they are owed
+ * (`payoutPosition`, the same figure the Earnings page opens with), what is on its way, and what
+ * has been paid. Their own records only; the route that serves it holds `invoice.read` at SELF,
+ * exactly as `GET /api/v1/payouts?scopeType=SELF` does.
+ */
+export interface EarningsSummary {
+  owedKobo: number;
+  heldKobo: number;
+  awaitingKobo: number;
+  /** Prepared or released, not yet confirmed received. */
+  inFlightKobo: number;
+  /** Every payment confirmed, all time. */
+  paidKobo: number;
+  lastPaidAt: Date | null;
+}
+
+export async function earningsSummary(practitionerId: string): Promise<EarningsSummary> {
+  const [payouts, position] = await Promise.all([listPayouts(practitionerId), payoutPosition(practitionerId)]);
+  const settled = payouts.filter((row) => row.status === 'SETTLED');
+  return {
+    ...position,
+    inFlightKobo: payouts
+      .filter((row) => row.status === 'PREPARED' || row.status === 'RELEASED')
+      .reduce((sum, row) => sum + row.amountKobo, 0),
+    paidKobo: settled.reduce((sum, row) => sum + row.amountKobo, 0),
+    lastPaidAt: settled.reduce<Date | null>((latest, row) => {
+      const at = row.settledAt ? new Date(row.settledAt) : null;
+      return at && (!latest || at > latest) ? at : latest;
+    }, null),
+  };
+}
