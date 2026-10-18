@@ -17,6 +17,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
+import { MoneyInput } from '@/components/app/money-input';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -260,14 +261,7 @@ export function NewShiftDialog({ facilityId }: { facilityId: string }) {
 
           <div className="space-y-1.5">
             <Label htmlFor="rate">Hourly rate (naira)</Label>
-            <Input
-              id="rate"
-              type="number"
-              min={0}
-              step={100}
-              value={rateNaira}
-              onChange={(event) => setRateNaira(event.target.value)}
-            />
+            <MoneyInput id="rate" value={rateNaira} onValueChange={setRateNaira} />
           </div>
 
           <label className="flex items-center gap-2 text-sm sm:col-span-2">

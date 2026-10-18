@@ -100,14 +100,36 @@ export function parseNairaToKobo(text: string): number | null {
 /**
  * Integer kobo in, naira out. Rule 3: money is only ever computed in kobo,
  * and this is the single place it becomes something with a decimal point.
+ *
+ * Whole naira print without kobo ("₦10,500"), because ".00" is noise on a rate card
+ * and on a figure somebody is reading at arm's length (UXA-15). Anything with kobo
+ * keeps both digits ("₦10,500.50", never "₦10,500.5"), so a column of amounts still
+ * lines up where it matters.
  */
 export function formatNaira(kobo: number | null | undefined): string {
   if (kobo === null || kobo === undefined) return '—';
   return new Intl.NumberFormat('en-NG', {
     style: 'currency',
     currency: 'NGN',
-    minimumFractionDigits: 2,
+    minimumFractionDigits: kobo % 100 === 0 ? 0 : 2,
   }).format(kobo / 100);
+}
+
+/**
+ * What somebody has typed in an amount box, reduced to what an amount can be: digits,
+ * and at most one point followed by at most two. "₦40,000.505" becomes "40000.50".
+ * Whether the result is a usable amount is `parseNairaToKobo`'s question.
+ */
+export function cleanMoneyInput(text: string): string {
+  const [whole = '', ...rest] = text.replace(/[^\d.]/g, '').split('.');
+  return rest.length === 0 ? whole : `${whole}.${rest.join('').slice(0, 2)}`;
+}
+
+/** The same, with thousands separators, for an amount box that is not being typed in: "40000.5" → "40,000.5". */
+export function groupMoneyInput(raw: string): string {
+  const [whole = '', decimals] = raw.split('.');
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return decimals === undefined ? grouped : `${grouped}.${decimals}`;
 }
 
 /** 480 → "8h 0m". Minutes are how attendance is stored; hours are how it reads. */

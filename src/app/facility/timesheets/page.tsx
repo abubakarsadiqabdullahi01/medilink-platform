@@ -3,10 +3,9 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ChevronLeft, ChevronRight, History, ReceiptText, TriangleAlert } from 'lucide-react';
+import { ChevronLeft, ChevronRight, History, ReceiptText, } from 'lucide-react';
 import { api, errorMessage } from '@/lib/ui/api';
 import { useFacilityId } from '@/lib/ui/facility';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import {
@@ -35,8 +34,7 @@ import {
   DetailGrid,
   EmptyState,
   PageHeader,
-  QueueSkeleton,
-} from '@/components/app/page-shell';
+  QueueSkeleton, ErrorState } from '@/components/app/page-shell';
 import { formatMinutes, formatNaira, formatWhen, toLocalInput } from '@/components/app/format';
 import { lagosLocalToInstant } from '@/lib/lagos-date';
 
@@ -379,10 +377,7 @@ export default function TimesheetsPage() {
       {roster.isPending || settling ? (
         <QueueSkeleton />
       ) : roster.isError ? (
-        <Alert variant="destructive">
-          <TriangleAlert />
-          <AlertDescription>The roster could not be loaded.</AlertDescription>
-        </Alert>
+        <ErrorState message="The roster could not be loaded." onRetry={() => void roster.refetch()} retrying={roster.isFetching} />
       ) : visible.length === 0 ? (
         <EmptyState
           icon={<ReceiptText />}
@@ -413,8 +408,8 @@ export default function TimesheetsPage() {
               <Card key={assignment.id}>
                 <CardHeader className="flex-row items-start justify-between gap-4 space-y-0 pb-4">
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">{assignment.practitionerName}</p>
-                    <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
+                    <p className="break-words text-sm font-medium">{assignment.practitionerName}</p>
+                    <p className="mt-0.5 break-words font-mono text-xs text-muted-foreground">
                       {assignment.practitionerPhone}
                     </p>
                     <p className="mt-0.5 text-xs text-muted-foreground">

@@ -394,7 +394,7 @@ export default function DashboardPage() {
                           key={entry.id}
                           className="flex items-baseline justify-between gap-3 text-sm"
                         >
-                          <span className="truncate">
+                          <span className="min-w-0 break-words">
                             {actionLabel(entry.action)}
                           </span>
                           <span className="shrink-0 text-xs text-muted-foreground">

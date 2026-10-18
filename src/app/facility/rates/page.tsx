@@ -1,16 +1,15 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { Pencil, Percent, PlusCircle, TriangleAlert } from 'lucide-react';
+import { Pencil, Percent, PlusCircle, } from 'lucide-react';
 import { api } from '@/lib/ui/api';
 import { useFacilityId } from '@/lib/ui/facility';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { StatusBadge } from '@/components/app/status-badge';
-import { EmptyState, PageHeader, QueueSkeleton } from '@/components/app/page-shell';
+import { EmptyState, PageHeader, QueueSkeleton, ErrorState } from '@/components/app/page-shell';
 import { formatDate } from '@/components/app/format';
 import { RateCardDialog, type RateCard } from './rate-card-dialog';
 
@@ -64,10 +63,7 @@ export default function RatesPage() {
       {cards.isPending ? (
         <QueueSkeleton rows={2} />
       ) : cards.isError ? (
-        <Alert variant="destructive">
-          <TriangleAlert />
-          <AlertDescription>Rate cards could not be loaded.</AlertDescription>
-        </Alert>
+        <ErrorState message="Rate cards could not be loaded." onRetry={() => void cards.refetch()} retrying={cards.isFetching} />
       ) : cards.data.rateCards.length === 0 ? (
         <EmptyState
           icon={<Percent />}

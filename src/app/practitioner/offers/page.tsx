@@ -20,8 +20,7 @@ import {
   DetailGrid,
   EmptyState,
   PageHeader,
-  QueueSkeleton,
-} from '@/components/app/page-shell';
+  QueueSkeleton, ErrorState } from '@/components/app/page-shell';
 import { formatAgo, formatNaira, formatWhen } from '@/components/app/format';
 
 interface Invitation {
@@ -138,10 +137,7 @@ export default function OffersPage() {
       {queue.isPending ? (
         <QueueSkeleton />
       ) : queue.isError ? (
-        <Alert variant="destructive">
-          <TriangleAlert />
-          <AlertDescription>Your offers could not be loaded.</AlertDescription>
-        </Alert>
+        <ErrorState message="Your offers could not be loaded." onRetry={() => void queue.refetch()} retrying={queue.isFetching} />
       ) : open.length === 0 && answered.length === 0 ? (
         <EmptyState
           icon={<Inbox />}

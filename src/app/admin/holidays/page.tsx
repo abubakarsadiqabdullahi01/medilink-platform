@@ -18,7 +18,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { PageHeader, QueueSkeleton } from '@/components/app/page-shell';
+import { PageHeader, QueueSkeleton, ErrorState } from '@/components/app/page-shell';
 import { formatDate } from '@/components/app/format';
 
 interface Holiday {
@@ -93,11 +93,8 @@ export default function HolidaysPage() {
         {list.isPending ? (
           <QueueSkeleton rows={4} />
         ) : list.isError ? (
-          <Alert variant="destructive">
-            <TriangleAlert />
-            <AlertDescription>The holidays could not be loaded.</AlertDescription>
-          </Alert>
-        ) : (
+        <ErrorState message="The holidays could not be loaded." onRetry={() => void list.refetch()} retrying={list.isFetching} />
+      ) : (
           <>
             {coverage?.years.map((year) => {
               const entered = list.data.holidays.filter((row) => row.year === year.year);

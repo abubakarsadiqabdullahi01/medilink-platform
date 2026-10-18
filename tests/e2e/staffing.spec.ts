@@ -85,7 +85,7 @@ test('the nurse accepts the offer from her own console', async ({ page }) => {
   });
   await expect(offer).toHaveCount(1);
   // The terms are on the offer itself, not behind it.
-  await expect(offer.getByText('₦5,000.00/hour')).toBeVisible();
+  await expect(offer.getByText('₦5,000/hour')).toBeVisible();
   await offer.getByRole('button', { name: 'Accept' }).click();
 
   await expectToast(page, 'Accepted — the facility still has to confirm you');

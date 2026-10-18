@@ -2,10 +2,9 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, Search, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Search, ShieldCheck, } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { api } from '@/lib/ui/api';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -20,7 +19,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
-import { EmptyState, PageHeader } from '@/components/app/page-shell';
+import { EmptyState, PageHeader, ErrorState } from '@/components/app/page-shell';
 import { ScreenTransition } from '@/components/app/motion';
 import { formatAgo, formatWhen } from '@/components/app/format';
 import { RequestDetail, type SubjectRequest } from './request-detail';
@@ -202,10 +201,7 @@ export default function DataRequestsPage() {
           ))}
         </div>
       ) : queue.isError ? (
-        <Alert variant="destructive">
-          <TriangleAlert />
-          <AlertDescription>This queue could not be loaded.</AlertDescription>
-        </Alert>
+        <ErrorState message="This queue could not be loaded." onRetry={() => void queue.refetch()} retrying={queue.isFetching} />
       ) : rows.length === 0 ? (
         <EmptyState
           icon={<ShieldCheck />}
@@ -238,11 +234,11 @@ export default function DataRequestsPage() {
                     </span>
 
                     <div className="min-w-0 flex-1">
-                      <p className="truncate font-medium">{row.subjectName}</p>
-                      <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                      <p className="break-words font-medium">{row.subjectName}</p>
+                      <p className="mt-0.5 break-words text-xs text-muted-foreground">
                         {humanise(row.kind)} · received {formatAgo(row.receivedAt)}
                       </p>
-                      <p className="mt-1 truncate text-xs text-muted-foreground">
+                      <p className="mt-1 break-words text-xs text-muted-foreground">
                         Due {formatWhen(row.dueBy)}
                       </p>
                     </div>

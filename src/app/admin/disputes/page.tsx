@@ -2,9 +2,8 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, Gavel, Search, TriangleAlert } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Gavel, Search, } from 'lucide-react';
 import { api } from '@/lib/ui/api';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -12,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
-import { EmptyState, PageHeader, QueueSkeleton } from '@/components/app/page-shell';
+import { EmptyState, PageHeader, QueueSkeleton, ErrorState } from '@/components/app/page-shell';
 import { formatAgo, formatWhen } from '@/components/app/format';
 import { cn } from '@/lib/utils';
 import { ScreenTransition } from '@/components/app/motion';
@@ -158,10 +157,7 @@ export default function DisputesPage() {
       {queue.isPending ? (
         <QueueSkeleton />
       ) : queue.isError ? (
-        <Alert variant="destructive">
-          <TriangleAlert />
-          <AlertDescription>This queue could not be loaded.</AlertDescription>
-        </Alert>
+        <ErrorState message="This queue could not be loaded." onRetry={() => void queue.refetch()} retrying={queue.isFetching} />
       ) : rows.length === 0 ? (
         <EmptyState
           icon={<Gavel />}
@@ -189,14 +185,14 @@ export default function DisputesPage() {
                     </span>
 
                     <div className="min-w-0 flex-1">
-                      <p className="truncate font-medium">{row.practitionerName}</p>
-                      <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                      <p className="break-words font-medium">{row.practitionerName}</p>
+                      <p className="mt-0.5 break-words text-xs text-muted-foreground">
                         {row.facilityName} · shift {formatWhen(row.shiftStartsAt)}
                       </p>
                       {/* One line of the reason. The whole of it is a click
                           away, and a queue of full paragraphs is a queue
                           nobody scans. */}
-                      <p className="mt-1 truncate text-sm text-muted-foreground">{row.reason}</p>
+                      <p className="mt-1 break-words text-sm text-muted-foreground">{row.reason}</p>
                     </div>
 
                     <div className="flex shrink-0 flex-wrap items-center gap-2">

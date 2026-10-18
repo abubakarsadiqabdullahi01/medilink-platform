@@ -1,11 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ArrowLeft, Sparkles, TriangleAlert, UserCheck, UserPlus } from 'lucide-react';
+import { Sparkles, TriangleAlert, UserCheck, UserPlus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { api, errorMessage } from '@/lib/ui/api';
 import { useFacilityId } from '@/lib/ui/facility';
@@ -13,7 +12,7 @@ import { useSession } from '@/lib/ui/session';
 import { nameOf, useReference } from '@/lib/ui/reference';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
-import { Button, buttonVariants } from '@/components/ui/button';
+import { Button, } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -217,14 +216,7 @@ export default function ShiftDetailPage() {
 
   return (
     <>
-      <Link
-        href="/facility/shifts"
-        className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'mb-4 -ml-2')}
-      >
-        <ArrowLeft />
-        All shifts
-      </Link>
-
+      {/* The way back to the list is the breadcrumb the console shell draws above this page. */}
       {shift.isPending ? (
         <Skeleton className="h-32 w-full" />
       ) : shift.isError || !shift.data ? (
@@ -276,13 +268,13 @@ export default function ShiftDetailPage() {
                     className="flex items-center justify-between rounded-md border px-3 py-2 text-sm"
                   >
                     <div className="min-w-0">
-                      <p className="truncate">{row.practitionerName}</p>
+                      <p className="break-words">{row.practitionerName}</p>
                       {row.practitionerPhone ? (
-                        <p className="truncate font-mono text-xs text-muted-foreground">
+                        <p className="break-words font-mono text-xs text-muted-foreground">
                           {row.practitionerPhone}
                         </p>
                       ) : (
-                        <p className="truncate text-xs text-muted-foreground">
+                        <p className="break-words text-xs text-muted-foreground">
                           Phone shown from 2 days before the shift
                         </p>
                       )}
@@ -393,18 +385,20 @@ export default function ShiftDetailPage() {
                           {candidate.factors.map((factor) => (
                             <div
                               key={factor.factor}
-                              className="flex items-center gap-2 text-xs text-muted-foreground"
+                              className="text-xs text-muted-foreground"
                             >
-                              <span className="w-20 shrink-0 capitalize">{factor.factor}</span>
-                              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
-                                <div
-                                  className="h-full rounded-full bg-primary/60"
-                                  style={{ width: `${Math.round(factor.raw * 100)}%` }}
-                                />
+                              <div className="flex items-center gap-2">
+                                <span className="w-20 shrink-0 capitalize">{factor.factor}</span>
+                                <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+                                  <div
+                                    className="h-full rounded-full bg-primary/60"
+                                    style={{ width: `${Math.round(factor.raw * 100)}%` }}
+                                  />
+                                </div>
                               </div>
-                              <span className="w-28 shrink-0 truncate" title={factor.detail}>
-                                {factor.detail}
-                              </span>
+                              {/* Under the bar, in full: the hand review of the first engagements
+                                  has to be able to read why. Indented to line up with the bar. */}
+                              <p className="ml-[5.5rem] mt-0.5 break-words">{factor.detail}</p>
                             </div>
                           ))}
                         </div>

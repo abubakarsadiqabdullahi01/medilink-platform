@@ -5,7 +5,7 @@ import { formatNaira } from '@/components/app/format';
 /**
  * One amount of money, said plainly, with a line on what it counts.
  *
- * A failed fetch says so rather than showing ₦0.00: "you are owed nothing"
+ * A failed fetch says so rather than showing ₦0: "you are owed nothing"
  * and "we could not find out" must never look the same, and only one of them
  * is safe to act on.
  */
@@ -25,7 +25,7 @@ export function AmountFigure({
   /** Darken a non-zero figure — the one the page exists to show. */
   emphasise?: boolean;
 }) {
-  // A named group, so a screen reader announces "Outstanding, ₦12,000.00"
+  // A named group, so a screen reader announces "Outstanding, ₦12,000"
   // rather than a bare figure with nothing to say what it counts.
   return (
     <Card role="group" aria-label={label}>

@@ -108,7 +108,7 @@ export function DocumentUpload({
       <div className="flex items-center justify-between gap-3 rounded-md border border-success/40 bg-success/5 px-3 py-2">
         <span className="flex min-w-0 items-center gap-2 text-sm">
           <CircleCheck className="size-4 shrink-0 text-success" />
-          <span className="truncate">{value.filename}</span>
+          <span className="min-w-0 break-all">{value.filename}</span>
         </span>
         <Button
           variant="ghost"

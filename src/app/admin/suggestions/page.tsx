@@ -2,16 +2,15 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, MessageSquareText, TriangleAlert, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, MessageSquareText, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { api } from '@/lib/ui/api';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
-import { EmptyState, PageHeader, QueueSkeleton } from '@/components/app/page-shell';
+import { EmptyState, PageHeader, QueueSkeleton, ErrorState } from '@/components/app/page-shell';
 import { formatAgo } from '@/components/app/format';
 import { ScreenTransition } from '@/components/app/motion';
 import { SuggestionDetail, type Suggestion } from './suggestion-detail';
@@ -125,7 +124,7 @@ export default function SuggestionsPage() {
               >
                 <span
                   className={cn(
-                    'w-32 shrink-0 truncate text-left text-muted-foreground',
+                    'w-32 shrink-0 break-words text-left text-muted-foreground',
                     area === row.area && 'font-medium text-foreground',
                   )}
                 >
@@ -169,10 +168,7 @@ export default function SuggestionsPage() {
       {queue.isPending ? (
         <QueueSkeleton rows={2} />
       ) : queue.isError ? (
-        <Alert variant="destructive">
-          <TriangleAlert />
-          <AlertDescription>This queue could not be loaded.</AlertDescription>
-        </Alert>
+        <ErrorState message="This queue could not be loaded." onRetry={() => void queue.refetch()} retrying={queue.isFetching} />
       ) : rows.length === 0 ? (
         <EmptyState
           icon={<MessageSquareText />}
@@ -196,7 +192,7 @@ export default function SuggestionsPage() {
                     {/* Two lines of it, not one: a suggestion is prose and a
                         single truncated line is often just its preamble. */}
                     <p className="line-clamp-2 text-sm leading-relaxed">{row.body}</p>
-                    <p className="mt-1 truncate text-xs text-muted-foreground">
+                    <p className="mt-1 break-words text-xs text-muted-foreground">
                       {row.raisedByName ?? (row.source === 'DECLINE_REASON' ? 'No name' : 'Unattributed')}
                       {' · '}
                       {formatAgo(row.createdAt)}

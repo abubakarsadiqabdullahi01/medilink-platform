@@ -23,6 +23,18 @@ import {
 /** Kobo on the axis would be six digits of noise; naira is what people say. */
 const naira = (kobo: number) => `₦${Math.round(kobo / 100).toLocaleString('en-NG')}`;
 
+/**
+ * The same, short, for an axis: "₦1.5M", "₦500k". Full figures went in the tooltip; on the axis
+ * they were wider than the space left for them and lost their leading digits (a column of
+ * "000,000"), which is worse than abbreviating.
+ */
+const nairaShort = (kobo: number) => {
+  const value = Math.round(kobo / 100);
+  if (value >= 1_000_000) return `₦${+(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `₦${+(value / 1_000).toFixed(1)}k`;
+  return `₦${value}`;
+};
+
 const SPEND_CONFIG = {
   invoiced: { label: 'Invoiced', color: 'hsl(var(--chart-1))' },
   paid: { label: 'Paid', color: 'hsl(var(--chart-2))' },
@@ -56,7 +68,7 @@ export function SpendChart({
             categorical axis has not already said. */}
         <CartesianGrid vertical={false} strokeDasharray="3 3" />
         <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={8} />
-        <YAxis tickLine={false} axisLine={false} tickMargin={8} width={yAxisWidth} tickFormatter={naira} />
+        <YAxis tickLine={false} axisLine={false} tickMargin={8} width={yAxisWidth} tickFormatter={nairaShort} />
         <ChartTooltip content={<ChartTooltipContent formatter={(value) => naira(Number(value))} />} />
         {/* 2px surface gap between adjacent bars, and rounded data-ends
             anchored to the baseline. */}
@@ -75,7 +87,7 @@ export function FulfilmentChart({ data }: { data: { week: string; needed: number
       <BarChart data={data} accessibilityLayer>
         <CartesianGrid vertical={false} strokeDasharray="3 3" />
         <XAxis dataKey="week" tickLine={false} axisLine={false} tickMargin={8} />
-        <YAxis tickLine={false} axisLine={false} tickMargin={8} width={28} allowDecimals={false} />
+        <YAxis tickLine={false} axisLine={false} tickMargin={8} width={40} allowDecimals={false} />
         <ChartTooltip content={<ChartTooltipContent />} />
         <Bar dataKey="needed" fill="var(--color-needed)" radius={[4, 4, 0, 0]} />
         <Bar dataKey="filled" fill="var(--color-filled)" radius={[4, 4, 0, 0]} />
@@ -94,7 +106,7 @@ export function OutstandingChart({ data }: { data: { name: string; outstanding: 
     <ChartContainer config={OUTSTANDING_CONFIG} className="h-[260px] w-full">
       <BarChart data={data} layout="vertical" accessibilityLayer>
         <CartesianGrid horizontal={false} strokeDasharray="3 3" />
-        <XAxis type="number" tickLine={false} axisLine={false} tickFormatter={naira} />
+        <XAxis type="number" tickLine={false} axisLine={false} tickFormatter={nairaShort} />
         <YAxis type="category" dataKey="name" tickLine={false} axisLine={false} width={140} />
         <ChartTooltip content={<ChartTooltipContent formatter={(value) => naira(Number(value))} />} />
         <Bar dataKey="outstanding" radius={[0, 4, 4, 0]}>

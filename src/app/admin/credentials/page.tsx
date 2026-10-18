@@ -8,13 +8,11 @@ import {
   ChevronRight,
   FileCheck2,
   Search,
-  TriangleAlert,
   UserRound,
 } from 'lucide-react';
 import { api } from '@/lib/ui/api';
 import { useQueueAction } from '@/lib/ui/queue';
 import { useReference } from '@/lib/ui/reference';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -36,8 +34,7 @@ import {
   DetailGrid,
   EmptyState,
   PageHeader,
-  QueueSkeleton,
-} from '@/components/app/page-shell';
+  QueueSkeleton, ErrorState } from '@/components/app/page-shell';
 import { expiryOf, formatAgo, formatDate } from '@/components/app/format';
 
 interface Submission {
@@ -250,10 +247,7 @@ export default function CredentialsPage() {
       {queue.isPending ? (
         <QueueSkeleton />
       ) : queue.isError ? (
-        <Alert variant="destructive">
-          <TriangleAlert />
-          <AlertDescription>This queue could not be loaded.</AlertDescription>
-        </Alert>
+        <ErrorState message="This queue could not be loaded." onRetry={() => void queue.refetch()} retrying={queue.isFetching} />
       ) : rows.length === 0 ? (
         <EmptyState
           icon={<FileCheck2 />}
@@ -297,8 +291,8 @@ export default function CredentialsPage() {
                       )}
                     </span>
                     <div className="min-w-0">
-                      <p className="truncate font-medium">{row.practitionerName}</p>
-                      <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
+                      <p className="break-words font-medium">{row.practitionerName}</p>
+                      <p className="mt-0.5 break-words font-mono text-xs text-muted-foreground">
                         {row.practitionerPhone}
                       </p>
                     </div>

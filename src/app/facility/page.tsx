@@ -161,7 +161,12 @@ export default function FacilityDashboard() {
       <MyInvitations />
 
       {unverified ? (
-        <Alert variant={facility.data?.status === 'PENDING' ? 'warning' : 'destructive'} className="mb-6">
+        <Alert
+          variant={facility.data?.status === 'PENDING' ? 'warning' : 'destructive'}
+          // A standing fact about the facility, not something that just happened.
+          live={false}
+          className="mb-6"
+        >
           <AlertDescription className="space-y-1">
             {facility.data?.status === 'PENDING' ? (
               <p>
@@ -284,7 +289,7 @@ export default function FacilityDashboard() {
                     Nothing invoiced yet.
                   </p>
                 ) : (
-                  <SpendChart data={spend} height={240} yAxisWidth={64} legend />
+                  <SpendChart data={spend} height={240} yAxisWidth={72} legend />
                 )}
               </CardContent>
             </Card>

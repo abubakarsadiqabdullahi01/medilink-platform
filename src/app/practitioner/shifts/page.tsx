@@ -1,11 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { CalendarCheck, TriangleAlert } from 'lucide-react';
+import { CalendarCheck, } from 'lucide-react';
 import { useQueue } from '@/lib/ui/queue';
 import { agenda, type AgendaRange } from '@/lib/ui/agenda';
 import { Button } from '@/components/ui/button';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -15,8 +14,7 @@ import {
   DetailGrid,
   EmptyState,
   PageHeader,
-  QueueSkeleton,
-} from '@/components/app/page-shell';
+  QueueSkeleton, ErrorState } from '@/components/app/page-shell';
 import { formatAgo, formatNaira, formatWhen } from '@/components/app/format';
 import { CheckInPanel, type Attendance } from './check-in-panel';
 import { ExcusalPanel } from './excusal-panel';
@@ -166,10 +164,7 @@ export default function MyShiftsPage() {
       {queue.isPending ? (
         <QueueSkeleton />
       ) : queue.isError ? (
-        <Alert variant="destructive">
-          <TriangleAlert />
-          <AlertDescription>Your shifts could not be loaded.</AlertDescription>
-        </Alert>
+        <ErrorState message="Your shifts could not be loaded." onRetry={() => void queue.refetch()} retrying={queue.isFetching} />
       ) : rows.length === 0 ? (
         <EmptyState
           icon={<CalendarCheck />}

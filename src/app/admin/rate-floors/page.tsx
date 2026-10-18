@@ -8,6 +8,7 @@ import { api, errorMessage } from '@/lib/ui/api';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { MoneyInput } from '@/components/app/money-input';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -25,7 +26,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { PageHeader, QueueSkeleton } from '@/components/app/page-shell';
+import { PageHeader, QueueSkeleton, ErrorState } from '@/components/app/page-shell';
 import { formatDate, formatNaira, parseNairaToKobo } from '@/components/app/format';
 
 interface Floor {
@@ -110,10 +111,7 @@ export default function RateFloorsPage() {
       {overview.isPending ? (
         <QueueSkeleton rows={3} />
       ) : overview.isError ? (
-        <Alert variant="destructive">
-          <TriangleAlert />
-          <AlertDescription>The pay floors could not be loaded.</AlertDescription>
-        </Alert>
+        <ErrorState message="The pay floors could not be loaded." onRetry={() => void overview.refetch()} retrying={overview.isFetching} />
       ) : (
         <>
           {overview.data.missing.length > 0 ? (
@@ -211,12 +209,7 @@ export default function RateFloorsPage() {
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="floor-amount">Minimum per hour (₦)</Label>
-                <Input
-                  id="floor-amount"
-                  inputMode="decimal"
-                  value={amount}
-                  onChange={(event) => setAmount(event.target.value)}
-                />
+                <MoneyInput id="floor-amount" value={amount} onValueChange={setAmount} />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="floor-date">From</Label>

@@ -13,7 +13,7 @@ import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
-import { Detail, DetailGrid } from '@/components/app/page-shell';
+import { Detail, DetailGrid, ErrorState } from '@/components/app/page-shell';
 import { formatDate, formatWhen } from '@/components/app/format';
 
 interface ScreeningReview {
@@ -102,11 +102,8 @@ function ScreeningCard({ userId, onChanged }: { userId: string; onChanged: () =>
         {review.isPending ? (
           <Skeleton className="h-16 w-full" />
         ) : review.isError ? (
-          <Alert variant="destructive">
-            <TriangleAlert />
-            <AlertDescription>The screening result could not be loaded.</AlertDescription>
-          </Alert>
-        ) : !review.data.screening ? (
+        <ErrorState message="The screening result could not be loaded." onRetry={() => void review.refetch()} retrying={review.isFetching} />
+      ) : !review.data.screening ? (
           <p className="text-sm text-muted-foreground">
             Not screened yet. Screening runs when somebody signs up and every night after.
           </p>

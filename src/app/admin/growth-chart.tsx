@@ -66,7 +66,7 @@ export default function GrowthChart({
                         tickLine={false}
                         axisLine={false}
                         tickMargin={8}
-                        width={32}
+                        width={40}
                         allowDecimals={false}
                       />
                       <YAxis
@@ -75,7 +75,7 @@ export default function GrowthChart({
                         tickLine={false}
                         axisLine={false}
                         tickMargin={8}
-                        width={40}
+                        width={56}
                         allowDecimals={false}
                       />
                       <ChartTooltip content={<ChartTooltipContent />} />
