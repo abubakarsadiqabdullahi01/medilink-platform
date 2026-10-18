@@ -22,6 +22,18 @@ import { prisma } from '@/lib/db';
  * `roster` stay as they were; `roster` in particular counts every confirmed assignment of any
  * date, which is why it cannot answer "who is due today" and `coverage` exists.
  */
+/** One shift, as a list row on the dashboard. No names: it is about the shift, not the people. */
+export interface ShiftRow {
+  id: string;
+  startsAt: Date;
+  endsAt: Date;
+  headcount: number;
+  filled: number;
+  shiftType: string;
+  urgency: string;
+  profession: string;
+}
+
 export interface CoverageSummary {
   /** Published or filled shifts that start today, Lagos time. */
   todayShifts: number;
@@ -34,6 +46,10 @@ export interface CoverageSummary {
   /** ...of which start within the next 24 hours. */
   openNext24h: number;
   nextOpenStartsAt: Date | null;
+  /** Today's shifts, earliest first (at most eight). */
+  today: ShiftRow[];
+  /** The next shifts still short of people, soonest first (at most five). */
+  open: ShiftRow[];
 }
 
 export interface OffersSummary {
@@ -105,13 +121,12 @@ export async function facilitySummary(
 
   if (can('service_request.read')) {
     tasks.push(
-      prisma
-        .$queryRaw<{ count: number }[]>`
+      prisma.$queryRaw<{ count: number }[]>`
           SELECT count(*)::int AS count FROM service_requests.service_requests
-          WHERE facility_id = ${facilityId}::uuid AND status = 'PUBLISHED' AND deleted_at IS NULL`
-        .then((rows) => void (out.published = rows[0]?.count ?? 0)),
-      prisma
-        .$queryRaw<{ week: string; needed: number; filled: number }[]>`
+          WHERE facility_id = ${facilityId}::uuid AND status = 'PUBLISHED' AND deleted_at IS NULL`.then(
+        (rows) => void (out.published = rows[0]?.count ?? 0),
+      ),
+      prisma.$queryRaw<{ week: string; needed: number; filled: number }[]>`
           SELECT to_char(date_trunc('week', r.starts_at), 'YYYY-MM-DD') AS week,
                  sum(r.headcount)::int AS needed,
                  sum(least(coalesce(a.booked, 0), r.headcount))::int AS filled
@@ -122,18 +137,17 @@ export async function facilitySummary(
           ) a ON a.service_request_id = r.id
           WHERE r.facility_id = ${facilityId}::uuid AND r.status <> 'DRAFT' AND r.deleted_at IS NULL
             AND r.starts_at >= now() - make_interval(weeks => ${WEEKS}::int)
-          GROUP BY 1 ORDER BY 1`
-        .then((rows) => void (out.fulfilment = rows)),
+          GROUP BY 1 ORDER BY 1`.then((rows) => void (out.fulfilment = rows)),
     );
   }
 
   if (can('attendance.record') || can('timesheet.approve')) {
     tasks.push(
-      prisma
-        .$queryRaw<{ count: number }[]>`
+      prisma.$queryRaw<{ count: number }[]>`
           SELECT count(*)::int AS count FROM matching.assignments
-          WHERE facility_id = ${facilityId}::uuid AND status = 'CONFIRMED'`
-        .then((rows) => void (out.roster = rows[0]?.count ?? 0)),
+          WHERE facility_id = ${facilityId}::uuid AND status = 'CONFIRMED'`.then(
+        (rows) => void (out.roster = rows[0]?.count ?? 0),
+      ),
     );
   }
 
@@ -141,36 +155,34 @@ export async function facilitySummary(
     // Only a SUBMITTED timesheet is waiting on this hospital. Counted over the
     // confirmed shifts, as the tile always was: an approved one has left them.
     tasks.push(
-      prisma
-        .$queryRaw<{ count: number }[]>`
+      prisma.$queryRaw<{ count: number }[]>`
           SELECT count(*)::int AS count
           FROM matching.assignments a
           JOIN attendance.attendance_records ar ON ar.assignment_id = a.id
           WHERE a.facility_id = ${facilityId}::uuid AND a.status = 'CONFIRMED'
-            AND ar.status = 'SUBMITTED'`
-        .then((rows) => void (out.awaitingApproval = rows[0]?.count ?? 0)),
+            AND ar.status = 'SUBMITTED'`.then(
+        (rows) => void (out.awaitingApproval = rows[0]?.count ?? 0),
+      ),
     );
   }
 
   if (can('invoice.read')) {
     tasks.push(
-      prisma
-        .$queryRaw<{ month: string; invoiced: number; paid: number }[]>`
+      prisma.$queryRaw<{ month: string; invoiced: number; paid: number }[]>`
           SELECT to_char(date_trunc('month', period_start AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Lagos'), 'YYYY-MM') AS month,
                  coalesce(sum(gross_kobo) FILTER (WHERE status <> 'VOID'), 0)::float8 AS invoiced,
                  coalesce(sum(gross_kobo) FILTER (WHERE status = 'PAID'), 0)::float8 AS paid
           FROM billing.invoices
           WHERE facility_id = ${facilityId}::uuid
             AND period_start >= now() - make_interval(months => ${MONTHS}::int)
-          GROUP BY 1 ORDER BY 1`
-        .then(
-          (rows) =>
-            void (out.spend = rows.map((row) => ({
-              month: row.month,
-              invoicedKobo: Number(row.invoiced),
-              paidKobo: Number(row.paid),
-            }))),
-        ),
+          GROUP BY 1 ORDER BY 1`.then(
+        (rows) =>
+          void (out.spend = rows.map((row) => ({
+            month: row.month,
+            invoicedKobo: Number(row.invoiced),
+            paidKobo: Number(row.paid),
+          }))),
+      ),
     );
   }
 
@@ -183,14 +195,14 @@ export async function facilitySummary(
   }
   if (can('timesheet.approve')) {
     tasks.push(
-      prisma
-        .$queryRaw<{ oldest: Date | null }[]>`
+      prisma.$queryRaw<{ oldest: Date | null }[]>`
           SELECT min(ar.submitted_at) AS oldest
           FROM matching.assignments a
           JOIN attendance.attendance_records ar ON ar.assignment_id = a.id
           WHERE a.facility_id = ${facilityId}::uuid AND a.status = 'CONFIRMED'
-            AND ar.status = 'SUBMITTED'`
-        .then((rows) => void (out.awaitingOldest = rows[0]?.oldest ?? null)),
+            AND ar.status = 'SUBMITTED'`.then(
+        (rows) => void (out.awaitingOldest = rows[0]?.oldest ?? null),
+      ),
     );
   }
   if (can('invoice.read')) {
@@ -204,7 +216,6 @@ export async function facilitySummary(
   return out;
 }
 
-
 /**
  * Lagos midnight to midnight, worked out in SQL so a shift at 00:30 WAT is in *its* day. The
  * columns hold UTC without a zone (Prisma's convention), which is why both ends are converted back.
@@ -213,28 +224,54 @@ const BOUNDS = `
   now() AT TIME ZONE 'UTC' AS now_utc,
   ((now() AT TIME ZONE 'Africa/Lagos')::date::timestamp AT TIME ZONE 'Africa/Lagos') AT TIME ZONE 'UTC' AS day_start`;
 
+/** Each shift with how many places are taken, shared by the counts and the two lists. */
+const REQUESTS = `
+  SELECT r.id, r.starts_at, r.ends_at, r.headcount, r.status, r.shift_type, r.urgency,
+         r.professional_category_id,
+         least(coalesce(a.booked, 0), r.headcount) AS filled
+  FROM service_requests.service_requests r
+  LEFT JOIN (
+    SELECT service_request_id, count(*)::int AS booked
+    FROM matching.assignments WHERE status <> 'CANCELLED' GROUP BY 1
+  ) a ON a.service_request_id = r.id`;
+
+type ListRow = {
+  id: string;
+  starts_at: Date;
+  ends_at: Date;
+  headcount: number;
+  filled: number;
+  shift_type: string;
+  urgency: string;
+  profession: string;
+};
+
+const toShiftRow = (row: ListRow): ShiftRow => ({
+  id: row.id,
+  startsAt: row.starts_at,
+  endsAt: row.ends_at,
+  headcount: row.headcount,
+  filled: row.filled,
+  shiftType: row.shift_type,
+  urgency: row.urgency,
+  profession: row.profession,
+});
+
 async function coverage(facilityId: string): Promise<CoverageSummary> {
-  const [row] = await prisma.$queryRaw<
-    {
-      today_shifts: number;
-      today_needed: number;
-      today_filled: number;
-      today_unfilled_shifts: number;
-      open_shifts: number;
-      open_next_24h: number;
-      next_open: Date | null;
-    }[]
-  >(Prisma.sql`WITH b AS (SELECT ${Prisma.raw(BOUNDS)}),
-     req AS (
-       SELECT r.starts_at, r.headcount, r.status,
-              least(coalesce(a.booked, 0), r.headcount) AS filled
-       FROM service_requests.service_requests r
-       LEFT JOIN (
-         SELECT service_request_id, count(*)::int AS booked
-         FROM matching.assignments WHERE status <> 'CANCELLED' GROUP BY 1
-       ) a ON a.service_request_id = r.id
-       WHERE r.facility_id = ${facilityId}::uuid AND r.deleted_at IS NULL AND r.status IN ('PUBLISHED', 'FILLED')
-     )
+  const [counts, today, open] = await Promise.all([
+    prisma.$queryRaw<
+      {
+        today_shifts: number;
+        today_needed: number;
+        today_filled: number;
+        today_unfilled_shifts: number;
+        open_shifts: number;
+        open_next_24h: number;
+        next_open: Date | null;
+      }[]
+    >(Prisma.sql`WITH b AS (SELECT ${Prisma.raw(BOUNDS)}),
+     req AS (${Prisma.raw(REQUESTS)}
+       WHERE r.facility_id = ${facilityId}::uuid AND r.deleted_at IS NULL AND r.status IN ('PUBLISHED', 'FILLED'))
      SELECT
        count(*) FILTER (WHERE req.starts_at >= b.day_start AND req.starts_at < b.day_start + interval '1 day')::int AS today_shifts,
        coalesce(sum(req.headcount) FILTER (WHERE req.starts_at >= b.day_start AND req.starts_at < b.day_start + interval '1 day'), 0)::int AS today_needed,
@@ -243,7 +280,29 @@ async function coverage(facilityId: string): Promise<CoverageSummary> {
        count(*) FILTER (WHERE req.status = 'PUBLISHED' AND req.starts_at > b.now_utc AND req.filled < req.headcount)::int AS open_shifts,
        count(*) FILTER (WHERE req.status = 'PUBLISHED' AND req.starts_at > b.now_utc AND req.starts_at <= b.now_utc + interval '24 hours' AND req.filled < req.headcount)::int AS open_next_24h,
        min(req.starts_at) FILTER (WHERE req.status = 'PUBLISHED' AND req.starts_at > b.now_utc AND req.filled < req.headcount) AS next_open
-     FROM req, b`);
+     FROM req, b`),
+    prisma.$queryRaw<ListRow[]>(Prisma.sql`WITH b AS (SELECT ${Prisma.raw(BOUNDS)}),
+     req AS (${Prisma.raw(REQUESTS)}
+       WHERE r.facility_id = ${facilityId}::uuid AND r.deleted_at IS NULL AND r.status IN ('PUBLISHED', 'FILLED'))
+     SELECT req.id::text AS id, req.starts_at, req.ends_at, req.headcount, req.filled,
+            req.shift_type::text AS shift_type, req.urgency::text AS urgency, pc.name AS profession
+     FROM req
+     JOIN config.professional_categories pc ON pc.id = req.professional_category_id, b
+     WHERE req.starts_at >= b.day_start AND req.starts_at < b.day_start + interval '1 day'
+     ORDER BY req.starts_at, req.id
+     LIMIT 8`),
+    prisma.$queryRaw<ListRow[]>(Prisma.sql`WITH b AS (SELECT ${Prisma.raw(BOUNDS)}),
+     req AS (${Prisma.raw(REQUESTS)}
+       WHERE r.facility_id = ${facilityId}::uuid AND r.deleted_at IS NULL AND r.status = 'PUBLISHED')
+     SELECT req.id::text AS id, req.starts_at, req.ends_at, req.headcount, req.filled,
+            req.shift_type::text AS shift_type, req.urgency::text AS urgency, pc.name AS profession
+     FROM req
+     JOIN config.professional_categories pc ON pc.id = req.professional_category_id, b
+     WHERE req.starts_at > b.now_utc AND req.filled < req.headcount
+     ORDER BY req.starts_at, req.id
+     LIMIT 5`),
+  ]);
+  const row = counts[0];
   return {
     todayShifts: row?.today_shifts ?? 0,
     todayNeeded: row?.today_needed ?? 0,
@@ -252,6 +311,8 @@ async function coverage(facilityId: string): Promise<CoverageSummary> {
     openShifts: row?.open_shifts ?? 0,
     openNext24h: row?.open_next_24h ?? 0,
     nextOpenStartsAt: row?.next_open ?? null,
+    today: today.map(toShiftRow),
+    open: open.map(toShiftRow),
   };
 }
 

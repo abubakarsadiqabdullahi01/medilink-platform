@@ -1,3 +1,6 @@
+'use client';
+
+import { useState } from 'react';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import {
@@ -190,6 +193,7 @@ export function AttentionList({
   error = false,
   emptyTitle = 'Nothing needs your attention',
   emptyDetail,
+  limit = 5,
 }: {
   title?: string;
   items: AttentionItem[];
@@ -197,7 +201,14 @@ export function AttentionList({
   error?: boolean;
   emptyTitle?: string;
   emptyDetail?: string;
+  /**
+   * How many to show before "Show all". The list is most urgent first, so the cut hides the least
+   * urgent; without one, a busy day pushed everything else on the page below the fold on a phone.
+   */
+  limit?: number;
 }) {
+  const [all, setAll] = useState(false);
+  const shown = all ? items : items.slice(0, limit);
   return (
     <section aria-labelledby="attention-heading">
       <h2 id="attention-heading" className="mb-3 text-lg font-semibold tracking-tight">
@@ -245,7 +256,7 @@ export function AttentionList({
       ) : (
         <Card>
           <ul className="divide-y">
-            {items.map((item) => {
+            {shown.map((item) => {
               const mark = ATTENTION[item.tone];
               const Icon = mark.icon;
               return (
@@ -283,6 +294,18 @@ export function AttentionList({
               );
             })}
           </ul>
+          {items.length > limit ? (
+            <div className="border-t px-4 py-2">
+              <button
+                type="button"
+                aria-expanded={all}
+                onClick={() => setAll((value) => !value)}
+                className="inline-flex min-h-11 items-center text-sm font-medium text-primary underline-offset-4 hover:underline"
+              >
+                {all ? 'Show fewer' : `Show all ${items.length}`}
+              </button>
+            </div>
+          ) : null}
         </Card>
       )}
     </section>

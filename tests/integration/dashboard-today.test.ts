@@ -112,6 +112,25 @@ describe('the facility summary: today and what is open', () => {
     expect(summary.coverage?.openShifts).toBe(1);
     expect(summary.coverage?.openNext24h).toBe(0);
     expect(summary.coverage?.nextOpenStartsAt).toBeInstanceOf(Date);
+
+    // The lists a dashboard draws from: today's shifts in order with how many places are taken, and
+    // the next ones still short of people. Names of people are never among them.
+    expect(summary.coverage?.today.map((row) => [row.filled, row.headcount])).toEqual([
+      [1, 2],
+      [0, 1],
+    ]);
+    expect(summary.coverage?.open).toHaveLength(1);
+    expect(summary.coverage?.open[0]).toMatchObject({ filled: 0, headcount: 2 });
+    expect(Object.keys(summary.coverage!.today[0]!).sort()).toEqual([
+      'endsAt',
+      'filled',
+      'headcount',
+      'id',
+      'profession',
+      'shiftType',
+      'startsAt',
+      'urgency',
+    ]);
   });
 
   it('counts an offer as waiting only while it can still be answered, and an acceptance only until it is confirmed', async () => {

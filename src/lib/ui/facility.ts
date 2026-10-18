@@ -11,6 +11,11 @@ export interface FacilitySummary {
   status: string;
   /** Compliance's note on a rejection, which the owner is owed. */
   reviewNotes?: string | null;
+  /** The licence's own expiry. Past it, the facility cannot publish. */
+  licenceExpiresAt?: string | null;
+  /** Whether a shift can be published now, and if not, why: the record already carries both. */
+  canPublish?: boolean;
+  publishBlockers?: string[];
 }
 
 /**

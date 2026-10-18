@@ -42,7 +42,14 @@ import { deriveShiftType } from '@/modules/service-requests/domain/shift-type';
  * only ever integer kobo, and this is the boundary — a scheduler thinking in
  * naira is not a reason to put a float in the database.
  */
-export function NewShiftDialog({ facilityId }: { facilityId: string }) {
+export function NewShiftDialog({
+  facilityId,
+  trigger,
+}: {
+  facilityId: string;
+  /** The control that opens it, when the page has a better place for it than the default button. */
+  trigger?: React.ReactNode;
+}) {
   const [open, setOpen] = useState(false);
   const reference = useReference();
   const queryClient = useQueryClient();
@@ -122,10 +129,12 @@ export function NewShiftDialog({ facilityId }: { facilityId: string }) {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button>
-          <CalendarPlus />
-          Publish a shift
-        </Button>
+        {trigger ?? (
+          <Button>
+            <CalendarPlus />
+            Publish a shift
+          </Button>
+        )}
       </DialogTrigger>
 
       <DialogContent className="max-w-2xl">
