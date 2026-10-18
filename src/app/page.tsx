@@ -193,7 +193,7 @@ export default function LandingPage() {
       </header>
 
       <main>
-        <section className="relative isolate flex min-h-[560px] items-center overflow-hidden bg-[#062a2e] lg:min-h-[640px]">
+        <section className="relative isolate flex min-h-[560px] items-center overflow-hidden bg-brand-night lg:min-h-[640px]">
           <Image
             src="/medilink-hero.webp"
             alt="A nurse and a doctor reviewing a shift together on a tablet in a hospital corridor"
@@ -209,16 +209,16 @@ export default function LandingPage() {
             never be asked to hold its own against a bright corridor window.
           */}
           <div
-            className="absolute inset-0 -z-10 bg-gradient-to-b from-[#062a2e]/95 via-[#062a2e]/85 to-[#062a2e]/70 sm:hidden"
+            className="absolute inset-0 -z-10 bg-gradient-to-b from-brand-night/95 via-brand-night/85 to-brand-night/70 sm:hidden"
             aria-hidden="true"
           />
           <div
-            className="absolute inset-0 -z-10 hidden bg-gradient-to-r from-[#062a2e] via-[#062a2e]/90 to-[#062a2e]/10 sm:block"
+            className="absolute inset-0 -z-10 hidden bg-gradient-to-r from-brand-night via-brand-night/90 to-brand-night/10 sm:block"
             aria-hidden="true"
           />
           <div className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8 sm:py-20">
             <div className="max-w-[600px]">
-              <p className="mb-6 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[#7fd3cf]">
+              <p className="mb-6 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-brand-mint">
                 <MapPin className="size-4" aria-hidden="true" /> Healthcare workforce management ·
                 Nigeria
               </p>
@@ -261,7 +261,7 @@ export default function LandingPage() {
               <ul className="mt-12 flex flex-col gap-3 border-t border-white/15 pt-6 text-sm text-white/75 sm:flex-row sm:flex-wrap sm:gap-x-7">
                 {proofPoints.map((point) => (
                   <li key={point} className="flex items-center gap-2">
-                    <Check className="size-4 shrink-0 text-[#7fd3cf]" aria-hidden="true" />
+                    <Check className="size-4 shrink-0 text-brand-mint" aria-hidden="true" />
                     {point}
                   </li>
                 ))}
@@ -289,7 +289,7 @@ export default function LandingPage() {
               {workspaces.map((workspace) => {
                 const Icon = workspace.icon;
                 return (
-                  <div key={workspace.name} className="rounded-xl border bg-[#f7faf9] p-6 sm:p-7">
+                  <div key={workspace.name} className="rounded-xl border bg-tint/50 p-6 sm:p-7">
                     <span className="flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
                       <Icon className="size-5" aria-hidden="true" />
                     </span>
@@ -338,7 +338,7 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <section className="bg-[#f2f7f6] py-16 sm:py-20">
+        <section className="bg-tint py-16 sm:py-20">
           <div className="mx-auto grid max-w-7xl gap-12 px-5 sm:px-8 lg:grid-cols-2 lg:gap-20">
             <div id="for-facilities" className="scroll-mt-24">
               <p className="text-xs font-semibold uppercase tracking-wider text-primary">
@@ -380,10 +380,10 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <section className="bg-[#062a2e] py-16 text-white sm:py-20">
+        <section className="bg-brand-night py-16 text-white sm:py-20">
           <div className="mx-auto max-w-7xl px-5 sm:px-8">
             <div className="max-w-2xl">
-              <p className="text-xs font-semibold uppercase tracking-wider text-[#7fd3cf]">
+              <p className="text-xs font-semibold uppercase tracking-wider text-brand-mint">
                 Trust and safety
               </p>
               <h2 className="mt-3 text-3xl font-semibold leading-tight sm:text-4xl">
@@ -399,7 +399,7 @@ export default function LandingPage() {
                 const Icon = assurance.icon;
                 return (
                   <div key={assurance.title} className="flex gap-4">
-                    <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-white/10 text-[#7fd3cf]">
+                    <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-white/10 text-brand-mint">
                       <Icon className="size-5" aria-hidden="true" />
                     </span>
                     <div>
@@ -446,7 +446,7 @@ export default function LandingPage() {
         </section>
       </main>
 
-      <footer className="bg-[#04201f] px-5 py-10 text-sm text-white/65 sm:px-8">
+      <footer className="bg-brand-deeper px-5 py-10 text-sm text-white/65 sm:px-8">
         <div className="mx-auto flex max-w-7xl flex-col gap-6 md:flex-row md:items-center md:justify-between">
           <div>
             <span className="flex items-center gap-2 font-semibold text-white">

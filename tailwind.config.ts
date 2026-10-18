@@ -1,5 +1,6 @@
 import type { Config } from 'tailwindcss';
 import animate from 'tailwindcss-animate';
+import defaultTheme from 'tailwindcss/defaultTheme';
 
 export default {
   darkMode: ['class'],
@@ -13,7 +14,19 @@ export default {
   		}
   	},
   	extend: {
+  		fontFamily: {
+  			// Plus Jakarta Sans, self-hosted (src/app/fonts), then the system stack so text
+  			// is readable at once and never waits on the file.
+  			sans: ['var(--font-sans)', ...defaultTheme.fontFamily.sans]
+  		},
   		colors: {
+  			// The public pages' own surfaces (see globals.css). `bg-brand-night/90` works.
+  			brand: {
+  				night: 'hsl(var(--brand-night))',
+  				deeper: 'hsl(var(--brand-deeper))',
+  				mint: 'hsl(var(--brand-mint))'
+  			},
+  			tint: 'hsl(var(--surface-tint))',
   			border: 'hsl(var(--border))',
   			input: 'hsl(var(--input))',
   			ring: 'hsl(var(--ring))',
@@ -79,9 +92,36 @@ export default {
   		// (UXA-01). Content is now 16px, the floor the blueprint asks for, and secondary text
   		// 14px, with nothing set below that. Everything else is sized in rem, so the larger-text
   		// switch still scales from here.
+  		//
+  		// The named scale below is what headings use, so two pages cannot disagree
+  		// about how big a page title is. Body is `text-sm` (1rem) and secondary is
+  		// `text-xs` (0.875rem) — their names are shadcn's, their sizes are ours.
+  		//   display  the hero of a public page
+  		//   h1       a page title        h2  a section        h3  a card or group
+  		//   body / small   running text and secondary text, as above
+  		// Spacing is Tailwind's 4px scale: 1–3 inside a control, 4 between related
+  		// things, 6 between groups, 8–12 between sections.
   		fontSize: {
   			xs: ['0.875rem', { lineHeight: '1.3rem' }],
-  			sm: ['1rem', { lineHeight: '1.5rem' }]
+  			sm: ['1rem', { lineHeight: '1.5rem' }],
+  			display: ['clamp(2.25rem, 1.6rem + 2.4vw, 3.75rem)', { lineHeight: '1.08', letterSpacing: '-0.02em', fontWeight: '600' }],
+  			h1: ['1.75rem', { lineHeight: '2.25rem', letterSpacing: '-0.015em', fontWeight: '600' }],
+  			h2: ['1.375rem', { lineHeight: '1.875rem', letterSpacing: '-0.01em', fontWeight: '600' }],
+  			h3: ['1.125rem', { lineHeight: '1.625rem', fontWeight: '600' }],
+  			body: ['1rem', { lineHeight: '1.5rem' }],
+  			small: ['0.875rem', { lineHeight: '1.3rem' }]
+  		},
+  		boxShadow: {
+  			card: 'var(--shadow-card)',
+  			raised: 'var(--shadow-raised)'
+  		},
+  		transitionDuration: {
+  			fast: 'var(--duration-fast)',
+  			base: 'var(--duration-base)',
+  			slow: 'var(--duration-slow)'
+  		},
+  		transitionTimingFunction: {
+  			out: 'var(--ease-out)'
   		},
   		borderRadius: {
   			lg: 'var(--radius)',
