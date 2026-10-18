@@ -1,19 +1,19 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useMutation } from '@tanstack/react-query';
 import { TriangleAlert } from 'lucide-react';
 import { api, errorMessage } from '@/lib/ui/api';
 import { useZodForm } from '@/lib/ui/form';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { TextSizeControl } from '@/components/app/text-size-control';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { AuthLink, AuthShell } from '@/components/app/auth-shell';
+import { Field } from '@/components/app/field';
+import { PasswordInput } from '@/components/app/password-input';
 
 /**
  * Getting back into an account: the phone number, the code that is sent to it,
@@ -54,17 +54,7 @@ const resetSchema = z
     path: ['confirm'],
   });
 
-function FieldError({ message }: { message?: string }) {
-  if (!message) return null;
-  return (
-    <p role="alert" className="text-xs text-destructive-text">
-      {message}
-    </p>
-  );
-}
-
 export default function ForgotPasswordPage() {
-  const router = useRouter();
   const [step, setStep] = useState<'phone' | 'reset'>('phone');
   const [done, setDone] = useState(false);
 
@@ -89,153 +79,160 @@ export default function ForgotPasswordPage() {
         code: values.code,
         password: values.password,
       }),
-    onSuccess: () => {
-      setDone(true);
-      // Every session was revoked, so the next thing to do is sign in.
-      setTimeout(() => router.replace('/login'), 2500);
-    },
+    // Every session was revoked, so the next thing to do is sign in. It is a link, not a timer:
+    // a message that vanishes after two seconds is gone before a slow reader, or a screen
+    // reader, has finished it.
+    onSuccess: () => setDone(true),
   });
 
   const resend = useMutation({
     mutationFn: () => api.post('/api/v1/auth/resend-code', { phone, purpose: 'PASSWORD_RESET' }),
   });
 
+  // Moving to the second step removes the button that was just pressed. Without this, focus falls
+  // to the top of the document and a keyboard or screen-reader user starts again from the logo.
+  const heading = useRef<HTMLHeadingElement>(null);
+  const mounted = useRef(false);
+  useEffect(() => {
+    if (mounted.current) heading.current?.focus();
+    mounted.current = true;
+  }, [step]);
+
   const failure = request.error ?? confirm.error ?? resend.error;
 
+  const { errors: phoneErrors } = phoneForm.formState;
+  const { errors: resetErrors } = resetForm.formState;
+
   return (
-    <main className="relative flex min-h-dvh items-center justify-center px-6 py-12">
-      <TextSizeControl className="absolute right-3 top-3 z-10" />
-      <div className="w-full max-w-sm">
-        <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-          Medilink
+    <AuthShell
+      title="Reset your password"
+      description={
+        step === 'phone'
+          ? 'Enter the number you sign in with. If it has an account, we will text it a code.'
+          : 'Enter the code and choose a new password.'
+      }
+      footer={
+        <p>
+          Remembered it? <AuthLink href="/login">Sign in</AuthLink>
         </p>
-        <h1 className="mt-1 text-2xl font-semibold tracking-tight">Reset your password</h1>
-        <p className="mt-1.5 text-sm text-muted-foreground">
-          {step === 'phone'
-            ? 'Enter the number you sign in with. If it has an account, we will text it a code.'
-            : 'Enter the code and choose a new password.'}
-        </p>
+      }
+    >
+      <Card>
+        <CardContent className="pt-6">
+          <h2 ref={heading} tabIndex={-1} className="sr-only">
+            {done
+              ? 'Password changed'
+              : step === 'phone'
+                ? 'Step 1 of 2: your number'
+                : 'Step 2 of 2: the code and a new password'}
+          </h2>
 
-        <Card className="mt-6">
-          <CardContent className="pt-6">
-            {failure ? (
-              <Alert variant="destructive" className="mb-4">
-                <TriangleAlert />
-                <AlertDescription>{errorMessage(failure)}</AlertDescription>
-              </Alert>
-            ) : null}
+          {failure ? (
+            <Alert variant="destructive" className="mb-4">
+              <TriangleAlert />
+              <AlertDescription>{errorMessage(failure)}</AlertDescription>
+            </Alert>
+          ) : null}
 
-            {done ? (
-              <p role="status" className="text-sm">
-                Your password has been changed and you have been signed out everywhere. Taking you
-                to sign in…
+          {done ? (
+            <div role="status" className="space-y-4">
+              <p className="leading-relaxed">
+                Your password has been changed and you have been signed out everywhere. Sign in with
+                the new one.
               </p>
-            ) : step === 'phone' ? (
-              <form
-                className="space-y-4"
-                onSubmit={phoneForm.handleSubmit((values) => request.mutate(values))}
-                noValidate
+              <Button asChild size="lg" className="w-full">
+                <Link href="/login">Sign in</Link>
+              </Button>
+            </div>
+          ) : step === 'phone' ? (
+            <form
+              className="space-y-4"
+              onSubmit={phoneForm.handleSubmit((values) => request.mutate(values))}
+              noValidate
+            >
+              <Field
+                label="Phone number"
+                hint="For example 0803 123 4567"
+                error={phoneErrors.phone?.message}
               >
-                <div className="space-y-1.5">
-                  <Label htmlFor="phone">Phone number</Label>
-                  <Input
-                    id="phone"
-                    {...phoneForm.register('phone')}
-                    placeholder="0803 123 4567"
-                    autoComplete="username"
-                    inputMode="tel"
-                    aria-invalid={Boolean(phoneForm.formState.errors.phone) || undefined}
-                  />
-                  <FieldError message={phoneForm.formState.errors.phone?.message} />
-                </div>
-                <Button type="submit" className="w-full" loading={request.isPending}>
-                  Send me a code
-                </Button>
-              </form>
-            ) : (
-              <form
-                className="space-y-4"
-                onSubmit={resetForm.handleSubmit((values) => confirm.mutate(values))}
-                noValidate
+                <Input
+                  {...phoneForm.register('phone')}
+                  placeholder="0803 123 4567"
+                  autoComplete="username"
+                  inputMode="tel"
+                />
+              </Field>
+              <Button type="submit" size="lg" className="w-full" loading={request.isPending}>
+                Send me a code
+              </Button>
+            </form>
+          ) : (
+            <form
+              className="space-y-4"
+              onSubmit={resetForm.handleSubmit((values) => confirm.mutate(values))}
+              noValidate
+            >
+              <Field
+                label={`The ${CODE_LENGTH}-digit code`}
+                hint={`If ${phone} has an account, a code is on its way. It expires in ten minutes.`}
+                error={resetErrors.code?.message}
               >
-                <div className="space-y-1.5">
-                  <Label htmlFor="code">The {CODE_LENGTH}-digit code</Label>
-                  <Input
-                    id="code"
-                    {...resetForm.register('code')}
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    maxLength={CODE_LENGTH}
-                    className="tabular text-lg tracking-[0.3em]"
-                    aria-invalid={Boolean(resetForm.formState.errors.code) || undefined}
-                  />
-                  <FieldError message={resetForm.formState.errors.code?.message} />
-                  <p className="text-xs text-muted-foreground">
-                    If {phone} has an account, a code is on its way. It expires in ten minutes.
-                  </p>
-                </div>
+                <Input
+                  {...resetForm.register('code')}
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={CODE_LENGTH}
+                  className="tabular text-lg tracking-[0.3em]"
+                />
+              </Field>
 
-                <div className="space-y-1.5">
-                  <Label htmlFor="password">New password</Label>
-                  <Input
-                    id="password"
-                    type="password"
-                    {...resetForm.register('password')}
-                    autoComplete="new-password"
-                    aria-invalid={Boolean(resetForm.formState.errors.password) || undefined}
-                  />
-                  <FieldError message={resetForm.formState.errors.password?.message} />
-                  <p className="text-xs text-muted-foreground">At least {MIN_PASSWORD} characters.</p>
-                </div>
+              <Field
+                label="New password"
+                hint={`At least ${MIN_PASSWORD} characters.`}
+                error={resetErrors.password?.message}
+              >
+                <PasswordInput {...resetForm.register('password')} autoComplete="new-password" />
+              </Field>
 
-                <div className="space-y-1.5">
-                  <Label htmlFor="confirm">Confirm new password</Label>
-                  <Input
-                    id="confirm"
-                    type="password"
-                    {...resetForm.register('confirm')}
-                    autoComplete="new-password"
-                    aria-invalid={Boolean(resetForm.formState.errors.confirm) || undefined}
-                  />
-                  <FieldError message={resetForm.formState.errors.confirm?.message} />
-                </div>
+              <Field label="Confirm new password" error={resetErrors.confirm?.message}>
+                <PasswordInput {...resetForm.register('confirm')} autoComplete="new-password" />
+              </Field>
 
-                <Button type="submit" className="w-full" loading={confirm.isPending}>
-                  Change my password
+              <Button type="submit" size="lg" className="w-full" loading={confirm.isPending}>
+                Change my password
+              </Button>
+
+              <div className="flex flex-wrap items-center justify-between gap-x-4">
+                <Button
+                  type="button"
+                  variant="link"
+                  className="h-11 px-0"
+                  onClick={() => resend.mutate()}
+                  loading={resend.isPending}
+                >
+                  Send it again
                 </Button>
-
-                <div className="flex items-center justify-between text-xs">
-                  <button
-                    type="button"
-                    className="font-medium text-primary underline-offset-4 hover:underline disabled:opacity-50"
-                    onClick={() => resend.mutate()}
-                    disabled={resend.isPending}
-                  >
-                    Send it again
-                  </button>
-                  <button
-                    type="button"
-                    className="text-muted-foreground underline-offset-4 hover:underline"
-                    onClick={() => {
-                      setStep('phone');
-                      resetForm.reset();
-                    }}
-                  >
-                    Change the number
-                  </button>
-                </div>
-              </form>
-            )}
-          </CardContent>
-        </Card>
-
-        <p className="mt-6 text-sm text-muted-foreground">
-          Remembered it?{' '}
-          <Link href="/login" className="font-medium text-primary underline-offset-4 hover:underline">
-            Sign in
-          </Link>
-        </p>
-      </div>
-    </main>
+                <Button
+                  type="button"
+                  variant="link"
+                  className="h-11 px-0 text-muted-foreground"
+                  onClick={() => {
+                    setStep('phone');
+                    resetForm.reset();
+                  }}
+                >
+                  Change the number
+                </Button>
+              </div>
+              <p role="status" className="min-h-5 text-sm text-muted-foreground">
+                {resend.isSuccess
+                  ? 'If that number can receive one, another code is on its way.'
+                  : ''}
+              </p>
+            </form>
+          )}
+        </CardContent>
+      </Card>
+    </AuthShell>
   );
 }

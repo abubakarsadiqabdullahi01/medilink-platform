@@ -127,6 +127,11 @@ export const api = {
 
 /** The message to show a person, field errors included. */
 export function errorMessage(error: unknown): string {
+  // fetch() rejects with a TypeError when there is no connection at all. "Something went wrong" is
+  // true and useless there: the person needs to know it is their connection.
+  if (error instanceof TypeError) {
+    return 'Could not reach Medilink. Check your connection and try again.';
+  }
   if (!(error instanceof ApiError)) return 'Something went wrong.';
   const fields = error.fieldMessages;
   return fields.length > 0 ? `${error.message} ${fields.join('; ')}` : error.message;

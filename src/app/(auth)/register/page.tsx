@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -11,11 +11,12 @@ import { api, errorMessage } from '@/lib/ui/api';
 import { useZodForm } from '@/lib/ui/form';
 import { consoleFor, type SessionState } from '@/lib/ui/session';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { TextSizeControl } from '@/components/app/text-size-control';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { AuthLink, AuthShell, type AuthPoint } from '@/components/app/auth-shell';
+import { Field } from '@/components/app/field';
+import { PasswordInput } from '@/components/app/password-input';
 
 /**
  * Creating an account, in the three steps the API is built as: claim a phone
@@ -55,7 +56,7 @@ const detailsSchema = z.object({
     // type, and normalisation belongs in one place (lib/phone.ts) rather
     // than being half-done by a regex here. This only catches the obviously
     // wrong before a round trip.
-    .regex(/^[\d\s+()-]{10,}$/, "That does not look like a Nigerian mobile number."),
+    .regex(/^[\d\s+()-]{10,}$/, 'That does not look like a Nigerian mobile number.'),
   email: z.union([z.literal(''), z.string().email('That email address is not valid.')]),
   // Recorded against the privacy notice in force. Always asked, so what somebody
   // sees does not depend on whether a notice has been published yet; the server
@@ -83,21 +84,6 @@ const passwordSchema = z
     path: ['confirm'],
   });
 
-/**
- * One field's problem, under that field.
- *
- * `role="alert"` so a screen reader hears it when it appears rather than only
- * if the person happens to navigate back over the input.
- */
-function FieldError({ message }: { message?: string }) {
-  if (!message) return null;
-  return (
-    <p role="alert" className="text-xs text-destructive-text">
-      {message}
-    </p>
-  );
-}
-
 function RegisterForm() {
   const router = useRouter();
   // Facility signup has nowhere else to start from: `/facility/register`
@@ -116,8 +102,23 @@ function RegisterForm() {
   const [resent, setResent] = useState(false);
   const [sharing, setSharing] = useState(false);
 
+  // Moving on removes the button that was just pressed, and focus would fall to the top of the
+  // page. The step's heading takes it instead, so a keyboard or screen-reader user hears where
+  // they are and carries on from there. Not on first render: arriving must not steal focus.
+  const stepHeading = useRef<HTMLHeadingElement>(null);
+  const arrived = useRef(false);
+  useEffect(() => {
+    if (arrived.current) stepHeading.current?.focus();
+    arrived.current = true;
+  }, [step]);
+
   const details = useZodForm(detailsSchema, {
-    defaultValues: { fullName: '', phone: '', email: '', acceptTerms: undefined as unknown as true },
+    defaultValues: {
+      fullName: '',
+      phone: '',
+      email: '',
+      acceptTerms: undefined as unknown as true,
+    },
   });
   const codeForm = useZodForm(codeSchema, { defaultValues: { code: '' } });
   const passwordForm = useZodForm(passwordSchema, {
@@ -202,386 +203,329 @@ function RegisterForm() {
 
   const failure = start.error ?? verify.error ?? finish.error ?? resend.error;
 
+  const title = forFacility
+    ? "Register your facility's account"
+    : forStaff
+      ? 'Create your staff account'
+      : 'Create an account';
+
+  const aside =
+    forStaff && !forFacility
+      ? {
+          icon: Building2,
+          headline:
+            'An account is the start. Access comes from the person who manages it where you work.',
+          points: [
+            {
+              title: 'Your own sign-in, never a shared one',
+              description:
+                'Everything you do is recorded against your name, so nobody else can act as you and nobody has to share a password.',
+            },
+            {
+              title: 'Access is given, not chosen',
+              description:
+                'Once your account exists, your hospital’s owner adds you from their Staff page using your phone number. Until then the console tells you what to do next.',
+            },
+          ] satisfies AuthPoint[],
+        }
+      : forFacility
+        ? {
+            icon: Building2,
+            headline:
+              'An account is the start. Your facility is next, and Medilink verifies it before it can publish anything.',
+            points: [
+              {
+                title: 'Your facility is checked against its registration',
+                description:
+                  'You can set it up straight away — it just cannot offer a shift to anybody until Medilink has confirmed it is real.',
+              },
+              {
+                title: 'This account is yours, not the facility’s',
+                description:
+                  'You can grant access to colleagues once the facility exists, so this is not the only login it will ever have.',
+              },
+            ] satisfies AuthPoint[],
+          }
+        : {
+            icon: BadgeCheck,
+            headline: 'An account is the start. Verification is what gets you offered work.',
+            points: [
+              {
+                title: 'You will be asked for your credentials',
+                description:
+                  'Your registration and credentials are reviewed before you can be matched to a shift. Until then your profile says exactly what is outstanding.',
+              },
+              {
+                title: 'Nothing is hidden from you',
+                description:
+                  'If you are not eligible, the reasons are listed by name. No one has to ring support to find out why.',
+              },
+            ] satisfies AuthPoint[],
+          };
+
+  const detailErrors = details.formState.errors;
+  const codeErrors = codeForm.formState.errors;
+  const passwordErrors = passwordForm.formState.errors;
+
   return (
-    <main className="relative grid min-h-dvh lg:grid-cols-2">
-      <TextSizeControl className="absolute right-3 top-3 z-10" />
-      <div className="flex items-center justify-center px-6 py-12">
-        <div className="w-full max-w-sm">
-          <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-            Medilink
-          </p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight">
-            {forFacility
-              ? "Register your facility's account"
-              : forStaff
-                ? 'Create your staff account'
-                : 'Create an account'}
-          </h1>
-          <p className="mt-1.5 text-sm text-muted-foreground">
-            {forFacility
-              ? "This is you, not the facility — the person who will manage it. Your hospital's own details come next, once this is done."
-              : forStaff
-                ? 'For people who work at a hospital, or for Medilink, already using the platform. Once your account exists, whoever manages access adds you from their Staff page.'
-                : (
-                  <>
-                    For doctors, nurses and other practitioners looking for shifts. Representing a
-                    hospital?{' '}
-                    <Link href="/register?as=facility" className="font-medium text-foreground underline underline-offset-4">
-                      Register it here
-                    </Link>
-                    .
-                  </>
-                )}
-          </p>
-
-          <ol className="mt-6 flex items-center gap-2" aria-label="Progress">
-            {STEPS.map((label, index) => (
-              <li key={label} className="flex flex-1 items-center gap-2">
-                <span
-                  className={cn(
-                    'flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold',
-                    index < step && 'bg-success text-success-foreground',
-                    index === step && 'bg-primary text-primary-foreground',
-                    index > step && 'bg-muted text-muted-foreground',
-                  )}
-                  aria-current={index === step ? 'step' : undefined}
-                >
-                  {index < step ? <Check className="size-3.5" /> : index + 1}
-                </span>
-                {index < STEPS.length - 1 ? (
-                  <span
-                    className={cn('h-px flex-1', index < step ? 'bg-success' : 'bg-border')}
-                    aria-hidden="true"
-                  />
-                ) : null}
-              </li>
-            ))}
-          </ol>
-          <p className="mt-2 text-xs font-medium text-muted-foreground">{STEPS[step]}</p>
-
-          <Card className="mt-4">
-            <CardContent className="pt-6">
-              {failure ? (
-                <Alert variant="destructive" className="mb-4">
-                  <TriangleAlert />
-                  <AlertDescription>{errorMessage(failure)}</AlertDescription>
-                </Alert>
-              ) : null}
-
-              {step === 0 ? (
-                <form
-                  className="space-y-4"
-                  onSubmit={details.handleSubmit((values) => start.mutate(values))}
-                  noValidate
-                >
-                  <div className="space-y-1.5">
-                    <Label htmlFor="fullName">Full name</Label>
-                    <Input
-                      id="fullName"
-                      {...details.register('fullName')}
-                      autoComplete="name"
-                      placeholder="As it appears on your registration"
-                      aria-invalid={Boolean(details.formState.errors.fullName) || undefined}
-                    />
-                    <FieldError message={details.formState.errors.fullName?.message} />
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <Label htmlFor="phone">Phone number</Label>
-                    <Input
-                      id="phone"
-                      {...details.register('phone')}
-                      placeholder="0803 123 4567"
-                      autoComplete="tel"
-                      inputMode="tel"
-                      aria-invalid={Boolean(details.formState.errors.phone) || undefined}
-                    />
-                    <FieldError message={details.formState.errors.phone?.message} />
-                    <p className="text-xs text-muted-foreground">
-                      A Nigerian mobile number. The code comes here, and it is how you sign in.
-                    </p>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <Label htmlFor="email">
-                      Email <span className="text-muted-foreground">(optional)</span>
-                    </Label>
-                    <Input
-                      id="email"
-                      type="email"
-                      {...details.register('email')}
-                      autoComplete="email"
-                      aria-invalid={Boolean(details.formState.errors.email) || undefined}
-                    />
-                    <FieldError message={details.formState.errors.email?.message} />
-                    {/* Optional because recovery.ts makes the phone the only
-                        recovery channel, and because nothing in the product
-                        sends email yet. Saying so beats an unexplained
-                        "(optional)" on a field people will wonder about. */}
-                    <p className="text-xs text-muted-foreground">
-                      Your phone is how you sign in and how you recover your account. Medilink does
-                      not send email yet — an address here is kept on your record for when it does.
-                    </p>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="flex items-start gap-3 text-sm">
-                      <input
-                        type="checkbox"
-                        {...details.register('acceptTerms')}
-                        className="mt-1 size-5 shrink-0 rounded border-input accent-primary"
-                        aria-invalid={Boolean(details.formState.errors.acceptTerms) || undefined}
-                      />
-                      <span>
-                        I have read the{' '}
-                        <Link href="/privacy" target="_blank" className="font-medium underline">
-                          privacy notice
-                        </Link>{' '}
-                        and the{' '}
-                        <Link href="/terms" target="_blank" className="font-medium underline">
-                          terms
-                        </Link>{' '}
-                        and I accept them.
-                      </span>
-                    </label>
-                    <FieldError message={details.formState.errors.acceptTerms?.message} />
-                  </div>
-
-                  {/* Not disabled until the schema is satisfied. A button
-                      that is dead until every field is right gives somebody
-                      nothing to press and no reason why; submitting and being
-                      told which field is wrong is the kinder failure. */}
-                  <Button type="submit" className="w-full" loading={start.isPending}>
-                    Send me a code
-                  </Button>
-                </form>
-              ) : null}
-
-              {step === 1 ? (
-                <form
-                  className="space-y-4"
-                  onSubmit={codeForm.handleSubmit((values) => verify.mutate(values))}
-                  noValidate
-                >
-                  <div className="space-y-1.5">
-                    <Label htmlFor="code">The {CODE_LENGTH}-digit code</Label>
-                    <Input
-                      id="code"
-                      {...codeForm.register('code')}
-                      inputMode="numeric"
-                      autoComplete="one-time-code"
-                      maxLength={CODE_LENGTH}
-                      className="tabular text-lg tracking-[0.3em]"
-                      aria-invalid={Boolean(codeForm.formState.errors.code) || undefined}
-                    />
-                    <FieldError message={codeForm.formState.errors.code?.message} />
-                    <p className="text-xs text-muted-foreground">
-                      Sent to {phone}. It expires in ten minutes.
-                    </p>
-                  </div>
-
-                  <Button type="submit" className="w-full" loading={verify.isPending}>
-                    Confirm my number
-                  </Button>
-
-                  <div className="flex items-center justify-between text-xs">
-                    <button
-                      type="button"
-                      className="font-medium text-primary underline-offset-4 hover:underline disabled:opacity-50"
-                      onClick={() => resend.mutate()}
-                      disabled={resend.isPending}
-                    >
-                      Send it again
-                    </button>
-                    <button
-                      type="button"
-                      className="text-muted-foreground underline-offset-4 hover:underline"
-                      onClick={() => {
-                        setStep(0);
-                        codeForm.reset();
-                      }}
-                    >
-                      Change the number
-                    </button>
-                  </div>
-
-                  {resent ? (
-                    <p className="text-xs text-muted-foreground">
-                      If that number can receive one, another code is on its way.
-                    </p>
-                  ) : null}
-                </form>
-              ) : null}
-
-              {step === 2 ? (
-                <form
-                  className="space-y-4"
-                  onSubmit={passwordForm.handleSubmit((values) => finish.mutate(values))}
-                  noValidate
-                >
-                  <div className="space-y-1.5">
-                    <Label htmlFor="password">Password</Label>
-                    <Input
-                      id="password"
-                      type="password"
-                      {...passwordForm.register('password')}
-                      autoComplete="new-password"
-                      aria-invalid={Boolean(passwordForm.formState.errors.password) || undefined}
-                    />
-                    <FieldError message={passwordForm.formState.errors.password?.message} />
-                    <p className="text-xs text-muted-foreground">
-                      At least {MIN_PASSWORD} characters.
-                    </p>
-                  </div>
-
-                  {/* Typing it twice matters more here than it usually does:
-                      there is no way to reset a password from the interface
-                      yet, so one typo on this field is an account nobody can
-                      get back into. */}
-                  <div className="space-y-1.5">
-                    <Label htmlFor="confirm">Confirm password</Label>
-                    <Input
-                      id="confirm"
-                      type="password"
-                      {...passwordForm.register('confirm')}
-                      autoComplete="new-password"
-                      aria-invalid={Boolean(passwordForm.formState.errors.confirm) || undefined}
-                    />
-                    <FieldError message={passwordForm.formState.errors.confirm?.message} />
-                  </div>
-
-                  {/* Asked here, with the account, because matching shows a
-                      practitioner to hospitals from the first day. Recorded as
-                      consent, so it can be withdrawn from Privacy, under My profile, later. */}
-                  {!forStaff ? (
-                    <label className="flex items-start gap-3 rounded-md border p-3 text-sm leading-relaxed">
-                      <input
-                        type="checkbox"
-                        className="mt-1 size-4 shrink-0 accent-primary"
-                        checked={sharing}
-                        onChange={(event) => setSharing(event.target.checked)}
-                      />
-                      <span>
-                        Show my verified credentials and profile to hospitals that are considering
-                        me for shifts.{' '}
-                        <span className="text-muted-foreground">
-                          Needed to be offered work. You can withdraw it at any time from Privacy, under My profile.
-                        </span>
-                      </span>
-                    </label>
-                  ) : null}
-
-                  <Button
-                    type="submit"
-                    className="w-full"
-                    disabled={!forStaff && !sharing}
-                    loading={finish.isPending}
-                  >
-                    Create my account
-                  </Button>
-
-                  {finish.isPending ? (
-                    <p className="text-xs text-muted-foreground">
-                      Setting up your workspace — this takes a moment.
-                    </p>
-                  ) : null}
-                </form>
-              ) : null}
-            </CardContent>
-          </Card>
-
-          <p className="mt-6 text-sm text-muted-foreground">
-            Already have an account?{' '}
-            <Link
-              href="/login"
-              className="font-medium text-primary underline-offset-4 hover:underline"
-            >
-              Sign in
-            </Link>
-          </p>
-        </div>
-      </div>
-
-      {/* What they are actually signing up to, said before they do it rather
-          than discovered afterwards — a practitioner's eligibility card, or a
-          facility's verification queue. */}
-      <div className="hidden bg-primary p-12 text-primary-foreground lg:flex lg:flex-col lg:justify-center">
-        {forStaff ? <Building2 className="size-10 opacity-90" /> : <BadgeCheck className="size-10 opacity-90" />}
-        <p className="mt-6 max-w-md text-2xl font-semibold leading-snug tracking-tight">
-          {forFacility
-            ? 'An account is the start. Your facility is next, and compliance verifies it before it can publish anything.'
-            : forStaff
-              ? 'An account is the start. Access comes from the person who manages it where you work.'
-              : 'An account is the start. Verification is what gets you offered work.'}
+    <AuthShell
+      title={title}
+      description={
+        forFacility ? (
+          "This is you, not the facility — the person who will manage it. Your hospital's own details come next, once this is done."
+        ) : forStaff ? (
+          'For people who work at a hospital, or for Medilink, already using the platform. Once your account exists, whoever manages access adds you from their Staff page.'
+        ) : (
+          <>
+            For doctors, nurses and other practitioners looking for shifts. Representing a hospital?{' '}
+            <AuthLink href="/register?as=facility">Register it here</AuthLink>.
+          </>
+        )
+      }
+      aside={aside}
+      footer={
+        <p>
+          Already have an account? <AuthLink href="/login">Sign in</AuthLink>
         </p>
-        <div className="mt-8 space-y-4 text-sm leading-relaxed text-primary-foreground/85">
-          {forStaff && !forFacility ? (
-            <>
-              <Card className="border-white/15 bg-white/10 text-primary-foreground shadow-none">
-                <CardHeader className="p-4">
-                  <CardTitle className="text-sm">Your own sign-in, never a shared one</CardTitle>
-                  <CardDescription className="text-primary-foreground/75">
-                    Everything you do is recorded against your name, so nobody else can act as you
-                    and nobody has to share a password.
-                  </CardDescription>
-                </CardHeader>
-              </Card>
-              <Card className="border-white/15 bg-white/10 text-primary-foreground shadow-none">
-                <CardHeader className="p-4">
-                  <CardTitle className="text-sm">Access is given, not chosen</CardTitle>
-                  <CardDescription className="text-primary-foreground/75">
-                    Once your account exists, your hospital&rsquo;s owner adds you from their Staff
-                    page using your phone number. Until then the console tells you what to do next.
-                  </CardDescription>
-                </CardHeader>
-              </Card>
-            </>
-          ) : forFacility ? (
-            <>
-              <Card className="border-white/15 bg-white/10 text-primary-foreground shadow-none">
-                <CardHeader className="p-4">
-                  <CardTitle className="text-sm">Your facility is checked against its registration</CardTitle>
-                  <CardDescription className="text-primary-foreground/75">
-                    You can set it up and add colleagues straight away — it just cannot offer a
-                    shift to anybody until compliance has confirmed it is real.
-                  </CardDescription>
-                </CardHeader>
-              </Card>
-              <Card className="border-white/15 bg-white/10 text-primary-foreground shadow-none">
-                <CardHeader className="p-4">
-                  <CardTitle className="text-sm">This account is yours, not the facility&rsquo;s</CardTitle>
-                  <CardDescription className="text-primary-foreground/75">
-                    You can grant access to colleagues once the facility exists, so this is not the
-                    only login it will ever have.
-                  </CardDescription>
-                </CardHeader>
-              </Card>
-            </>
-          ) : (
-            <>
-              <Card className="border-white/15 bg-white/10 text-primary-foreground shadow-none">
-                <CardHeader className="p-4">
-                  <CardTitle className="text-sm">You will be asked for your credentials</CardTitle>
-                  <CardDescription className="text-primary-foreground/75">
-                    Your registration and credentials are reviewed before you can be matched to a
-                    shift. Until then your profile says exactly what is outstanding.
-                  </CardDescription>
-                </CardHeader>
-              </Card>
-              <Card className="border-white/15 bg-white/10 text-primary-foreground shadow-none">
-                <CardHeader className="p-4">
-                  <CardTitle className="text-sm">Nothing is hidden from you</CardTitle>
-                  <CardDescription className="text-primary-foreground/75">
-                    If you are not eligible, the reasons are listed by name. No one has to ring
-                    support to find out why.
-                  </CardDescription>
-                </CardHeader>
-              </Card>
-            </>
-          )}
-        </div>
-      </div>
-    </main>
+      }
+    >
+      <ol className="flex items-center gap-2" aria-label="Progress">
+        {STEPS.map((label, index) => (
+          <li key={label} className="flex flex-1 items-center gap-2">
+            <span
+              className={cn(
+                'flex size-8 shrink-0 items-center justify-center rounded-full text-sm font-semibold',
+                index < step && 'bg-success text-success-foreground',
+                index === step && 'bg-primary text-primary-foreground',
+                index > step && 'bg-muted text-muted-foreground',
+              )}
+              aria-current={index === step ? 'step' : undefined}
+            >
+              {index < step ? <Check className="size-4" aria-hidden="true" /> : index + 1}
+              <span className="sr-only">
+                {index < step
+                  ? ` ${label}, done`
+                  : index === step
+                    ? ` ${label}, this step`
+                    : ` ${label}, not yet`}
+              </span>
+            </span>
+            {index < STEPS.length - 1 ? (
+              <span
+                className={cn('h-px flex-1', index < step ? 'bg-success' : 'bg-border')}
+                aria-hidden="true"
+              />
+            ) : null}
+          </li>
+        ))}
+      </ol>
+      <p className="mt-3 text-sm text-muted-foreground">
+        Step {step + 1} of {STEPS.length}
+      </p>
+      <h2 ref={stepHeading} tabIndex={-1} className="text-lg font-semibold outline-none">
+        {STEPS[step]}
+      </h2>
+
+      <Card className="mt-3">
+        <CardContent className="pt-6">
+          {failure ? (
+            <Alert variant="destructive" className="mb-4">
+              <TriangleAlert />
+              <AlertDescription>{errorMessage(failure)}</AlertDescription>
+            </Alert>
+          ) : null}
+
+          {step === 0 ? (
+            <form
+              className="space-y-4"
+              onSubmit={details.handleSubmit((values) => start.mutate(values))}
+              noValidate
+            >
+              <Field
+                label="Full name"
+                hint="As it appears on your registration."
+                error={detailErrors.fullName?.message}
+              >
+                <Input {...details.register('fullName')} autoComplete="name" />
+              </Field>
+
+              <Field
+                label="Phone number"
+                hint="A Nigerian mobile number, for example 0803 123 4567. The code comes here, and it is how you sign in."
+                error={detailErrors.phone?.message}
+              >
+                <Input {...details.register('phone')} autoComplete="tel" inputMode="tel" />
+              </Field>
+
+              {/* Optional because recovery.ts makes the phone the only recovery channel, and
+                  because nothing in the product sends email yet. Saying so beats an unexplained
+                  "(optional)" on a field people will wonder about. */}
+              <Field
+                label="Email"
+                optional
+                hint="Your phone is how you sign in and how you recover your account. Medilink does not send email yet — an address here is kept on your record for when it does."
+                error={detailErrors.email?.message}
+              >
+                <Input type="email" {...details.register('email')} autoComplete="email" />
+              </Field>
+
+              <div className="space-y-1.5">
+                <label className="flex items-start gap-3 text-base">
+                  <input
+                    type="checkbox"
+                    {...details.register('acceptTerms')}
+                    className="mt-0.5 size-6 shrink-0 rounded border-input accent-primary"
+                    aria-invalid={Boolean(detailErrors.acceptTerms) || undefined}
+                  />
+                  <span>
+                    I have read the{' '}
+                    <Link href="/privacy" target="_blank" className="font-medium underline">
+                      privacy notice<span className="sr-only"> (opens in a new tab)</span>
+                    </Link>{' '}
+                    and the{' '}
+                    <Link href="/terms" target="_blank" className="font-medium underline">
+                      terms<span className="sr-only"> (opens in a new tab)</span>
+                    </Link>{' '}
+                    and I accept them.
+                  </span>
+                </label>
+                {detailErrors.acceptTerms?.message ? (
+                  <p role="alert" className="text-sm font-medium text-destructive-text">
+                    {detailErrors.acceptTerms.message}
+                  </p>
+                ) : null}
+              </div>
+
+              {/* Not disabled until the schema is satisfied. A button that is dead until every
+                  field is right gives somebody nothing to press and no reason why; submitting and
+                  being told which field is wrong is the kinder failure. */}
+              <Button type="submit" size="lg" className="w-full" loading={start.isPending}>
+                Send me a code
+              </Button>
+            </form>
+          ) : null}
+
+          {step === 1 ? (
+            <form
+              className="space-y-4"
+              onSubmit={codeForm.handleSubmit((values) => verify.mutate(values))}
+              noValidate
+            >
+              <Field
+                label={`The ${CODE_LENGTH}-digit code`}
+                hint={`Sent to ${phone}. It expires in ten minutes.`}
+                error={codeErrors.code?.message}
+              >
+                <Input
+                  {...codeForm.register('code')}
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={CODE_LENGTH}
+                  className="tabular text-lg tracking-[0.3em]"
+                />
+              </Field>
+
+              <Button type="submit" size="lg" className="w-full" loading={verify.isPending}>
+                Confirm my number
+              </Button>
+
+              <div className="flex flex-wrap items-center justify-between gap-x-4">
+                <Button
+                  type="button"
+                  variant="link"
+                  className="h-11 px-0"
+                  onClick={() => resend.mutate()}
+                  loading={resend.isPending}
+                >
+                  Send it again
+                </Button>
+                <Button
+                  type="button"
+                  variant="link"
+                  className="h-11 px-0 text-muted-foreground"
+                  onClick={() => {
+                    setStep(0);
+                    codeForm.reset();
+                  }}
+                >
+                  Change the number
+                </Button>
+              </div>
+
+              <p role="status" className="min-h-5 text-sm text-muted-foreground">
+                {resent ? 'If that number can receive one, another code is on its way.' : ''}
+              </p>
+            </form>
+          ) : null}
+
+          {step === 2 ? (
+            <form
+              className="space-y-4"
+              onSubmit={passwordForm.handleSubmit((values) => finish.mutate(values))}
+              noValidate
+            >
+              <Field
+                label="Password"
+                hint={`At least ${MIN_PASSWORD} characters.`}
+                error={passwordErrors.password?.message}
+              >
+                <PasswordInput {...passwordForm.register('password')} autoComplete="new-password" />
+              </Field>
+
+              {/* Typing it twice matters more here than it usually does: one typo on this field
+                  is an account nobody can get back into without a reset. */}
+              <Field label="Confirm password" error={passwordErrors.confirm?.message}>
+                <PasswordInput {...passwordForm.register('confirm')} autoComplete="new-password" />
+              </Field>
+
+              {/* Asked here, with the account, because matching shows a practitioner to hospitals
+                  from the first day. Recorded as consent, so it can be withdrawn from Privacy,
+                  under My profile, later. */}
+              {!forStaff ? (
+                <label className="flex items-start gap-3 rounded-md border p-3 text-base leading-relaxed">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 size-6 shrink-0 accent-primary"
+                    checked={sharing}
+                    onChange={(event) => setSharing(event.target.checked)}
+                    aria-describedby="sharing-help"
+                  />
+                  <span>
+                    Show my verified credentials and profile to hospitals that are considering me
+                    for shifts.{' '}
+                    <span id="sharing-help" className="text-muted-foreground">
+                      Needed to be offered work. You can withdraw it at any time from Privacy, under
+                      My profile.
+                    </span>
+                  </span>
+                </label>
+              ) : null}
+
+              <Button
+                type="submit"
+                size="lg"
+                className="w-full"
+                disabled={!forStaff && !sharing}
+                loading={finish.isPending}
+                aria-describedby={!forStaff && !sharing ? 'create-help' : undefined}
+              >
+                Create my account
+              </Button>
+              {!forStaff && !sharing ? (
+                <p id="create-help" className="text-sm text-muted-foreground">
+                  Tick the box above to continue: showing your profile to hospitals is what lets you
+                  be offered shifts.
+                </p>
+              ) : null}
+
+              <p role="status" className="min-h-5 text-sm text-muted-foreground">
+                {finish.isPending ? 'Setting up your workspace — this takes a moment.' : ''}
+              </p>
+            </form>
+          ) : null}
+        </CardContent>
+      </Card>
+    </AuthShell>
   );
 }
 

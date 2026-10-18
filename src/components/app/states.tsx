@@ -84,7 +84,7 @@ export function describeError(error: unknown): ErrorDescription {
       kind: 'network',
       title: 'Could not reach Medilink',
       description:
-        'Check your connection and try again. This is a connection problem, not an empty list — nothing has changed.',
+        'Check your connection and try again. This is a connection problem, not an empty list.',
       retryable: true,
     };
   }

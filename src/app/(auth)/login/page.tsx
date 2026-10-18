@@ -1,187 +1,148 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
+import { z } from 'zod';
 import { useRouter } from 'next/navigation';
 import { useMutation } from '@tanstack/react-query';
 import { ShieldCheck, TriangleAlert } from 'lucide-react';
 import { api, ApiError, errorMessage } from '@/lib/ui/api';
+import { useZodForm } from '@/lib/ui/form';
 import { consoleFor, type SessionState } from '@/lib/ui/session';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { TextSizeControl } from '@/components/app/text-size-control';
+import { AuthLink, AuthShell } from '@/components/app/auth-shell';
+import { Field } from '@/components/app/field';
+import { PasswordInput } from '@/components/app/password-input';
 
 /**
  * Sign in. The session is a cookie the API sets, so there is nothing to store
  * here and no token in local storage to leak.
+ *
+ * The button is never dead. A person who has typed a number and not yet a password
+ * is told which one is missing when they press it, beside the field, rather than
+ * left to work out why a faded button will not respond.
  */
+const schema = z.object({
+  phone: z.string().trim().min(1, 'Enter the phone number you sign in with.'),
+  password: z.string().min(1, 'Enter your password.'),
+});
+
 export default function LoginPage() {
   const router = useRouter();
-  const [phone, setPhone] = useState('');
-  const [password, setPassword] = useState('');
+  const form = useZodForm(schema, { defaultValues: { phone: '', password: '' } });
+  const [failedOnce, setFailedOnce] = useState(false);
 
   const signIn = useMutation({
-    mutationFn: async () => {
-      await api.post('/api/v1/auth/login', { phone, password });
+    mutationFn: async (values: z.infer<typeof schema>) => {
+      await api.post('/api/v1/auth/login', { phone: values.phone, password: values.password });
       return api.get<SessionState>('/api/v1/auth/session');
     },
     onSuccess: (session) => {
       router.replace(consoleFor(session));
       router.refresh();
     },
+    onError: () => setFailedOnce(true),
   });
 
+  const { errors } = form.formState;
+
   return (
-    <main className="relative grid min-h-dvh lg:grid-cols-2">
-      <TextSizeControl className="absolute right-3 top-3 z-10" />
-      <div className="flex items-center justify-center px-6 py-12">
-        <div className="w-full max-w-sm">
-          <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-            Medilink
+    <AuthShell
+      title="Sign in"
+      description="One sign-in for practitioners, facility staff and Medilink staff. Your workspace opens according to your account."
+      aside={{
+        icon: ShieldCheck,
+        summary: 'About Medilink',
+        headline: 'Every decision on this platform has a name and a reason against it.',
+        points: [
+          {
+            title: 'Nothing closes itself',
+            description:
+              'No shift is marked a no-show, no credential is approved and no dispute is resolved without a person deciding it.',
+          },
+          {
+            title: 'Nothing is overwritten',
+            description:
+              'A correction keeps what it replaced. A refused excusal stays on the record next to the one that was granted.',
+          },
+        ],
+      }}
+      footer={
+        <>
+          <p>
+            New to Medilink? <AuthLink href="/register">Create a practitioner account</AuthLink>
           </p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight">Sign in</h1>
-          <p className="mt-1.5 text-sm text-muted-foreground">
-            Verified healthcare workforce management.
-          </p>
-
-          <Card className="mt-6">
-            <CardContent className="pt-6">
-              <form
-                className="space-y-4"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  signIn.mutate();
-                }}
-              >
-                {signIn.isError ? (
-                  <Alert variant="destructive">
-                    <TriangleAlert />
-                    <AlertDescription>
-                      {errorMessage(signIn.error)}
-                      {signIn.error instanceof ApiError && signIn.error.failure.code === 'account_locked' ? (
-                        <>
-                          {' '}
-                          <Link href="/forgot-password" className="font-medium underline underline-offset-4">
-                            Reset your password
-                          </Link>
-                        </>
-                      ) : null}
-                    </AlertDescription>
-                  </Alert>
-                ) : null}
-
-                <div className="space-y-1.5">
-                  <Label htmlFor="phone">Phone number</Label>
-                  <Input
-                    id="phone"
-                    value={phone}
-                    onChange={(event) => setPhone(event.target.value)}
-                    placeholder="+234 803 000 0000"
-                    autoComplete="username"
-                    inputMode="tel"
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="password">Password</Label>
-                    <Link
-                      href="/forgot-password"
-                      className="text-xs font-medium text-primary underline-offset-4 hover:underline"
-                    >
-                      Forgot your password?
-                    </Link>
-                  </div>
-                  <Input
-                    id="password"
-                    type="password"
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    autoComplete="current-password"
-                  />
-                </div>
-
-                <Button
-                  type="submit"
-                  className="w-full"
-                  loading={signIn.isPending}
-                  disabled={!phone || !password}
-                >
-                  Sign in
-                </Button>
-              </form>
-            </CardContent>
-          </Card>
-
-          <p className="mt-6 text-sm text-muted-foreground">
-            New to Medilink?{' '}
-            <Link
-              href="/register"
-              className="font-medium text-primary underline-offset-4 hover:underline"
-            >
-              Create a practitioner account
-            </Link>
-          </p>
-
-          <p className="mt-2 text-sm text-muted-foreground">
-            Stuck?{' '}
-            <Link href="/contact" className="font-medium text-primary underline-offset-4 hover:underline">
-              Contact a person
-            </Link>
-            {' · '}
-            <Link href="/terms" className="font-medium text-primary underline-offset-4 hover:underline">
-              Terms
-            </Link>
-            {' · '}
-            <Link href="/privacy" className="font-medium text-primary underline-offset-4 hover:underline">
-              Privacy notice
-            </Link>
-          </p>
-
-          <p className="mt-2 text-sm text-muted-foreground">
+          <p>
             Represent a hospital or clinic?{' '}
-            <Link
-              href="/register?as=facility"
-              className="font-medium text-primary underline-offset-4 hover:underline"
-            >
-              Register your facility
-            </Link>
+            <AuthLink href="/register?as=facility">Register your facility</AuthLink>
           </p>
+          <p>
+            Work at a facility already on Medilink?{' '}
+            <AuthLink href="/register?as=staff">Create a staff account</AuthLink>
+          </p>
+          <p>
+            Stuck? <AuthLink href="/contact">Contact a person</AuthLink>
+            {' · '}
+            <AuthLink href="/terms">Terms</AuthLink>
+            {' · '}
+            <AuthLink href="/privacy">Privacy notice</AuthLink>
+          </p>
+        </>
+      }
+    >
+      <Card>
+        <CardContent className="pt-6">
+          <form
+            className="space-y-4"
+            noValidate
+            onSubmit={form.handleSubmit((values) => signIn.mutate(values))}
+          >
+            {signIn.isError ? (
+              <Alert variant="destructive">
+                <TriangleAlert />
+                <AlertDescription>
+                  {errorMessage(signIn.error)}
+                  {signIn.error instanceof ApiError &&
+                  signIn.error.failure.code === 'account_locked' ? (
+                    <>
+                      {' '}
+                      <AuthLink href="/forgot-password">Reset your password</AuthLink>
+                    </>
+                  ) : null}
+                </AlertDescription>
+              </Alert>
+            ) : null}
 
-        </div>
-      </div>
+            <Field
+              label="Phone number"
+              hint="For example 0803 123 4567"
+              error={errors.phone?.message}
+            >
+              <Input
+                {...form.register('phone')}
+                autoComplete="username"
+                inputMode="tel"
+                placeholder="0803 123 4567"
+              />
+            </Field>
 
-      {/* A panel rather than a hero image: this is a tool, and the useful
-          thing to say beside a login box is what the tool guarantees. */}
-      <div className="hidden bg-primary p-12 text-primary-foreground lg:flex lg:flex-col lg:justify-center">
-        <ShieldCheck className="size-10 opacity-90" />
-        <p className="mt-6 max-w-md text-2xl font-semibold leading-snug tracking-tight">
-          Every decision on this platform has a name and a reason against it.
-        </p>
-        <div className="mt-8 space-y-4 text-sm leading-relaxed text-primary-foreground/85">
-          <Card className="border-white/15 bg-white/10 text-primary-foreground shadow-none">
-            <CardHeader className="p-4">
-              <CardTitle className="text-sm">Nothing closes itself</CardTitle>
-              <CardDescription className="text-primary-foreground/75">
-                No shift is marked a no-show, no credential is approved and no dispute is resolved
-                without a person deciding it.
-              </CardDescription>
-            </CardHeader>
-          </Card>
-          <Card className="border-white/15 bg-white/10 text-primary-foreground shadow-none">
-            <CardHeader className="p-4">
-              <CardTitle className="text-sm">Nothing is overwritten</CardTitle>
-              <CardDescription className="text-primary-foreground/75">
-                A correction keeps what it replaced. A refused excusal stays on the record next to
-                the one that was granted.
-              </CardDescription>
-            </CardHeader>
-          </Card>
-        </div>
-      </div>
-    </main>
+            <Field label="Password" error={errors.password?.message}>
+              <PasswordInput {...form.register('password')} autoComplete="current-password" />
+            </Field>
+
+            <Button type="submit" size="lg" className="w-full" loading={signIn.isPending}>
+              Sign in
+            </Button>
+
+            {/* The way out is offered at the moment it is needed, not only as a small link above. */}
+            <p className={failedOnce ? 'text-base font-medium' : 'text-base'}>
+              <AuthLink href="/forgot-password">Forgot your password?</AuthLink>
+            </p>
+          </form>
+        </CardContent>
+      </Card>
+    </AuthShell>
   );
 }
