@@ -167,6 +167,18 @@ async function subject() {
   const officer = await operator();
   await startRequest({ requestId: request.id, actorId: officer.id });
 
+  // An invitation to work for the hospital, waiting on the number they had. The number is freed by
+  // the erasure, so it must not stay answerable by whoever registers with it next.
+  await prisma.staffInvitation.create({
+    data: {
+      facilityId: world.facilityId,
+      phone: PHONE,
+      roleKey: 'facility_administrator',
+      invitedBy: world.schedulerId,
+      expiresAt: new Date(Date.now() + 7 * 24 * 3_600_000),
+    },
+  });
+
   return { world, userId, assignmentId: assignment.id, requestId: request.id, officerId: officer.id };
 }
 
@@ -330,6 +342,30 @@ describe('erasing a person', () => {
     expect(acceptance.ipAddress).toBeNull();
     expect(acceptance.userAgent).toBeNull();
     expect((await prisma.screeningResult.findUniqueOrThrow({ where: { userId: s.userId } })).notes).toBeNull();
+  });
+
+  it('deletes an invitation to work for a facility that was waiting on their number, and no one else’s', async () => {
+    const s = await subject();
+    const other = await prisma.staffInvitation.create({
+      data: {
+        facilityId: s.world.facilityId,
+        phone: '+2348037770456',
+        roleKey: 'facility_administrator',
+        invitedBy: s.world.schedulerId,
+        expiresAt: new Date(Date.now() + 7 * 24 * 3_600_000),
+      },
+    });
+    expect(await prisma.staffInvitation.count({ where: { phone: PHONE } })).toBe(1);
+
+    await executeErasure({ requestId: s.requestId, actorId: s.officerId });
+
+    expect(await prisma.staffInvitation.count({ where: { phone: PHONE } })).toBe(0);
+    // Somebody else's invitation is untouched.
+    expect(await prisma.staffInvitation.findUnique({ where: { id: other.id } })).not.toBeNull();
+    // And the request says it happened, without the number.
+    const request = await prisma.dataSubjectRequest.findUniqueOrThrow({ where: { id: s.requestId } });
+    expect(request.outcome ?? '').toContain('1 invitations to work for a facility');
+    expect(request.outcome ?? '').not.toContain(PHONE_DIGITS);
   });
 
   it('keeps the shift, the money and the audit trail, which no longer name them', async () => {

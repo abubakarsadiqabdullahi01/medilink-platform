@@ -146,6 +146,15 @@ export async function executeErasure(input: {
     });
     count(replaced, 'account', 1);
 
+    // --- Invitations to work for a facility addressed to the number they had. The number is the
+    // only thing on one that names them, and it is freed for anybody to register again, so an
+    // invitation still waiting must not be answerable by whoever takes it next.
+    count(
+      deleted,
+      'invitations to work for a facility',
+      (await tx.staffInvitation.deleteMany({ where: { phone: user.phone } })).count,
+    );
+
     // --- Every way of signing in, and the record of attempts to.
     count(deleted, 'sessions', (await tx.session.deleteMany({ where: { userId: user.id } })).count);
     count(deleted, 'devices', (await tx.device.deleteMany({ where: { userId: user.id } })).count);

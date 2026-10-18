@@ -60,6 +60,12 @@ export interface Tenant {
   staffGrantId: string;
   /** Another colleague's, for the route that changes a role: the revoke above ends its grant first. */
   roleChangeGrantId: string;
+  /** Somebody this hospital has invited to work for it, and the number the invitation waits on. */
+  staffInviteeId: string;
+  staffInviteePhone: string;
+  staffInvitationId: string;
+  /** A second waiting invitation, for the route that cancels one: answering the first ends it. */
+  cancelStaffInvitationId: string;
   credentialId: string;
   /** A credential type nobody has submitted yet, for a fresh submission. */
   docTypeId: string;
@@ -82,6 +88,9 @@ export interface TenantWorld {
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
+
+/** Numbers for invitations nobody has answered, so a person cannot be mistaken for the one invited. */
+let nobodyHoldsThisNumber = 0;
 
 async function buildTenant(label: string): Promise<Tenant> {
   const world = await buildBookingWorld({ headcount: 2 });
@@ -120,6 +129,28 @@ async function buildTenant(label: string): Promise<Tenant> {
     permissions: ROLE_PERMISSIONS.facility_administrator ?? [],
     scopeType: 'FACILITY',
     scopeId: facility.id,
+  });
+
+  // A person this hospital has invited to work for it, who has verified the number it was sent to,
+  // and a second invitation to a number nobody holds yet.
+  const staffInvitee = await createUser({ fullName: `${label} Staff Invitee` });
+  const staffInvitation = await prisma.staffInvitation.create({
+    data: {
+      facilityId: facility.id,
+      phone: staffInvitee.phone,
+      roleKey: 'facility_administrator',
+      invitedBy: ownerId,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    },
+  });
+  const cancelStaffInvitation = await prisma.staffInvitation.create({
+    data: {
+      facilityId: facility.id,
+      phone: `+23480666${String((nobodyHoldsThisNumber += 1)).padStart(5, '0')}`,
+      roleKey: 'facility_administrator',
+      invitedBy: ownerId,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    },
   });
 
   const now = Date.now();
@@ -436,6 +467,10 @@ async function buildTenant(label: string): Promise<Tenant> {
     payoutId: payout.id,
     staffGrantId: staffGrant.id,
     roleChangeGrantId: roleChangeGrant.id,
+    staffInviteeId: staffInvitee.id,
+    staffInviteePhone: staffInvitee.phone,
+    staffInvitationId: staffInvitation.id,
+    cancelStaffInvitationId: cancelStaffInvitation.id,
     credentialId: credential.id,
     docTypeId: docType.id,
     queriedCredentialId: queried.id,

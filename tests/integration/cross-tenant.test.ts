@@ -80,9 +80,10 @@ interface Case {
   /**
    * Who the rightful caller is. `same`: the same role in tenant B. `admin`: the
    * platform, for routes only the platform may call. `invitee`: the person an
+   * invitation was sent to. `holder`: the person who holds the number a staff
    * invitation was sent to.
    */
-  control: 'same' | 'admin' | 'invitee';
+  control: 'same' | 'admin' | 'invitee' | 'holder';
   /**
    * Who of the rightful side is let through, when that is fewer than the roles
    * that attack. The dispute routes guard on the caller's own scope, so a
@@ -412,6 +413,21 @@ const CASES: Case[] = [
     },
   })),
 
+  onFacility('staff-invitations/[id]/cancel', 'POST', (c) => ({
+    ...ID(c.t.cancelStaffInvitationId),
+    body: { facilityId: c.declare },
+  })),
+
+  // Anybody signed in is a stranger to somebody else's invitation: it answers to the number it was
+  // sent to, and to no one who merely knows its identifier.
+  {
+    route: 'staff-invitations/[id]/respond',
+    method: 'POST',
+    attackers: ['owner', 'practitioner'],
+    control: 'holder',
+    request: (c) => ({ ...ID(c.t.staffInvitationId), body: { decision: 'decline' } }),
+  },
+
   // ── incidents ────────────────────────────────────────────────────────────
   onPlatform('incidents/[id]/close', 'POST', (c) => ({
     ...ID(c.t.incidentId),
@@ -606,6 +622,13 @@ const SCOPED: ScopedCase[] = [
     request: (c) => ({ query: { scopeType: 'FACILITY', scopeId: c.declare } }),
   },
   {
+    route: 'staff-invitations',
+    method: 'GET',
+    role: 'owner',
+    listing: true,
+    request: (c) => ({ query: { facilityId: c.declare } }),
+  },
+  {
     route: 'grants/find',
     method: 'GET',
     role: 'owner',
@@ -675,6 +698,14 @@ const SCOPED_WRITES: ScopedCase[] = [
         scopeId: c.declare,
         reason: 'Removing somebody from a hospital that is not mine.',
       },
+    }),
+  },
+  {
+    route: 'staff-invitations',
+    method: 'POST',
+    role: 'owner',
+    request: (c) => ({
+      body: { facilityId: c.declare, phone: '08036660099', roleKey: 'facility_administrator' },
     }),
   },
   {
@@ -795,6 +826,8 @@ const NO_TENANT_IDENTIFIER: Record<string, string> = {
   holidays: 'platform-only calendar; takes no identifier',
   'incidents/queue': 'the platform’s queue; takes no identifier',
   invitations: 'the caller’s own invitations, read from the session',
+  'staff-invitations/mine':
+    'the caller’s own invitations, read from the session and the number they have verified; staff-invitations.test.ts attacks it',
   'me/data-requests': 'the caller’s own record, read from the session',
   'me/erasure': 'the caller’s own record, read from the session',
   'me/export': 'the caller’s own record, read from the session',
@@ -991,9 +1024,10 @@ function errorCode(body: unknown): string {
   return (body as { error?: { code?: string } } | null)?.error?.code ?? '';
 }
 
-function userFor(t: Tenant, role: Role | 'invitee'): string {
+function userFor(t: Tenant, role: Role | 'invitee' | 'holder'): string {
   if (role === 'owner') return t.ownerId;
   if (role === 'invitee') return t.inviteeId;
+  if (role === 'holder') return t.staffInviteeId;
   return t.practitionerId;
 }
 
@@ -1002,7 +1036,7 @@ function markers(t: Tenant): string[] {
   const ids = Object.values(t).filter(
     (value): value is string => typeof value === 'string' && /^[0-9a-f-]{36}$/.test(value),
   );
-  return [...ids, t.label, t.practitionerPhone];
+  return [...ids, t.label, t.practitionerPhone, t.staffInviteePhone];
 }
 
 function leaks(text: string, t: Tenant): string[] {
@@ -1223,7 +1257,9 @@ describe('the controls', () => {
           ? [{ who: 'the platform', userId: world.platformAdminId, role: 'owner' }]
           : c.control === 'invitee'
             ? [{ who: 'the invitee', userId: b.inviteeId, role: 'practitioner' }]
-            : (c.controlRoles ?? c.attackers).map((role) => ({
+            : c.control === 'holder'
+              ? [{ who: 'the holder of the number', userId: b.staffInviteeId, role: 'practitioner' }]
+              : (c.controlRoles ?? c.attackers).map((role) => ({
                 who: `${role} B`,
                 userId: userFor(b, role),
                 role,

@@ -27,6 +27,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
 import { ReturnedNotice } from '@/app/practitioner/profile/returned-notice';
 import { PageHeader } from '@/components/app/page-shell';
+import { MyInvitations } from '@/components/app/my-invitations';
 import { formatWhen } from '@/components/app/format';
 
 interface Assignment {
@@ -168,6 +169,8 @@ function Overview() {
         title={`Hello, ${session.user.fullName.split(' ')[0]}`}
         description="Whether you can be offered work, what is waiting on an answer, and where you are next due."
       />
+
+      <MyInvitations />
 
       {/* Width becomes columns, not longer lines: status on the left, the two
           figures beside it, and on a phone they simply stack. */}

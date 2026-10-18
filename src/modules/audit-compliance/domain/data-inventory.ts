@@ -72,6 +72,12 @@ export const PURGE_RULES: PurgeRule[] = [
     after: 'delivery. Entries that failed or gave up are never purged: somebody still has to look at them.',
   },
   {
+    key: 'staff_invitations',
+    what: 'Invitations to work for a facility, with the phone number invited',
+    days: 90,
+    after: 'it ended: answered, cancelled or run out. A pending one is never touched. The facts of it stay in the audit trail, which holds the role and the dates and never the number.',
+  },
+  {
     key: 'abandoned_uploads',
     what: 'Files requested for upload that were never confirmed (the record of the request stays, marked deleted)',
     days: 7,
@@ -142,6 +148,22 @@ export const DATA_CATEGORIES: DataCategory[] = [
     retention:
       'Kept. A revoked grant stays, stamped, so past access can be reconstructed. Erasure revokes a person\'s grants and keeps the rows.',
     enforcement: 'kept',
+  },
+  {
+    key: 'staff_invitations',
+    name: 'Invitations to work for a facility',
+    tables: ['identity.staff_invitations'],
+    holds:
+      'The phone number a facility invited, which may belong to somebody who has not registered; the role offered, who sent it, when it runs out and how it was answered; whether the invitation text reached the number and, if not, why.',
+    purpose:
+      'To let a facility add a colleague with their agreement, and to answer who invited whom and what became of it.',
+    basis:
+      'Legitimate interest: a facility asked to add a colleague and the person is told by one text and may ignore it. Counsel to confirm for the number of somebody who never registers.',
+    owner: 'Operations',
+    retention:
+      'Deleted by the purge job (see below) once the invitation has ended. Erasure of the person it was for ends a waiting one at once and removes the number. The audit trail keeps the role and the dates and never the number.',
+    enforcement: 'purge_job',
+    purges: ['staff_invitations'],
   },
   {
     key: 'sign_in_codes',

@@ -175,6 +175,30 @@ export const MESSAGES: MessageKind[] = [
     names: 'The facility’s name. Never who was removed, who did it, or why: the Staff page shows who.',
   },
   {
+    kind: 'staff.invited',
+    trigger: { event: 'StaffInvited' },
+    to: 'The number a facility invited, which may belong to nobody registered yet',
+    when: 'A facility invites somebody to work for it. Not if the invitation was answered, cancelled or ran out before the worker ran.',
+    once: 'Once per invitation; a redelivered event sends nothing more. A text the gateway refused is retried until it goes.',
+    names: 'The facility’s name and the role, in fixed words: nothing the facility typed, no link and no number. The one message not kept in an inbox, since the number may have no account; the invitation records whether it went.',
+  },
+  {
+    kind: 'staff.invitation_accepted',
+    trigger: { event: 'StaffInvitationAnswered' },
+    to: 'The person who sent the invitation',
+    when: 'The person invited accepts, and the role is given.',
+    once: 'Once per invitation.',
+    names: 'The facility’s name and the role. Never who accepted: the Staff page shows who joined.',
+  },
+  {
+    kind: 'staff.invitation_declined',
+    trigger: { event: 'StaffInvitationAnswered' },
+    to: 'The person who sent the invitation',
+    when: 'The person invited declines.',
+    once: 'Once per invitation.',
+    names: 'The facility’s name and the role. Never who declined.',
+  },
+  {
     kind: 'dispute.opened',
     trigger: { event: 'DisputeOpened' },
     to: 'The other side of the case, and everyone who holds `dispute.manage` across the platform. Not the person who opened it.',
@@ -408,6 +432,8 @@ export const EVENT_COVERAGE: Record<EventKey, EventCoverage> = {
   ClinicalIncidentReported: { kinds: ['incident.severe'] },
   SuggestionAnswered: { kinds: ['suggestion.answered'] },
   StaffAccessRemoved: { kinds: ['staff.access_removed', 'staff.access_removed_owners'] },
+  StaffInvited: { kinds: ['staff.invited'] },
+  StaffInvitationAnswered: { kinds: ['staff.invitation_accepted', 'staff.invitation_declined'] },
 };
 
 const TRIGGER_LABEL = (trigger: MessageKind['trigger']): string =>
@@ -430,7 +456,7 @@ export function renderMatrix(): string {
     '',
     '## How a message goes',
     '',
-    '- **One channel today: SMS.** Every message is also kept as a row in the person’s in-app inbox, which is the same text and is what the bell shows. There is no email, push or WhatsApp (`NOT-09`) and no preference to switch a message off (`NOT-08`): every message below is sent to everyone it names.',
+    '- **One channel today: SMS.** Every message is also kept as a row in the person’s in-app inbox, which is the same text and is what the bell shows. The one exception is the invitation text (`staff.invited`), which goes to a number that may have no account: it is recorded on the invitation instead, with whether the gateway took it. There is no email, push or WhatsApp (`NOT-09`) and no preference to switch a message off (`NOT-08`): every message below is sent to everyone it names.',
     '- **A text that does not go is retried.** An event’s handler throws when a text failed, after trying everybody, so the outbox retries the event with backoff and parks it as a dead letter an operator can see. A scheduled job fails the same way and its next run reaches whoever was missed. A second gateway takes over when the first fails, if one is configured.',
     '- **Once is once.** Each message is checked against what the person has already been sent before it goes, so a redelivered event or a second run of a job sends nothing more.',
     '- **Names, not arguments.** Every text goes to a phone anybody may pick up, so none carries a patient, a clinical summary, a person’s full name where initials do, or what was argued in a dispute.',

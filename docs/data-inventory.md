@@ -16,6 +16,7 @@ A scheduled job (`retention.purge_sweep`, daily) deletes only what no obligation
 | Sessions that have ended | 30 days | it expired or was signed out. A live session is never touched. |
 | The log of sign-in attempts, with the number or identifier typed and the network address | 90 days | the attempt. The lockout looks back minutes, and a disputed lockout is raised within weeks. |
 | Entries in the background queue that were delivered | 30 days | delivery. Entries that failed or gave up are never purged: somebody still has to look at them. |
+| Invitations to work for a facility, with the phone number invited | 90 days | it ended: answered, cancelled or run out. A pending one is never touched. The facts of it stay in the audit trail, which holds the role and the dates and never the number. |
 | Files requested for upload that were never confirmed (the record of the request stays, marked deleted) | 7 days | the request. The link to upload expires within minutes; a week is long enough for a form left half filled to be finished. |
 
 ## Categories
@@ -39,6 +40,16 @@ A scheduled job (`retention.purge_sweep`, daily) deletes only what no obligation
 - **Owner:** Platform engineering
 - **Retention today:** Kept. A revoked grant stays, stamped, so past access can be reconstructed. Erasure revokes a person's grants and keeps the rows.
 - **What removes it:** Kept; nothing deletes it
+
+### Invitations to work for a facility
+
+- **Tables:** `identity.staff_invitations`
+- **Holds:** The phone number a facility invited, which may belong to somebody who has not registered; the role offered, who sent it, when it runs out and how it was answered; whether the invitation text reached the number and, if not, why.
+- **Purpose:** To let a facility add a colleague with their agreement, and to answer who invited whom and what became of it.
+- **Proposed basis:** Legitimate interest: a facility asked to add a colleague and the person is told by one text and may ignore it. Counsel to confirm for the number of somebody who never registers.
+- **Owner:** Operations
+- **Retention today:** Deleted by the purge job (see below) once the invitation has ended. Erasure of the person it was for ends a waiting one at once and removes the number. The audit trail keeps the role and the dates and never the number.
+- **What removes it:** Deleted by a scheduled job (90 days)
 
 ### One-time codes
 

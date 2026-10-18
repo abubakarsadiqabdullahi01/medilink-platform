@@ -68,6 +68,7 @@ export const EXPORT_COVERAGE: Record<string, ExportCoverage> = {
   'identity.otp_codes': { excluded: 'oneTimeCodes' },
   'identity.sessions': { section: 'sessions' },
   'identity.login_attempts': { section: 'signInAttempts', limits: ['networkAddresses'] },
+  'identity.staff_invitations': { section: 'staffInvitations' },
 
   'practitioners.practitioner_profiles': { section: 'profile' },
   'practitioners.professional_registrations': { section: 'professionalRegistrations' },
