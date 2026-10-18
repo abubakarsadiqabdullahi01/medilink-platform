@@ -28,6 +28,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { DocumentUpload, type UploadedDocument } from '@/components/app/document-upload';
 import { StatusBadge } from '@/components/app/status-badge';
 import { PageHeader } from '@/components/app/page-shell';
+import { ErrorState } from '@/components/app/states';
 
 /** The facility as /api/v1/facilities/:id returns it. */
 interface FacilityRecord {
@@ -159,13 +160,16 @@ export default function FacilityProfilePage() {
     return (
       <>
         <PageHeader title="Facility profile" description="What Medilink holds about this facility." />
-        <Alert variant="destructive">
-          <TriangleAlert />
-          <AlertDescription>The facility could not be loaded.</AlertDescription>
-        </Alert>
+        <ErrorState
+          error={facility.error}
+          onRetry={() => void facility.refetch()}
+          retrying={facility.isFetching}
+        />
       </>
     );
   }
+
+  const referenceLabel = registrationOption(registrationKind).referenceLabel;
 
   return (
     <>
@@ -206,12 +210,16 @@ export default function FacilityProfilePage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-1.5">
-              <Label>Name</Label>
+              <p className="text-sm font-medium leading-none">Name</p>
               <p className="text-sm">{record.name}</p>
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="cac">{registrationOption(registrationKind).referenceLabel}</Label>
+              {refused && canEdit ? (
+                <Label htmlFor="cac">{referenceLabel}</Label>
+              ) : (
+                <p className="text-sm font-medium leading-none">{referenceLabel}</p>
+              )}
               {refused && canEdit ? (
                 <>
                   <Select
@@ -306,7 +314,7 @@ export default function FacilityProfilePage() {
             </div>
 
             <div className="space-y-2">
-              <Label>Licence document</Label>
+              <p className="text-sm font-medium leading-none">Licence document</p>
               {record.licenceObjectKey && !licence ? (
                 <div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm">
                   <span>A licence document is on file.</span>

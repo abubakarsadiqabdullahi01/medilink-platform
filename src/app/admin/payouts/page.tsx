@@ -23,6 +23,7 @@ import { AmountFigure } from '@/components/app/amount-figure';
 import { PayoutAccountPanel, type AccountState } from '@/components/app/payout-account-panel';
 import { StatusBadge } from '@/components/app/status-badge';
 import { Detail, DetailGrid, EmptyState, PageHeader, QueueSkeleton } from '@/components/app/page-shell';
+import { ErrorState } from '@/components/app/states';
 import { useStepUp } from '@/components/app/step-up';
 import { formatDate, formatNaira, formatWhen } from '@/components/app/format';
 import { lagosDate } from '@/lib/lagos-date';
@@ -288,10 +289,11 @@ export default function PayoutsPage() {
         ) : results.isPending ? (
           <QueueSkeleton rows={2} />
         ) : results.isError ? (
-          <Alert variant="destructive">
-            <TriangleAlert />
-            <AlertDescription>The directory could not be searched.</AlertDescription>
-          </Alert>
+          <ErrorState
+            error={results.error}
+            onRetry={() => void results.refetch()}
+            retrying={results.isFetching}
+          />
         ) : hits.length === 0 ? (
           <EmptyState
             icon={<HandCoins />}
@@ -502,10 +504,11 @@ export default function PayoutsPage() {
       {payouts.isPending ? (
         <QueueSkeleton rows={2} />
       ) : payouts.isError ? (
-        <Alert variant="destructive">
-          <TriangleAlert />
-          <AlertDescription>Their payouts could not be loaded.</AlertDescription>
-        </Alert>
+        <ErrorState
+          error={payouts.error}
+          onRetry={() => void payouts.refetch()}
+          retrying={payouts.isFetching}
+        />
       ) : payouts.data.payouts.length === 0 ? (
         <EmptyState icon={<HandCoins />} title="No payouts for this practitioner" />
       ) : (

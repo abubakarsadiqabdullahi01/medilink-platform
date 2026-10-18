@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { TriangleAlert } from 'lucide-react';
 import { api, errorMessage } from '@/lib/ui/api';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -20,6 +19,7 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { PageHeader, QueueSkeleton } from '@/components/app/page-shell';
+import { ErrorState } from '@/components/app/states';
 import { formatDate } from '@/components/app/format';
 
 interface Version {
@@ -113,10 +113,11 @@ export default function AgreementsPage() {
         {versions.isPending ? (
           <QueueSkeleton rows={3} />
         ) : versions.isError ? (
-          <Alert variant="destructive">
-            <TriangleAlert />
-            <AlertDescription>The agreements could not be loaded.</AlertDescription>
-          </Alert>
+          <ErrorState
+            error={versions.error}
+            onRetry={() => void versions.refetch()}
+            retrying={versions.isFetching}
+          />
         ) : (
           <div className="grid gap-4 lg:grid-cols-3">
             {KINDS.map((type) => {
@@ -194,9 +195,9 @@ export default function AgreementsPage() {
           <CardContent className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
-                <Label>Kind</Label>
+                <Label htmlFor="agreement-kind">Kind</Label>
                 <Select value={kind} onValueChange={setKind}>
-                  <SelectTrigger>
+                  <SelectTrigger id="agreement-kind">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>

@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { StatusBadge } from '@/components/app/status-badge';
+import { ErrorState } from '@/components/app/states';
 import { useStepUp } from '@/components/app/step-up';
 import { formatDate } from '@/components/app/format';
 
@@ -91,10 +92,12 @@ export function MyPayoutAccount() {
         </CardHeader>
         <CardContent className="space-y-4">
           {mine.isError ? (
-            <Alert variant="destructive">
-              <TriangleAlert />
-              <AlertDescription>Your payout account could not be loaded.</AlertDescription>
-            </Alert>
+            <ErrorState
+              error={mine.error}
+              onRetry={() => void mine.refetch()}
+              retrying={mine.isFetching}
+              compact
+            />
           ) : null}
 
           {data && !data.verified && !data.pending ? (

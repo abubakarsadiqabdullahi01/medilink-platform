@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, ScrollText, TriangleAlert, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ScrollText, X } from 'lucide-react';
 import { api } from '@/lib/ui/api';
 import { keys, timing } from '@/lib/ui/query-keys';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -28,6 +28,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { EmptyState, PageHeader } from '@/components/app/page-shell';
+import { ErrorState } from '@/components/app/states';
 import { actionLabel, formatWhen, recordLabel, shortId } from '@/components/app/format';
 import { AUDIT_AREA_LABELS, AUDIT_AREA_VALUES } from '@/modules/audit-compliance/domain/audit-areas';
 
@@ -142,7 +143,7 @@ export default function AuditPage() {
         <CardContent className="pt-6">
           <div className="flex flex-wrap items-end gap-3">
             <div className="min-w-[200px] space-y-1.5">
-              <Label>Area</Label>
+              <Label htmlFor="audit-area">Area</Label>
               <Select
                 value={area}
                 onValueChange={(value) => {
@@ -150,7 +151,7 @@ export default function AuditPage() {
                   startOver();
                 }}
               >
-                <SelectTrigger>
+                <SelectTrigger id="audit-area">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -233,10 +234,11 @@ export default function AuditPage() {
           </div>
         </Card>
       ) : queue.isError ? (
-        <Alert variant="destructive">
-          <TriangleAlert />
-          <AlertDescription>The trail could not be loaded.</AlertDescription>
-        </Alert>
+        <ErrorState
+          error={queue.error}
+          onRetry={() => void queue.refetch()}
+          retrying={queue.isFetching}
+        />
       ) : rows.length === 0 ? (
         <EmptyState
           icon={<ScrollText />}

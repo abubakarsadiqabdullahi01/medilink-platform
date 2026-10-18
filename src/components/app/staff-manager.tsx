@@ -3,7 +3,7 @@
 import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { CircleCheck, LockKeyhole, Mail, Search, TriangleAlert, UserPlus, Users } from 'lucide-react';
+import { CircleCheck, LockKeyhole, Mail, Search, UserPlus, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { api, ApiError, errorMessage } from '@/lib/ui/api';
 import { useSession } from '@/lib/ui/session';
@@ -24,6 +24,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { EmptyState, QueueSkeleton } from '@/components/app/page-shell';
 import { StatusBadge } from '@/components/app/status-badge';
+import { ErrorState } from '@/components/app/states';
 import { StepUpDialog, isStepUpRequired } from '@/components/app/step-up';
 import { formatDate } from '@/components/app/format';
 
@@ -497,10 +498,12 @@ export function StaffManager({
               {invitations.isPending ? (
                 <QueueSkeleton rows={1} />
               ) : invitations.isError ? (
-                <Alert variant="destructive">
-                  <TriangleAlert />
-                  <AlertDescription>The invitations could not be loaded.</AlertDescription>
-                </Alert>
+                <ErrorState
+                  error={invitations.error}
+                  onRetry={() => void invitations.refetch()}
+                  retrying={invitations.isFetching}
+                  compact
+                />
               ) : (
                 <InvitationList
                   rows={invitations.data?.invitations ?? []}
@@ -520,10 +523,12 @@ export function StaffManager({
             {grants.isPending ? (
               <QueueSkeleton rows={2} />
             ) : grants.isError ? (
-              <Alert variant="destructive">
-                <TriangleAlert />
-                <AlertDescription>The staff list could not be loaded.</AlertDescription>
-              </Alert>
+              <ErrorState
+                error={grants.error}
+                onRetry={() => void grants.refetch()}
+                retrying={grants.isFetching}
+                compact
+              />
             ) : live.length === 0 ? (
               <EmptyState icon={<Users />} title="Nobody yet" description="Add someone above." />
             ) : (
@@ -544,6 +549,7 @@ export function StaffManager({
                         <Button
                           variant="outline"
                           size="sm"
+                          aria-label={`Change role for ${row.fullName}`}
                           onClick={() => {
                             setChanging(row);
                             setNewRoleKey('');
@@ -552,13 +558,19 @@ export function StaffManager({
                         >
                           Change role
                         </Button>
-                        <Button variant="outline" size="sm" onClick={() => setRevoking(row)}>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          aria-label={`Remove access for ${row.fullName}`}
+                          onClick={() => setRevoking(row)}
+                        >
                           Remove access
                         </Button>
                         <Button
                           variant="outline"
                           size="sm"
-                          className="text-destructive"
+                          className="text-destructive-text"
+                          aria-label={`Remove all access now for ${row.fullName}`}
                           onClick={() => {
                             setRemovingAll(row);
                             setEmergencyReason('');

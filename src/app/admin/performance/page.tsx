@@ -1,10 +1,9 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { Gauge, TriangleAlert } from 'lucide-react';
+import { Gauge } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { api } from '@/lib/ui/api';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -17,6 +16,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { EmptyState, PageHeader } from '@/components/app/page-shell';
+import { ErrorState } from '@/components/app/states';
 import { formatWhen } from '@/components/app/format';
 
 interface Report {
@@ -69,10 +69,11 @@ export default function PerformancePage() {
       {report.isPending ? (
         <Skeleton className="h-64 w-full" />
       ) : report.isError ? (
-        <Alert variant="destructive">
-          <TriangleAlert />
-          <AlertDescription>The performance figures could not be loaded.</AlertDescription>
-        </Alert>
+        <ErrorState
+          error={report.error}
+          onRetry={() => void report.refetch()}
+          retrying={report.isFetching}
+        />
       ) : report.data.routes.length === 0 ? (
         <EmptyState
           icon={<Gauge />}

@@ -26,6 +26,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { PageHeader, QueueSkeleton } from '@/components/app/page-shell';
+import { ErrorState } from '@/components/app/states';
 import { formatDate, formatNaira, parseNairaToKobo } from '@/components/app/format';
 
 interface Floor {
@@ -110,10 +111,11 @@ export default function RateFloorsPage() {
       {overview.isPending ? (
         <QueueSkeleton rows={3} />
       ) : overview.isError ? (
-        <Alert variant="destructive">
-          <TriangleAlert />
-          <AlertDescription>The pay floors could not be loaded.</AlertDescription>
-        </Alert>
+        <ErrorState
+          error={overview.error}
+          onRetry={() => void overview.refetch()}
+          retrying={overview.isFetching}
+        />
       ) : (
         <>
           {overview.data.missing.length > 0 ? (
@@ -142,7 +144,7 @@ export default function RateFloorsPage() {
             </CardHeader>
             <CardContent className="flex flex-wrap items-end gap-3">
               <div className="min-w-[12rem] space-y-1.5">
-                <Label>Profession</Label>
+                <Label htmlFor="floor-profession">Profession</Label>
                 <Select
                   value={categoryKey}
                   onValueChange={(value) => {
@@ -151,7 +153,7 @@ export default function RateFloorsPage() {
                     setLevelKey(EVERY);
                   }}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger id="floor-profession">
                     <SelectValue placeholder="Choose…" />
                   </SelectTrigger>
                   <SelectContent>
@@ -164,9 +166,9 @@ export default function RateFloorsPage() {
                 </Select>
               </div>
               <div className="min-w-[12rem] space-y-1.5">
-                <Label>Specialty</Label>
+                <Label htmlFor="floor-specialty">Specialty</Label>
                 <Select value={specialtyKey} onValueChange={setSpecialtyKey} disabled={!category}>
-                  <SelectTrigger>
+                  <SelectTrigger id="floor-specialty">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -181,9 +183,9 @@ export default function RateFloorsPage() {
               </div>
               {(category?.levels ?? []).length > 0 ? (
                 <div className="min-w-[12rem] space-y-1.5">
-                  <Label>Level</Label>
+                  <Label htmlFor="floor-level">Level</Label>
                   <Select value={levelKey} onValueChange={setLevelKey}>
-                    <SelectTrigger>
+                    <SelectTrigger id="floor-level">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -198,9 +200,9 @@ export default function RateFloorsPage() {
                 </div>
               ) : null}
               <div className="space-y-1.5">
-                <Label>Shift</Label>
+                <Label htmlFor="floor-shift">Shift</Label>
                 <Select value={shiftType} onValueChange={(value) => setShiftType(value as 'day' | 'night')}>
-                  <SelectTrigger>
+                  <SelectTrigger id="floor-shift">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>

@@ -21,6 +21,7 @@ export function SuccessScreen({
   description,
   steps,
   actions,
+  bare = false,
 }: {
   title: string;
   description?: ReactNode;
@@ -28,14 +29,20 @@ export function SuccessScreen({
   steps?: ReactNode[];
   /** The next thing to do: usually one primary link and one quiet one. */
   actions?: ReactNode;
+  /** Without its own card, for use inside a dialog that already is one. */
+  bare?: boolean;
 }) {
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     heading.current?.focus();
   }, []);
 
+  const Frame = bare ? 'div' : Card;
   return (
-    <Card role="status" className="mx-auto max-w-xl space-y-5 p-6 sm:p-8">
+    <Frame
+      role="status"
+      className={bare ? 'space-y-5' : 'mx-auto max-w-xl space-y-5 p-6 sm:p-8'}
+    >
       <div className="flex items-start gap-3">
         <CircleCheck className="mt-1 size-7 shrink-0 text-success" aria-hidden="true" />
         <div className="min-w-0">
@@ -71,6 +78,6 @@ export function SuccessScreen({
       ) : null}
 
       {actions ? <div className="flex flex-wrap items-center gap-3 pt-1">{actions}</div> : null}
-    </Card>
+    </Frame>
   );
 }

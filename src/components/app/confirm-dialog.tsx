@@ -42,6 +42,7 @@ export function ConfirmDialog({
   confirmLabel,
   destructive = false,
   loading = false,
+  confirmDisabled = false,
   onConfirm,
   children,
 }: {
@@ -57,6 +58,8 @@ export function ConfirmDialog({
   confirmLabel: string;
   destructive?: boolean;
   loading?: boolean;
+  /** For a decision that needs something first — a reason. Say what it needs beside the field. */
+  confirmDisabled?: boolean;
   onConfirm: () => void;
   /** Extra fields the decision needs: a reason, a step-up prompt. */
   children?: ReactNode;
@@ -124,6 +127,7 @@ export function ConfirmDialog({
             variant={destructive ? 'destructive' : 'default'}
             onClick={onConfirm}
             loading={loading}
+            disabled={confirmDisabled}
           >
             {confirmLabel}
           </Button>

@@ -116,6 +116,24 @@ export default function RegisterFacilityPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {reference.isError ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <p role="alert" className="text-sm text-destructive-text">
+                The lists of facility types and states could not be loaded, so Type and State cannot
+                be chosen yet.
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                loading={reference.isFetching}
+                onClick={() => void reference.refetch()}
+              >
+                Try again
+              </Button>
+            </div>
+          ) : null}
+
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1.5 sm:col-span-2">
               <Label htmlFor="name">Facility name</Label>
@@ -128,9 +146,9 @@ export default function RegisterFacilityPage() {
             </div>
 
             <div className="space-y-1.5">
-              <Label>Type</Label>
+              <Label htmlFor="facility-type">Type</Label>
               <Select value={facilityTypeId} onValueChange={setFacilityTypeId}>
-                <SelectTrigger>
+                <SelectTrigger id="facility-type">
                   <SelectValue placeholder="Choose one" />
                 </SelectTrigger>
                 <SelectContent>

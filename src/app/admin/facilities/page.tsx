@@ -2,12 +2,11 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Building2, ChevronLeft, ChevronRight, Search, TriangleAlert } from 'lucide-react';
+import { Building2, ChevronLeft, ChevronRight, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { api } from '@/lib/ui/api';
 import { useReference } from '@/lib/ui/reference';
 import { useCan } from '@/lib/ui/session';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { NewFacilityDialog } from './new-facility-dialog';
@@ -24,6 +23,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
 import { EmptyState, PageHeader } from '@/components/app/page-shell';
+import { ErrorState } from '@/components/app/states';
 import { ScreenTransition } from '@/components/app/motion';
 import { formatAgo } from '@/components/app/format';
 import { FacilityDetail, type Facility } from './facility-detail';
@@ -138,7 +138,7 @@ export default function FacilitiesPage() {
             </div>
 
             <div className="min-w-[180px] space-y-1.5">
-              <Label>State</Label>
+              <Label htmlFor="facility-state">State</Label>
               <Select
                 value={stateId}
                 onValueChange={(value) => {
@@ -146,7 +146,7 @@ export default function FacilitiesPage() {
                   startOver();
                 }}
               >
-                <SelectTrigger>
+                <SelectTrigger id="facility-state">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -194,10 +194,11 @@ export default function FacilitiesPage() {
           ))}
         </div>
       ) : directory.isError ? (
-        <Alert variant="destructive">
-          <TriangleAlert />
-          <AlertDescription>This queue could not be loaded.</AlertDescription>
-        </Alert>
+        <ErrorState
+          error={directory.error}
+          onRetry={() => void directory.refetch()}
+          retrying={directory.isFetching}
+        />
       ) : rows.length === 0 ? (
         <EmptyState
           icon={<Building2 />}

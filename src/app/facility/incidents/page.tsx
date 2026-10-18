@@ -2,10 +2,9 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, Search, Stethoscope, TriangleAlert } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Search, Stethoscope } from 'lucide-react';
 import { api } from '@/lib/ui/api';
 import { useFacilityId } from '@/lib/ui/facility';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -20,6 +19,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { SeverityBadge, StatusBadge, humanise } from '@/components/app/status-badge';
 import { EmptyState, PageHeader } from '@/components/app/page-shell';
+import { ErrorState } from '@/components/app/states';
 import { formatAgo, formatWhen } from '@/components/app/format';
 import { ReportIncidentDialog } from './report-incident-dialog';
 import { IncidentDetailDialog, type FacilityIncident } from './incident-detail-dialog';
@@ -144,7 +144,7 @@ export default function FacilityIncidentsPage() {
             </div>
 
             <div className="min-w-[150px] space-y-1.5">
-              <Label>Status</Label>
+              <Label htmlFor="incident-status">Status</Label>
               <Select
                 value={status}
                 onValueChange={(value) => {
@@ -152,7 +152,7 @@ export default function FacilityIncidentsPage() {
                   startOver();
                 }}
               >
-                <SelectTrigger>
+                <SelectTrigger id="incident-status">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -166,7 +166,7 @@ export default function FacilityIncidentsPage() {
             </div>
 
             <div className="min-w-[150px] space-y-1.5">
-              <Label>Severity</Label>
+              <Label htmlFor="incident-severity">Severity</Label>
               <Select
                 value={severity}
                 onValueChange={(value) => {
@@ -174,7 +174,7 @@ export default function FacilityIncidentsPage() {
                   startOver();
                 }}
               >
-                <SelectTrigger>
+                <SelectTrigger id="incident-severity">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -189,7 +189,7 @@ export default function FacilityIncidentsPage() {
             </div>
 
             <div className="min-w-[170px] space-y-1.5">
-              <Label>Category</Label>
+              <Label htmlFor="incident-category">Category</Label>
               <Select
                 value={category}
                 onValueChange={(value) => {
@@ -197,7 +197,7 @@ export default function FacilityIncidentsPage() {
                   startOver();
                 }}
               >
-                <SelectTrigger>
+                <SelectTrigger id="incident-category">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -236,10 +236,11 @@ export default function FacilityIncidentsPage() {
           ))}
         </div>
       ) : queue.isError ? (
-        <Alert variant="destructive">
-          <TriangleAlert />
-          <AlertDescription>These could not be loaded.</AlertDescription>
-        </Alert>
+        <ErrorState
+          error={queue.error}
+          onRetry={() => void queue.refetch()}
+          retrying={queue.isFetching}
+        />
       ) : rows.length === 0 ? (
         <EmptyState
           icon={<Stethoscope />}

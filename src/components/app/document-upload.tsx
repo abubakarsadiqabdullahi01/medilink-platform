@@ -159,6 +159,7 @@ export function DocumentUpload({
         ref={input}
         type="file"
         className="sr-only"
+        aria-label={label}
         accept={ACCEPTED.join(',')}
         onChange={(event) => {
           const file = event.target.files?.[0];

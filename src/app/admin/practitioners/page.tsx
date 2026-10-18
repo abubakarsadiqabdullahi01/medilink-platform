@@ -12,13 +12,11 @@ import {
   CircleAlert,
   CircleCheck,
   Search,
-  TriangleAlert,
   UserRound,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { api, errorMessage } from '@/lib/ui/api';
 import { useReference } from '@/lib/ui/reference';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -34,6 +32,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
 import { Detail, DetailGrid, EmptyState, PageHeader } from '@/components/app/page-shell';
+import { ErrorState } from '@/components/app/states';
 import { formatAgo, formatWhen } from '@/components/app/format';
 import { CredentialsTab } from './credentials-tab';
 import { EvidenceReview } from './evidence-review';
@@ -197,9 +196,9 @@ function StandingEditor({
     <div className="mt-3 grid gap-3 border-t pt-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
       {own.length > 0 ? (
         <div className="space-y-1.5">
-          <Label>Level</Label>
+          <Label htmlFor={`standing-level-${registration.id}`}>Level</Label>
           <Select value={level} onValueChange={(next) => onChange({ level: next, category })}>
-            <SelectTrigger aria-label="Level">
+            <SelectTrigger id={`standing-level-${registration.id}`} aria-label="Level">
               <SelectValue placeholder="Not recorded" />
             </SelectTrigger>
             <SelectContent>
@@ -217,9 +216,9 @@ function StandingEditor({
       )}
       {categories.length > 0 ? (
         <div className="space-y-1.5">
-          <Label>Registration category</Label>
+          <Label htmlFor={`standing-category-${registration.id}`}>Registration category</Label>
           <Select value={category} onValueChange={(next) => onChange({ level, category: next })}>
-            <SelectTrigger aria-label="Registration category">
+            <SelectTrigger id={`standing-category-${registration.id}`} aria-label="Registration category">
               <SelectValue placeholder="Not recorded" />
             </SelectTrigger>
             <SelectContent>
@@ -473,10 +472,12 @@ function Practitioners() {
                   {eligibility.isPending ? (
                     <Skeleton className="h-16 w-full" />
                   ) : eligibility.isError ? (
-                    <Alert variant="destructive">
-                      <TriangleAlert />
-                      <AlertDescription>Their eligibility could not be loaded.</AlertDescription>
-                    </Alert>
+                    <ErrorState
+                      error={eligibility.error}
+                      onRetry={() => void eligibility.refetch()}
+                      retrying={eligibility.isFetching}
+                      compact
+                    />
                   ) : eligibility.data?.eligible ? (
                     <p className="flex items-center gap-2 text-sm">
                       <CircleCheck className="size-4 text-success" aria-hidden="true" />
@@ -520,12 +521,12 @@ function Practitioners() {
                   {verification.isPending ? (
                     <Skeleton className="h-24 w-full" />
                   ) : verification.isError ? (
-                    <Alert variant="destructive">
-                      <TriangleAlert />
-                      <AlertDescription>
-                        Their verification record could not be loaded.
-                      </AlertDescription>
-                    </Alert>
+                    <ErrorState
+                      error={verification.error}
+                      onRetry={() => void verification.refetch()}
+                      retrying={verification.isFetching}
+                      compact
+                    />
                   ) : (
                     <>
                       <div>
@@ -644,9 +645,9 @@ function Practitioners() {
                         </div>
 
                         <div className="space-y-1.5">
-                          <Label>Does the name on the slip match the account?</Label>
+                          <Label htmlFor="nin-name-match">Does the name on the slip match the account?</Label>
                           <Select value={nameMatch} onValueChange={setNameMatch}>
-                            <SelectTrigger>
+                            <SelectTrigger id="nin-name-match">
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -706,12 +707,12 @@ function Practitioners() {
                           </div>
 
                           <div className="space-y-1.5">
-                            <Label>Status on the register</Label>
+                            <Label htmlFor="registration-status">Status on the register</Label>
                             <Select
                               value={registrationStatus}
                               onValueChange={setRegistrationStatus}
                             >
-                              <SelectTrigger>
+                              <SelectTrigger id="registration-status">
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
@@ -853,10 +854,11 @@ function Practitioners() {
           ))}
         </div>
       ) : directory.isError ? (
-        <Alert variant="destructive">
-          <TriangleAlert />
-          <AlertDescription>The directory could not be loaded.</AlertDescription>
-        </Alert>
+        <ErrorState
+          error={directory.error}
+          onRetry={() => void directory.refetch()}
+          retrying={directory.isFetching}
+        />
       ) : rows.length === 0 ? (
         <EmptyState
           icon={<UserRound />}

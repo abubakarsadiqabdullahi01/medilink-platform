@@ -36,6 +36,7 @@ import {
 } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import { PageHeader, QueueSkeleton } from '@/components/app/page-shell';
+import { ErrorState } from '@/components/app/states';
 import { formatDate } from '@/components/app/format';
 
 type SourceList = 'MDCN_QUACK_LIST' | 'MDCN_SANCTIONS' | 'INTERNAL';
@@ -234,9 +235,9 @@ export default function SanctionsPage() {
           </CardHeader>
           <CardContent className="space-y-5">
             <div className="max-w-md space-y-1.5">
-              <Label>Which list</Label>
+              <Label htmlFor="sanction-source-list">Which list</Label>
               <Select value={sourceList} onValueChange={(value) => setSourceList(value as SourceList)}>
-                <SelectTrigger>
+                <SelectTrigger id="sanction-source-list">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -336,10 +337,12 @@ export default function SanctionsPage() {
             {list.isPending ? (
               <QueueSkeleton rows={3} />
             ) : list.isError ? (
-              <Alert variant="destructive">
-                <TriangleAlert />
-                <AlertDescription>The list could not be loaded.</AlertDescription>
-              </Alert>
+              <ErrorState
+                error={list.error}
+                onRetry={() => void list.refetch()}
+                retrying={list.isFetching}
+                compact
+              />
             ) : list.data.entries.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 {applied ? 'Nobody on the list matches that.' : 'Nobody is on the list.'}

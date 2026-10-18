@@ -97,6 +97,23 @@ export function NotificationBell() {
         </div>
         {inbox.isPending ? (
           <p className="px-4 py-6 text-sm text-muted-foreground">Loading…</p>
+        ) : inbox.isError && !inbox.data ? (
+          // Only when there is nothing earlier to show: a failed poll over a list the bell already
+          // holds keeps the list (see `retry: false` above), but "Nothing yet" must never be a
+          // failure's way of reading.
+          <div className="space-y-3 px-4 py-6">
+            <p role="alert" className="text-sm text-destructive-text">
+              Could not load your messages.
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              loading={inbox.isFetching}
+              onClick={() => void inbox.refetch()}
+            >
+              Try again
+            </Button>
+          </div>
         ) : items.length === 0 ? (
           <p className="px-4 py-6 text-sm text-muted-foreground">
             Nothing yet. Offers, decisions and reminders from Medilink will appear here.

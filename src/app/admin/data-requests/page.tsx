@@ -2,10 +2,9 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, Search, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Search, ShieldCheck } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { api } from '@/lib/ui/api';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -21,6 +20,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
 import { EmptyState, PageHeader } from '@/components/app/page-shell';
+import { ErrorState } from '@/components/app/states';
 import { ScreenTransition } from '@/components/app/motion';
 import { formatAgo, formatWhen } from '@/components/app/format';
 import { RequestDetail, type SubjectRequest } from './request-detail';
@@ -141,7 +141,7 @@ export default function DataRequestsPage() {
             </div>
 
             <div className="min-w-[170px] space-y-1.5">
-              <Label>Right</Label>
+              <Label htmlFor="request-kind">Right</Label>
               <Select
                 value={kind}
                 onValueChange={(value) => {
@@ -149,7 +149,7 @@ export default function DataRequestsPage() {
                   startOver();
                 }}
               >
-                <SelectTrigger>
+                <SelectTrigger id="request-kind">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -202,10 +202,11 @@ export default function DataRequestsPage() {
           ))}
         </div>
       ) : queue.isError ? (
-        <Alert variant="destructive">
-          <TriangleAlert />
-          <AlertDescription>This queue could not be loaded.</AlertDescription>
-        </Alert>
+        <ErrorState
+          error={queue.error}
+          onRetry={() => void queue.refetch()}
+          retrying={queue.isFetching}
+        />
       ) : rows.length === 0 ? (
         <EmptyState
           icon={<ShieldCheck />}

@@ -2,9 +2,8 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, Gavel, Search, TriangleAlert } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Gavel, Search } from 'lucide-react';
 import { api } from '@/lib/ui/api';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -13,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
 import { EmptyState, PageHeader, QueueSkeleton } from '@/components/app/page-shell';
+import { ErrorState } from '@/components/app/states';
 import { formatAgo, formatWhen } from '@/components/app/format';
 import { cn } from '@/lib/utils';
 import { ScreenTransition } from '@/components/app/motion';
@@ -158,10 +158,11 @@ export default function DisputesPage() {
       {queue.isPending ? (
         <QueueSkeleton />
       ) : queue.isError ? (
-        <Alert variant="destructive">
-          <TriangleAlert />
-          <AlertDescription>This queue could not be loaded.</AlertDescription>
-        </Alert>
+        <ErrorState
+          error={queue.error}
+          onRetry={() => void queue.refetch()}
+          retrying={queue.isFetching}
+        />
       ) : rows.length === 0 ? (
         <EmptyState
           icon={<Gavel />}

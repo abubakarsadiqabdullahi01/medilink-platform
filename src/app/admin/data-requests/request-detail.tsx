@@ -23,6 +23,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
 import { Detail, DetailGrid, PageHeader } from '@/components/app/page-shell';
+import { ErrorState } from '@/components/app/states';
 import { useStepUp } from '@/components/app/step-up';
 import { actionLabel, formatAgo, formatWhen } from '@/components/app/format';
 import { ERASURE_RETAINED } from '@/modules/audit-compliance/domain/erasure';
@@ -391,10 +392,12 @@ export function RequestDetail({
                 {history.isPending ? (
                   <Skeleton className="h-32 w-full" />
                 ) : history.isError ? (
-                  <Alert variant="destructive">
-                    <TriangleAlert />
-                    <AlertDescription>The history could not be loaded.</AlertDescription>
-                  </Alert>
+                  <ErrorState
+                    error={history.error}
+                    onRetry={() => void history.refetch()}
+                    retrying={history.isFetching}
+                    compact
+                  />
                 ) : history.data.length === 0 ? (
                   <p className="text-sm text-muted-foreground">Nothing recorded yet.</p>
                 ) : (

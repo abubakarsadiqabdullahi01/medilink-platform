@@ -18,6 +18,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { PageHeader, QueueSkeleton } from '@/components/app/page-shell';
+import { ErrorState } from '@/components/app/states';
 import { formatWhen } from '@/components/app/format';
 
 interface Problem {
@@ -101,10 +102,11 @@ export default function SystemPage() {
         {system.isPending ? (
           <QueueSkeleton rows={3} />
         ) : system.isError ? (
-          <Alert variant="destructive">
-            <TriangleAlert />
-            <AlertDescription>The system status could not be loaded.</AlertDescription>
-          </Alert>
+          <ErrorState
+            error={system.error}
+            onRetry={() => void system.refetch()}
+            retrying={system.isFetching}
+          />
         ) : (
           <>
             {system.data.problems.length === 0 ? (

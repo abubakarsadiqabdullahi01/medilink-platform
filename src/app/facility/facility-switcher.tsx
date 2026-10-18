@@ -49,7 +49,11 @@ export function FacilitySwitcher() {
   return (
     <div className="mb-6 flex flex-wrap items-center gap-3 rounded-lg border bg-muted/40 px-3 py-2">
       <Building2 className="size-4 text-muted-foreground" aria-hidden="true" />
-      <label id="facility-switcher-label" className="text-sm text-muted-foreground">
+      <label
+        id="facility-switcher-label"
+        htmlFor="facility-switcher"
+        className="text-sm text-muted-foreground"
+      >
         Acting for
       </label>
       <Select
@@ -60,7 +64,11 @@ export function FacilitySwitcher() {
           void queryClient.resetQueries({ predicate: (query) => query.queryKey[0] !== 'session' });
         }}
       >
-        <SelectTrigger className="h-8 w-auto min-w-[14rem]" aria-labelledby="facility-switcher-label">
+        <SelectTrigger
+          id="facility-switcher"
+          className="h-8 w-auto min-w-[14rem]"
+          aria-labelledby="facility-switcher-label"
+        >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>

@@ -155,9 +155,9 @@ export function ReportIncidentDialog({ facilityId }: { facilityId: string }) {
             </div>
 
             <div className="space-y-1.5">
-              <Label>Category</Label>
+              <Label htmlFor="report-category">Category</Label>
               <Select value={category} onValueChange={setCategory}>
-                <SelectTrigger>
+                <SelectTrigger id="report-category">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -171,9 +171,9 @@ export function ReportIncidentDialog({ facilityId }: { facilityId: string }) {
             </div>
 
             <div className="space-y-1.5 sm:col-span-2">
-              <Label>Severity</Label>
+              <Label htmlFor="report-severity">Severity</Label>
               <Select value={severity} onValueChange={setSeverity}>
-                <SelectTrigger>
+                <SelectTrigger id="report-severity">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -188,12 +188,12 @@ export function ReportIncidentDialog({ facilityId }: { facilityId: string }) {
           </div>
 
           <div className="space-y-1.5">
-            <Label>
+            <Label htmlFor="report-shift">
               The shift it happened on{' '}
               <span className="font-normal text-muted-foreground">— optional</span>
             </Label>
             <Select value={assignmentId} onValueChange={setAssignmentId}>
-              <SelectTrigger>
+              <SelectTrigger id="report-shift">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -205,6 +205,22 @@ export function ReportIncidentDialog({ facilityId }: { facilityId: string }) {
                 ))}
               </SelectContent>
             </Select>
+            {recent.isError ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <p role="alert" className="text-xs text-destructive-text">
+                  Your recent shifts could not be loaded, so none can be chosen right now.
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  loading={recent.isFetching}
+                  onClick={() => void recent.refetch()}
+                >
+                  Try again
+                </Button>
+              </div>
+            ) : null}
             <p className="text-xs text-muted-foreground">
               Choosing a shift links the report to the practitioner who worked it. Shifts from the
               last {LOOKBACK_DAYS} days are listed.

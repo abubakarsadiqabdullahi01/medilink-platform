@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ArrowLeft, FileText, Gavel, History, Paperclip, TriangleAlert } from 'lucide-react';
+import { ArrowLeft, FileText, Gavel, History, Paperclip } from 'lucide-react';
 import { api, errorMessage } from '@/lib/ui/api';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -16,6 +16,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
 import { Detail, DetailGrid, PageHeader } from '@/components/app/page-shell';
 import { DocumentDialog } from '@/components/app/document-dialog';
+import { ErrorState } from '@/components/app/states';
 import { actionLabel, formatAgo, formatWhen } from '@/components/app/format';
 
 /**
@@ -332,10 +333,12 @@ export function DisputeDetail({ dispute, onBack }: { dispute: Dispute; onBack: (
                 {evidence.isPending ? (
                   <Skeleton className="h-32 w-full" />
                 ) : evidence.isError ? (
-                  <Alert variant="destructive">
-                    <TriangleAlert />
-                    <AlertDescription>The evidence could not be loaded.</AlertDescription>
-                  </Alert>
+                  <ErrorState
+                    error={evidence.error}
+                    onRetry={() => void evidence.refetch()}
+                    retrying={evidence.isFetching}
+                    compact
+                  />
                 ) : evidence.data.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
                     Neither side has attached anything. The case has to be decided on the written
@@ -414,10 +417,12 @@ export function DisputeDetail({ dispute, onBack }: { dispute: Dispute; onBack: (
                 {history.isPending ? (
                   <Skeleton className="h-32 w-full" />
                 ) : history.isError ? (
-                  <Alert variant="destructive">
-                    <TriangleAlert />
-                    <AlertDescription>The history could not be loaded.</AlertDescription>
-                  </Alert>
+                  <ErrorState
+                    error={history.error}
+                    onRetry={() => void history.refetch()}
+                    retrying={history.isFetching}
+                    compact
+                  />
                 ) : history.data.length === 0 ? (
                   <p className="text-sm text-muted-foreground">Nothing recorded yet.</p>
                 ) : (

@@ -13,6 +13,17 @@ import { cn } from '@/lib/utils';
 import { Label } from '@/components/ui/label';
 
 /**
+ * What a control needs to be tied to its label, its hint and its error. `Field` makes these and
+ * either clones them onto its one child or hands them to a function child to spread.
+ */
+export interface FieldControlProps {
+  id: string;
+  'aria-describedby': string | undefined;
+  'aria-invalid': true | undefined;
+  'aria-required': true | undefined;
+}
+
+/**
  * A form field that is labelled, explained and error-reporting without each form
  * remembering how.
  *
@@ -28,8 +39,14 @@ import { Label } from '@/components/ui/label';
  *   `onTouched` mode already decides when), with an icon and the words, and is announced:
  *   `role="alert"` makes a screen reader read it the moment it appears.
  *
- * The one child must be a single form control; its `id`, `aria-describedby` and
- * `aria-invalid` are set for it.
+ * Give it **one form control** as a child and it sets `id`, `aria-describedby`, `aria-invalid`
+ * and `aria-required` on it. For a control that is not a single element — a Radix Select inside a
+ * react-hook-form `Controller`, whose trigger is several components down — give it a **function**
+ * and spread what it hands you onto the node that takes focus:
+ *
+ *     <Field label="Profession">
+ *       {(a11y) => <Select …><SelectTrigger {...a11y} /></Select>}
+ *     </Field>
  */
 export function Field({
   label,
@@ -47,29 +64,42 @@ export function Field({
   required?: boolean;
   /** Says "(optional)" in words, which is clearer than an asterisk for everything else. */
   optional?: boolean;
-  children: ReactNode;
+  children: ReactNode | ((props: FieldControlProps) => ReactNode);
   className?: string;
 }) {
   const id = useId();
   const hintId = `${id}-hint`;
   const errorId = `${id}-error`;
-  const control = Children.only(children) as ReactElement<Record<string, unknown>>;
+  const own = [hint ? hintId : null, error ? errorId : null].filter(Boolean).join(' ');
 
-  const describedBy =
-    [
-      hint ? hintId : null,
-      error ? errorId : null,
-      control.props['aria-describedby'] as string | undefined,
-    ]
-      .filter(Boolean)
-      .join(' ') || undefined;
+  let labelFor = id;
+  let control: ReactNode;
+
+  if (typeof children === 'function') {
+    control = children({
+      id,
+      'aria-describedby': own || undefined,
+      'aria-invalid': error ? true : undefined,
+      'aria-required': required ? true : undefined,
+    });
+  } else {
+    const only = Children.only(children) as ReactElement<Record<string, unknown>>;
+    labelFor = (only.props.id as string | undefined) ?? id;
+    const describedBy =
+      [own, only.props['aria-describedby'] as string | undefined].filter(Boolean).join(' ') || undefined;
+    control = isValidElement(only)
+      ? cloneElement(only, {
+          id: labelFor,
+          'aria-describedby': describedBy,
+          'aria-invalid': error ? true : only.props['aria-invalid'],
+          'aria-required': required ? true : only.props['aria-required'],
+        })
+      : only;
+  }
 
   return (
     <div className={cn('flex min-w-0 flex-col gap-1.5', className)}>
-      <Label
-        htmlFor={(control.props.id as string | undefined) ?? id}
-        className="text-base font-medium leading-snug"
-      >
+      <Label htmlFor={labelFor} className="text-base font-medium leading-snug">
         {label}
         {required ? (
           <span className="text-destructive-text" aria-hidden="true">
@@ -85,14 +115,7 @@ export function Field({
           {hint}
         </p>
       ) : null}
-      {isValidElement(control)
-        ? cloneElement(control, {
-            id: (control.props.id as string | undefined) ?? id,
-            'aria-describedby': describedBy,
-            'aria-invalid': error ? true : control.props['aria-invalid'],
-            'aria-required': required ? true : control.props['aria-required'],
-          })
-        : control}
+      {control}
       {error ? (
         <p
           id={errorId}

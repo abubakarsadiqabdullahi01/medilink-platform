@@ -2,9 +2,8 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, FileClock, Search, TriangleAlert } from 'lucide-react';
+import { ChevronLeft, ChevronRight, FileClock, Search } from 'lucide-react';
 import { api } from '@/lib/ui/api';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -13,6 +12,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
 import { EmptyState, PageHeader } from '@/components/app/page-shell';
+import { ErrorState } from '@/components/app/states';
 import { ScreenTransition } from '@/components/app/motion';
 import { formatAgo } from '@/components/app/format';
 import { UnhonouredDetail, type Unhonoured } from './unhonoured-detail';
@@ -156,10 +156,11 @@ export default function UnhonouredPage() {
           ))}
         </div>
       ) : queue.isError ? (
-        <Alert variant="destructive">
-          <TriangleAlert />
-          <AlertDescription>This queue could not be loaded.</AlertDescription>
-        </Alert>
+        <ErrorState
+          error={queue.error}
+          onRetry={() => void queue.refetch()}
+          retrying={queue.isFetching}
+        />
       ) : rows.length === 0 ? (
         <EmptyState
           icon={<FileClock />}

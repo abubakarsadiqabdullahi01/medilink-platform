@@ -26,6 +26,7 @@ import {
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { MySuggestionsList, SUGGESTION_AREAS, type MySuggestion } from '@/components/app/my-suggestions';
+import { ErrorState } from '@/components/app/states';
 
 
 const MIN_BODY = 10;
@@ -102,9 +103,9 @@ export function SuggestionDialog({ open, onOpenChange }: { open: boolean; onOpen
           <>
             <div className="space-y-4">
               <div className="space-y-1.5">
-                <Label>What it is about</Label>
+                <Label htmlFor="suggestion-area">What it is about</Label>
                 <Select value={area} onValueChange={setArea}>
-                  <SelectTrigger>
+                  <SelectTrigger id="suggestion-area">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -142,9 +143,12 @@ export function SuggestionDialog({ open, onOpenChange }: { open: boolean; onOpen
               {mine.isPending ? (
                 <p className="py-6 text-center text-sm text-muted-foreground">Loading…</p>
               ) : mine.isError ? (
-                <p className="py-6 text-center text-sm text-muted-foreground">
-                  Could not load them just now. Try again in a moment.
-                </p>
+                <ErrorState
+                  error={mine.error}
+                  onRetry={() => void mine.refetch()}
+                  retrying={mine.isFetching}
+                  compact
+                />
               ) : (
                 <MySuggestionsList suggestions={mine.data.suggestions} />
               )}
