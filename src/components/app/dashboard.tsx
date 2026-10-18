@@ -66,7 +66,7 @@ export function MetricGrid({
         // squeezed tiles at 1024px each held a seven-figure amount in 133px.
         compact
           ? 'grid-cols-2 xl:grid-cols-4'
-          : '[grid-template-columns:repeat(auto-fit,minmax(min(100%,14rem),1fr))]',
+          : '[grid-template-columns:repeat(auto-fit,minmax(min(100%,12rem),1fr))]',
         className,
       )}
     >

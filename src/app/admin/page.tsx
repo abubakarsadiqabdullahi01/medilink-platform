@@ -1,422 +1,448 @@
 'use client';
 
-import { useMemo } from 'react';
 import Link from 'next/link';
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
+  Activity,
   ArrowRight,
-  Building2,
-  FileCheck2,
-  FileClock,
-  Gavel,
-  History,
-  MessageSquareText,
-  Stethoscope,
-  TrendingUp,
-  type LucideIcon,
+  CircleCheck,
+  KeyRound,
+  Landmark,
+  ScrollText,
+  ShieldAlert,
+  ShieldCheck,
 } from 'lucide-react';
-import { cn } from '@/lib/utils';
 import { api } from '@/lib/ui/api';
+import { useNow } from '@/lib/ui/now';
+import {
+  QUEUES,
+  opsAttention,
+  oldestWaiting,
+  queueRows,
+  type PlatformSummaryJson,
+} from '@/lib/ui/ops-today';
 import { useSession } from '@/lib/ui/session';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import dynamic from 'next/dynamic';
+import { buttonVariants } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { humanise } from '@/components/app/status-badge';
-import { PageHeader } from '@/components/app/page-shell';
-import { actionLabel, formatAgo } from '@/components/app/format';
+import {
+  AttentionList,
+  DashboardSection,
+  MetricGrid,
+  MetricTile,
+} from '@/components/app/dashboard';
+import { EmptyState, PageHeader } from '@/components/app/page-shell';
+import { QueueAge, waitingFor } from '@/components/app/queue-age';
+import { ErrorState } from '@/components/app/states';
+import { SeverityBadge, humanise } from '@/components/app/status-badge';
+import { actionLabel, formatAgo, formatDate } from '@/components/app/format';
 
 /**
- * What is waiting, how long it has been waiting, and what happened recently.
+ * Where an operations officer starts: what is late, how long each queue has been left, and the
+ * things that stop work or move money.
  *
- * Everything on this page comes from one request, `/api/v1/dashboard/platform`,
- * which counts in the database. It used to download each queue to take its
- * length, and page through the whole audit trail to draw the growth chart —
- * dozens of requests and thousands of rows to show about thirty numbers, which
- * is most of what made opening the console feel slow. The count still carries
- * *how old* the oldest item is, which is the part a number alone never tells
- * you: eleven credentials waiting an hour is a normal morning, and one waiting
- * nine days is somebody who has given up on us.
+ * It used to be six tiles, a growth chart and a feed, with one rule — "stale after five days" —
+ * for every queue. A death reported four days ago was fine; a suggestion at six days was late. Now:
+ *
+ *   1. the one primary action: whatever is first on the list below
+ *   2. what needs attention, most urgent first (the rules are in lib/ui/ops-today.ts): a missed
+ *      legal deadline, a serious incident, a failing background system, a failed reconciliation,
+ *      then each queue that has been left too long *for what it is*, then the money awaiting a person
+ *   3. five figures: the longest wait, verifications, casework, privacy requests, system health
+ *   4. every queue the person may work, longest-waiting first, with its age in words
+ *   5. the money, and the actions that ask for the password again
+ *
+ * Everything is read from the one `/api/v1/dashboard/platform` request. A section the person may
+ * not see is absent, never zero. The growth chart is gone: it is the one thing here nobody acts on.
  */
-
-type QueueKey = 'credentials' | 'facilities' | 'incidents' | 'disputes' | 'unhonoured' | 'suggestions';
-
-/** The shape of /api/v1/dashboard/platform; dates arrive as ISO strings. */
-interface Summary {
-  queues: Partial<Record<QueueKey, { count: number; oldest: string | null }>>;
-  incidentSeverity: { severity: string; count: number }[];
-  worstIncident: { severity: string; category: string; summary: string; reportedAt: string } | null;
-  growth: { month: string; facilities: number; practitioners: number; usage: number }[];
-  recent: { id: string; action: string; createdAt: string }[];
-}
-
-interface Tile {
-  href: string;
-  label: string;
-  icon: LucideIcon;
-  permission: string;
-  queue: QueueKey;
-  hint: string;
-}
-
-const TILES: Tile[] = [
-  {
-    href: '/admin/credentials',
-    label: 'Credentials to review',
-    icon: FileCheck2,
-    permission: 'credential.review',
-    queue: 'credentials',
-    hint: 'A practitioner is ineligible until every mandatory credential is verified.',
-  },
-  {
-    href: '/admin/facilities',
-    label: 'Facilities to verify',
-    icon: Building2,
-    permission: 'facility.verify',
-    queue: 'facilities',
-    hint: 'An unverified facility cannot publish a shift.',
-  },
-  {
-    href: '/admin/incidents',
-    label: 'Clinical incidents open',
-    icon: Stethoscope,
-    permission: 'incident.manage',
-    queue: 'incidents',
-    hint: 'Most serious first. A death outranks a near miss from March.',
-  },
-  {
-    href: '/admin/disputes',
-    label: 'Disputes to adjudicate',
-    icon: Gavel,
-    permission: 'dispute.manage',
-    queue: 'disputes',
-    hint: 'A decided shift the two sides disagree about.',
-  },
-  {
-    href: '/admin/unhonoured',
-    label: 'Shifts awaiting fault',
-    icon: FileClock,
-    permission: 'sanction.apply',
-    queue: 'unhonoured',
-    hint: 'A sweep flags these. Only a person can close one.',
-  },
-  {
-    href: '/admin/suggestions',
-    label: 'Suggestions untriaged',
-    icon: MessageSquareText,
-    permission: 'suggestion.triage',
-    queue: 'suggestions',
-    hint: 'What the pilot is telling you, decline reasons included.',
-  },
-];
-
-/** Past a working week, something has gone wrong with the queue, not the row. */
-const STALE_AFTER_DAYS = 5;
-
-const SEVERITY_ORDER = ['DEATH', 'SEVERE', 'MODERATE', 'MINOR', 'NEAR_MISS'];
-
-
-
-/** "2026-10" as Oct 26. Parsed by hand: `new Date('2026-10')` is UTC and can land in the previous month. */
-function monthLabel(key: string): string {
-  const [year, month] = key.split('-').map(Number);
-  const names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  return `${names[(month ?? 1) - 1]} ${String(year).slice(-2)}`;
-}
-
-/**
- * The charting library is the heaviest thing on this page and nothing above the
- * fold needs it, so it loads after the tiles and the navigation have appeared,
- * as its own chunk. Skipped on the server: a chart has no meaning before there
- * is data to draw.
- */
-const GrowthChart = dynamic(() => import('./growth-chart'), {
-  ssr: false,
-  loading: () => <Skeleton className="h-[260px] w-full" />,
-});
-
 export default function DashboardPage() {
   const session = useSession();
-  const mine = TILES.filter((tile) => session.permissions.includes(tile.permission));
+  const now = useNow();
 
-  // One request for every number on the page. The key starts with 'tile', so
-  // the invalidation every queue action already does refreshes it too.
+  // One request for every number on the page. The key starts with 'tile', so the invalidation
+  // every queue action already does refreshes it too.
   const summary = useQuery({
     queryKey: ['tile', 'platform-summary'],
-    queryFn: () => api.get<Summary>('/api/v1/dashboard/platform'),
+    queryFn: () => api.get<PlatformSummaryJson>('/api/v1/dashboard/platform'),
     retry: false,
   });
   const data = summary.data;
 
-  const canSeeIncidents = session.permissions.includes('incident.manage');
-  const canSeeAudit = session.permissions.includes('audit.read');
-  const canSeeFacilityGrowth = session.permissions.includes('facility.read');
-  const canSeePractitionerGrowth = session.permissions.includes('practitioner.profile.read');
-  const canSeeUsage = canSeeAudit;
-  const canSeeGrowth = canSeeFacilityGrowth || canSeePractitionerGrowth || canSeeUsage;
-
-  const firstName = session.user.fullName.split(' ')[0];
-  const queues = data?.queues ?? {};
-  const total = mine.reduce((sum, tile) => sum + (queues[tile.queue]?.count ?? 0), 0);
+  const mayWorkAQueue = QUEUES.some((queue) =>
+    session.permissions.includes(permissionFor(queue.key)),
+  );
   const settled = !summary.isPending;
-  // A queue that failed to load is not a queue that is empty, and "every queue
-  // you can work is clear" is exactly the sentence somebody acts on by closing
-  // the tab.
+  // A queue that failed to load is not a queue that is empty, and "every queue you can work is
+  // clear" is exactly the sentence somebody acts on by closing the tab.
   const failed = summary.isError;
 
-  const oldestOverall = mine
-    .map((tile) => queues[tile.queue]?.oldest)
-    .filter((value): value is string => Boolean(value))
-    .map((value) => new Date(value).getTime())
-    .sort((a, b) => a - b)[0];
+  const rows = useMemo(() => queueRows(data, now), [data, now]);
+  const attention = useMemo(() => opsAttention(data, now), [data, now]);
+  const oldest = oldestWaiting(rows);
 
-  const incidentTotal = (data?.incidentSeverity ?? []).reduce((sum, row) => sum + row.count, 0);
-  const severityCounts = SEVERITY_ORDER.map((severity) => ({
-    severity,
-    count: data?.incidentSeverity.find((row) => row.severity === severity)?.count ?? 0,
-  })).filter((entry) => entry.count > 0);
-  const worst = data?.worstIncident ?? null;
+  const verifications =
+    (data?.queues.credentials?.count ?? 0) + (data?.queues.facilities?.count ?? 0);
+  const hasVerifications = Boolean(data?.queues.credentials || data?.queues.facilities);
+  const casework = (data?.queues.incidents?.count ?? 0) + (data?.queues.disputes?.count ?? 0);
+  const hasCasework = Boolean(data?.queues.incidents || data?.queues.disputes);
 
-  const growthLoading = summary.isPending;
-  const growthSeries = useMemo(
-    () => (data?.growth ?? []).map((row) => ({ ...row, month: monthLabel(row.month) })),
-    [data?.growth],
-  );
+  const firstName = session.user.fullName.split(' ')[0];
+  const primary = attention[0];
+
+  const recent = (data?.recent ?? [])
+    .filter((entry) => !entry.action.startsWith('auth.'))
+    .slice(0, 5);
 
   return (
     <>
       <PageHeader
-        title={`Good day, ${firstName}`}
-        description={
-          settled && !failed && total === 0
-            ? 'Nothing is waiting on you. Every queue you can work is clear.'
-            : 'Everything below is waiting on a person. Nothing in Medilink closes itself.'
+        title="Operations"
+        description={`Good day, ${firstName}. Everything below is waiting on a person: nothing in Medilink closes itself.`}
+        action={
+          settled && primary ? (
+            <Link href={primary.href} className={buttonVariants({ size: 'lg' })}>
+              {primary.action}
+              <ArrowRight />
+            </Link>
+          ) : null
         }
       />
 
-      {mine.length === 0 ? (
+      {!mayWorkAQueue && !data?.privacy && !data?.health && !data?.money ? (
         <Card>
-          <CardContent className="pt-6 text-sm text-muted-foreground">
+          <CardContent className="pt-6 text-base text-muted-foreground">
             This account holds no queue permissions, so there is nothing to show here. That is the
             grants deciding what you see, not a page failing to load.
           </CardContent>
         </Card>
       ) : (
-        <div className="space-y-6">
-          {/* The summary answers "is today bad?" before any individual queue
-              does, and the oldest item is the honest measure of that. */}
-          {settled && !failed && total > 0 ? (
-            <Card className="border-primary/25 bg-accent/40">
-              <CardContent className="flex flex-wrap items-baseline gap-x-2 gap-y-1 pt-6 text-sm">
-                <span className="tabular text-2xl font-semibold leading-none">{total}</span>
-                <span className="font-medium">
-                  {total === 1 ? 'thing is' : 'things are'} waiting on you
-                </span>
-                {oldestOverall ? (
-                  <span className="text-muted-foreground">
-                    · the oldest arrived {formatAgo(new Date(oldestOverall).toISOString())}
-                  </span>
-                ) : null}
-              </CardContent>
-            </Card>
+        <div className="space-y-8">
+          {failed ? (
+            <ErrorState
+              error={summary.error}
+              onRetry={() => void summary.refetch()}
+              retrying={summary.isFetching}
+              compact
+            />
           ) : null}
 
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-            {mine.map((tile) => {
-              const result = summary;
-              const count = queues[tile.queue]?.count ?? 0;
-              const oldest = queues[tile.queue]?.oldest ? new Date(queues[tile.queue]!.oldest!).getTime() : null;
-              const days = oldest ? (Date.now() - oldest) / 86_400_000 : 0;
-              const stale = days >= STALE_AFTER_DAYS;
-              const Icon = tile.icon;
+          <AttentionList
+            items={attention}
+            loading={!settled}
+            error={failed && attention.length === 0}
+            emptyTitle="Nothing is late"
+            emptyDetail="No deadline has been missed, no queue has been left too long, and nothing is waiting on a password."
+          />
 
-              return (
-                <Link key={tile.href} href={tile.href} className="group">
-                  <Card
-                    className={cn(
-                      'h-full transition-all hover:border-primary/50 hover:shadow-md',
-                      stale && 'border-warning/40',
-                    )}
-                  >
-                    <CardContent className="p-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <span className="flex size-7 items-center justify-center rounded-md bg-accent text-accent-foreground">
-                          <Icon className="size-3.5" />
-                        </span>
-                        <ArrowRight className="size-3.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
-                      </div>
+          <MetricGrid>
+            <MetricTile
+              label="Longest wait"
+              value={oldest?.oldest ? waitingFor(oldest.oldest, now) : '—'}
+              hint={oldest ? `${oldest.label}, ${oldest.count} waiting` : 'Every queue is clear'}
+              href={oldest?.href}
+              tone={
+                oldest?.tone === 'overdue'
+                  ? 'danger'
+                  : oldest?.tone === 'ageing'
+                    ? 'warning'
+                    : 'neutral'
+              }
+              icon={ScrollText}
+              loading={!settled}
+              error={failed}
+            />
+            {hasVerifications || !settled ? (
+              <MetricTile
+                label="Verifications"
+                value={verifications}
+                hint="Credentials and facilities waiting"
+                href={data?.queues.credentials ? '/admin/credentials' : '/admin/facilities'}
+                icon={ShieldCheck}
+                loading={!settled}
+                error={failed}
+              />
+            ) : null}
+            {hasCasework || !settled ? (
+              <MetricTile
+                label="Casework"
+                value={casework}
+                hint="Incidents and disputes open"
+                href={data?.queues.incidents ? '/admin/incidents' : '/admin/disputes'}
+                icon={ShieldAlert}
+                loading={!settled}
+                error={failed}
+              />
+            ) : null}
+            {data?.privacy ? (
+              <MetricTile
+                label="Data requests"
+                value={data.privacy.open}
+                hint={
+                  data.privacy.overdue > 0
+                    ? `${data.privacy.overdue} past the deadline`
+                    : data.privacy.nextDue
+                      ? `Next due ${formatDate(data.privacy.nextDue)}`
+                      : 'None open'
+                }
+                href="/admin/data-requests"
+                tone={data.privacy.overdue > 0 ? 'danger' : 'neutral'}
+                icon={KeyRound}
+              />
+            ) : null}
+            {data?.health ? (
+              <MetricTile
+                label="System health"
+                value={data.health.status === 'ok' ? 'Healthy' : `${data.health.problems} wrong`}
+                hint={
+                  data.health.status === 'ok'
+                    ? 'Messages and jobs are going out'
+                    : data.health.deadLetter > 0
+                      ? `${data.health.deadLetter} events gave up`
+                      : 'See the System page'
+                }
+                href="/admin/system"
+                tone={data.health.status === 'ok' ? 'success' : 'danger'}
+                icon={Activity}
+              />
+            ) : null}
+          </MetricGrid>
 
-                      <p className="mt-3 text-sm font-medium">{tile.label}</p>
-
-                      {result.isPending ? (
-                        <Skeleton className="mt-2 h-7 w-10" />
-                      ) : result.isError ? (
-                        <p className="mt-2 text-sm text-destructive-text">Could not load</p>
-                      ) : (
-                        <>
-                          <p
-                            className={cn(
-                              'tabular mt-1 text-2xl font-semibold',
-                              count === 0 && 'text-muted-foreground',
-                            )}
-                          >
-                            {count}
-                          </p>
-                          {oldest ? (
-                            <p
-                              className={cn(
-                                'mt-1 text-xs',
-                                stale ? 'font-medium text-warning' : 'text-muted-foreground',
-                              )}
-                            >
-                              oldest arrived {formatAgo(new Date(oldest).toISOString())}
-                            </p>
-                          ) : null}
-                        </>
-                      )}
-
-                      <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
-                        {tile.hint}
-                      </p>
-                    </CardContent>
-                  </Card>
-                </Link>
-              );
-            })}
-          </div>
-
-          {canSeeGrowth ? (
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <TrendingUp className="size-4 text-muted-foreground" aria-hidden="true" />
-                  Platform growth
-                </CardTitle>
-                <CardDescription>
-                  New facilities, new practitioners and overall activity, by month. A flat or
-                  falling line is where growth stalled.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {growthLoading ? (
-                  <Skeleton className="h-[260px] w-full" />
-                ) : growthSeries.length === 0 ? (
-                  <p className="py-20 text-center text-sm text-muted-foreground">
-                    Not enough history yet to chart a trend.
-                  </p>
-                ) : (
-                  <GrowthChart
-                    series={growthSeries}
-                    facilities={canSeeFacilityGrowth}
-                    practitioners={canSeePractitionerGrowth}
-                    usage={canSeeUsage}
-                  />
-                )}
-              </CardContent>
-            </Card>
-          ) : null}
-
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 [&>*]:min-w-0">
-            {canSeeIncidents ? (
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-sm">Open incidents by severity</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {summary.isPending ? (
-                    <Skeleton className="h-24 w-full" />
-                  ) : summary.isError ? (
-                    <p className="text-sm text-destructive-text">Could not load</p>
-                  ) : severityCounts.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">Nothing open.</p>
-                  ) : (
-                    <>
-                      <ul className="space-y-2">
-                        {severityCounts.map(({ severity, count }) => (
-                          <li key={severity} className="flex items-center gap-3 text-sm">
-                            <span className="w-24 shrink-0 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                              {humanise(severity)}
+          <div className="grid items-start gap-8 xl:grid-cols-[3fr_2fr]">
+            <DashboardSection
+              id="queues-heading"
+              title="Queues, longest-waiting first"
+              description="How long the oldest item in each has waited."
+            >
+              {!settled ? (
+                <Skeleton className="h-48 w-full" />
+              ) : failed && rows.length === 0 ? (
+                <ErrorState error={summary.error} onRetry={() => void summary.refetch()} compact />
+              ) : rows.length === 0 ? (
+                <EmptyState
+                  compact
+                  icon={<CircleCheck />}
+                  title="No queues to show"
+                  description="This account holds no queue permissions."
+                />
+              ) : (
+                <Card>
+                  <ul className="divide-y">
+                    {rows.map((row) => (
+                      <li key={row.key}>
+                        <Link
+                          href={row.href}
+                          className="grid min-h-16 grid-cols-[1fr_auto] items-center gap-x-4 p-4 transition-colors first:rounded-t-xl last:rounded-b-xl hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                        >
+                          <span className="min-w-0">
+                            <span className="block font-medium leading-snug">
+                              {row.label}{' '}
+                              <span className="font-normal text-muted-foreground">{row.noun}</span>
                             </span>
-                            <span
-                              className={cn(
-                                'h-2 rounded-full',
-                                severity === 'DEATH' || severity === 'SEVERE'
-                                  ? 'bg-destructive'
-                                  : severity === 'MODERATE'
-                                    ? 'bg-warning'
-                                    : 'bg-primary/40',
-                              )}
-                              style={{
-                                width: `${Math.max(8, (count / (incidentTotal || 1)) * 160)}px`,
-                              }}
+                            {row.count > 0 && row.oldest ? (
+                              <QueueAge
+                                since={row.oldest}
+                                label="Oldest waited"
+                                thresholds={row.thresholds}
+                              />
+                            ) : (
+                              <span className="text-sm text-muted-foreground">Nothing waiting</span>
+                            )}
+                          </span>
+                          <span className="flex items-center gap-2">
+                            <span className="tabular text-2xl font-semibold leading-none">
+                              {row.count}
+                            </span>
+                            <ArrowRight
+                              className="size-4 text-muted-foreground"
                               aria-hidden="true"
                             />
-                            <span className="tabular text-sm font-medium">{count}</span>
-                          </li>
-                        ))}
-                      </ul>
+                          </span>
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                </Card>
+              )}
+            </DashboardSection>
 
-                      {worst ? (
-                        <div className="mt-4 border-t pt-3">
-                          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                            Most serious open
-                          </p>
-                          <p className="mt-1 line-clamp-2 text-sm">{worst.summary}</p>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {humanise(worst.category)} · reported {formatAgo(worst.reportedAt)}
-                          </p>
-                        </div>
+            <div className="space-y-8">
+              {data?.worstIncident ? (
+                <DashboardSection
+                  id="worst-heading"
+                  title="Most serious open incident"
+                  href="/admin/incidents"
+                  hrefLabel="Incidents"
+                >
+                  <Card>
+                    <CardContent className="space-y-2 pt-6">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <SeverityBadge severity={data.worstIncident.severity} />
+                        <span className="text-sm text-muted-foreground">
+                          {humanise(data.worstIncident.category)}
+                        </span>
+                      </div>
+                      <p className="line-clamp-3 leading-relaxed">{data.worstIncident.summary}</p>
+                      <QueueAge
+                        since={data.worstIncident.reportedAt}
+                        label="Reported"
+                        thresholds={{ ageingAfterHours: 4, overdueAfterHours: 24 }}
+                      />
+                    </CardContent>
+                  </Card>
+                </DashboardSection>
+              ) : null}
+
+              {data?.money || data?.health ? (
+                <DashboardSection id="money-heading" title="Money and the system">
+                  <Card>
+                    <ul className="divide-y text-base">
+                      {data.money ? (
+                        <li className="flex items-start gap-3 p-4">
+                          <Landmark
+                            className="mt-0.5 size-5 shrink-0 text-muted-foreground"
+                            aria-hidden="true"
+                          />
+                          <span>
+                            <span className="block font-medium">Nightly reconciliation</span>
+                            <span className="text-sm text-muted-foreground">
+                              {data.money.reconciliation.lastStatus === null
+                                ? 'It has not run yet.'
+                                : data.money.reconciliation.lastStatus === 'SUCCEEDED'
+                                  ? `Last ran ${formatAgo(data.money.reconciliation.lastRunAt)}; the books added up.`
+                                  : `Last ran ${formatAgo(data.money.reconciliation.lastRunAt)} and failed.`}
+                            </span>
+                          </span>
+                        </li>
                       ) : null}
-                    </>
-                  )}
-                </CardContent>
-              </Card>
-            ) : null}
+                      {data.money?.payoutsPrepared ? (
+                        <li>
+                          <Link
+                            href="/admin/payouts"
+                            className="block p-4 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                          >
+                            <span className="block font-medium">
+                              {data.money.payoutsPrepared.count} payouts prepared
+                            </span>
+                            <span className="text-sm text-muted-foreground">
+                              {data.money.payoutsReleased?.count ?? 0} released, waiting for the
+                              transfer to be recorded
+                            </span>
+                          </Link>
+                        </li>
+                      ) : null}
+                      {data.money?.draftInvoices ? (
+                        <li>
+                          <Link
+                            href="/admin/invoices"
+                            className="block p-4 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                          >
+                            <span className="block font-medium">
+                              {data.money.draftInvoices.count} invoices drafted
+                            </span>
+                            <span className="text-sm text-muted-foreground">
+                              Not yet issued to a facility
+                            </span>
+                          </Link>
+                        </li>
+                      ) : null}
+                      {data.health ? (
+                        <li className="flex items-start gap-3 p-4">
+                          <Activity
+                            className="mt-0.5 size-5 shrink-0 text-muted-foreground"
+                            aria-hidden="true"
+                          />
+                          <span>
+                            <span className="block font-medium">Texts and background jobs</span>
+                            <span className="text-sm text-muted-foreground">
+                              {data.health.failedTexts24h} failed in the last day ·{' '}
+                              {data.health.deadLetter} events gave up
+                            </span>
+                          </span>
+                        </li>
+                      ) : null}
+                    </ul>
+                  </Card>
+                </DashboardSection>
+              ) : null}
 
-            {canSeeAudit ? (
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="flex items-center gap-2 text-sm">
-                    <History className="size-4 text-muted-foreground" aria-hidden="true" />
-                    Recently on the record
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {summary.isPending ? (
-                    <Skeleton className="h-24 w-full" />
-                  ) : summary.isError ? (
-                    <p className="text-sm text-destructive-text">Could not load</p>
-                  ) : (data?.recent ?? []).length === 0 ? (
-                    <p className="text-sm text-muted-foreground">Nothing recorded yet.</p>
-                  ) : (
-                    <ul className="space-y-2">
-                      {(data?.recent ?? []).map((entry) => (
+              {data?.money || data?.privacy ? (
+                <DashboardSection id="elevated-heading" title="Actions that ask for your password">
+                  <Card>
+                    <CardContent className="space-y-2 pt-6 text-base">
+                      <p className="flex items-start gap-2">
+                        <KeyRound
+                          className="mt-0.5 size-5 shrink-0 text-muted-foreground"
+                          aria-hidden="true"
+                        />
+                        <span>
+                          {session.stepUpFresh
+                            ? 'You confirmed your password recently, so these will go through without asking again for a few minutes.'
+                            : 'You will be asked for your password before any of these.'}
+                        </span>
+                      </p>
+                      <ul className="list-disc space-y-1 pl-9 text-muted-foreground">
+                        {data.money?.payoutsPrepared ? <li>Releasing a payout</li> : null}
+                        {data.money?.draftInvoices ? (
+                          <li>Issuing an invoice, or recording that one was paid</li>
+                        ) : null}
+                        {data.privacy ? (
+                          <li>
+                            Carrying out an erasure
+                            {data.privacy.erasures > 0 ? ` (${data.privacy.erasures} waiting)` : ''}
+                          </li>
+                        ) : null}
+                      </ul>
+                    </CardContent>
+                  </Card>
+                </DashboardSection>
+              ) : null}
+
+              {recent.length > 0 ? (
+                <DashboardSection
+                  id="recent-heading"
+                  title="Recently on the record"
+                  href="/admin/audit"
+                  hrefLabel="Audit trail"
+                >
+                  <Card>
+                    <ul className="divide-y">
+                      {recent.map((entry) => (
                         <li
                           key={entry.id}
-                          className="flex items-baseline justify-between gap-3 text-sm"
+                          className="flex items-baseline justify-between gap-3 px-4 py-3"
                         >
-                          <span className="truncate">
-                            {actionLabel(entry.action)}
-                          </span>
-                          <span className="shrink-0 text-xs text-muted-foreground">
+                          <span>{actionLabel(entry.action)}</span>
+                          <span className="shrink-0 text-sm text-muted-foreground">
                             {formatAgo(entry.createdAt)}
                           </span>
                         </li>
                       ))}
                     </ul>
-                  )}
-
-                  {/* Said here so nobody goes looking for a filter that is
-                      deliberately absent. */}
-                  <p className="mt-4 border-t pt-3 text-xs leading-relaxed text-muted-foreground">
-                    What happened, not who has been busy. The trail answers what happened to a
-                    record and cannot be filtered by person.
-                  </p>
-                </CardContent>
-              </Card>
-            ) : null}
+                    <p className="border-t px-4 py-3 text-sm text-muted-foreground">
+                      What happened to a record, not who has been busy. Sign-ins are not listed.
+                    </p>
+                  </Card>
+                </DashboardSection>
+              ) : null}
+            </div>
           </div>
         </div>
       )}
     </>
   );
+}
+
+/** The permission a queue needs, as its own endpoint asks for it (see QUEUE_PERMISSION on the server). */
+function permissionFor(key: string): string {
+  return (
+    {
+      credentials: 'credential.review',
+      facilities: 'facility.verify',
+      incidents: 'incident.manage',
+      disputes: 'dispute.manage',
+      unhonoured: 'sanction.apply',
+      suggestions: 'suggestion.triage',
+    } as Record<string, string>
+  )[key]!;
 }
