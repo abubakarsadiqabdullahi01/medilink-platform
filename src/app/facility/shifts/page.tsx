@@ -3,34 +3,16 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import {
-  CalendarPlus,
-  ChevronLeft,
-  ChevronRight,
-  Search,
-  Send,
-  TriangleAlert,
-  Users,
-} from 'lucide-react';
+import { CalendarPlus, Send, Users } from 'lucide-react';
 import { api } from '@/lib/ui/api';
+import { useCursorPager } from '@/lib/ui/cursor-pager';
 import { useFacilityId } from '@/lib/ui/facility';
 import { useQueueAction } from '@/lib/ui/queue';
 import { nameOf, useReference } from '@/lib/ui/reference';
 import { useSession } from '@/lib/ui/session';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import {
   Select,
   SelectContent,
@@ -38,20 +20,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
-import { StatusBadge, humanise } from '@/components/app/status-badge';
+import { ConfirmDialog } from '@/components/app/confirm-dialog';
+import { DataTable, type Column } from '@/components/app/data-table';
+import { Field } from '@/components/app/field';
+import { FilterBar } from '@/components/app/filter-bar';
 import { EmptyState, PageHeader } from '@/components/app/page-shell';
-import { formatNaira, formatWhen } from '@/components/app/format';
+import { Pager } from '@/components/app/pager';
+import { ErrorState, FilteredEmpty, TableSkeleton } from '@/components/app/states';
+import { StatusBadge, humanise } from '@/components/app/status-badge';
+import { formatMinutes, formatNaira, formatShiftWindow } from '@/components/app/format';
 import { NewShiftDialog } from './new-shift-dialog';
 
 interface ServiceRequest {
@@ -76,24 +55,44 @@ interface ServiceRequest {
 const STATUSES = ['PUBLISHED', 'FILLED', 'DRAFT', 'CANCELLED', 'EXPIRED'] as const;
 const PAGE_SIZE = 20;
 
+const NOTHING_HERE: Record<string, { title: string; description?: string }> = {
+  PUBLISHED: {
+    title: 'No published shifts',
+    description: 'Publish one and it becomes available to match against.',
+  },
+  FILLED: {
+    title: 'No filled shifts',
+    description: 'A shift appears here once every place on it has a confirmed practitioner.',
+  },
+  DRAFT: {
+    title: 'No drafts',
+    description:
+      'A draft is a shift that was saved but could not be published. If one is left behind, it is listed here so you can try again.',
+  },
+  CANCELLED: { title: 'No cancelled shifts' },
+  EXPIRED: {
+    title: 'No expired shifts',
+    description: 'A shift expires when its start time passes before every place is filled.',
+  },
+};
+
 /**
  * Module 6 — service requests, from the facility's side.
  *
- * A dense table rather than a stack of cards: this is the screen a scheduler
- * scans every morning, and a card per row means scrolling past nine tenths of
- * what is printed on it to compare two shifts. The row still links out to its
- * own detail page for the parts a table has no room for — notes, the full
- * cancellation terms, who has confirmed.
+ * The screen a scheduler scans every morning: one row per shift, with what it is, when it is,
+ * what it pays, how many places are filled and what to do next. On a wide screen that is a table;
+ * on a phone each row becomes a card that keeps the same five facts and the next step, rather
+ * than a table scrolled sideways. The row still links out to the shift's own page for the parts
+ * a list has no room for — notes, the full cancellation terms, who has been invited.
  *
- * Publishing an existing draft used to only be reachable by creating a new
- * shift from scratch — "Publish a shift" always did create-then-publish as
- * one step, and a draft left behind by a failed publish (the facility was not
- * verified yet, the rate floor moved, the start time had already passed by
- * the time the button was clicked) had no retry: cancel was the only action
- * on it. The publish endpoint was already separable from creation
- * (`POST .../:id/publish` takes an existing draft) — the row action below
- * just exposes it, so a draft stuck for a since-fixed reason does not have to
- * be rebuilt from nothing.
+ * Publishing an existing draft is its own action here: a draft left behind by a failed publish
+ * (the facility was not verified yet, the rate floor moved, the start time had passed by the
+ * time the button was clicked) has no other way forward than being rebuilt. The publish endpoint
+ * already takes an existing draft; this exposes it — behind a confirmation, because publishing
+ * is what makes a shift visible to practitioners.
+ *
+ * Cancelling is the one irreversible thing on the page, so it names the shift, says how many
+ * people it affects and what they are told, and needs a reason.
  */
 export default function ShiftsPage() {
   const facilityId = useFacilityId();
@@ -101,12 +100,11 @@ export default function ShiftsPage() {
   const session = useSession();
 
   /**
-   * Shifts is reached on `service_request.read`, which several facility roles
-   * hold without holding anything that changes a shift — an administrator, and
-   * an accounts officer who needs it to open a timesheet. They were being shown
-   * Publish, Cancel and New shift, and every one of them answered 403. The
-   * dashboard beside this page already hides what a role cannot use; this is
-   * the same rule, applied where the buttons are.
+   * Shifts is reached on `service_request.read`, which several facility roles hold without
+   * holding anything that changes a shift — an administrator, and an accounts officer who needs
+   * it to open a timesheet. They were being shown Publish, Cancel and New shift, and every one
+   * of them answered 403. The dashboard beside this page already hides what a role cannot use;
+   * this is the same rule, applied where the buttons are.
    */
   const canPublish = session.permissions.includes('service_request.publish');
   const canStaff = session.permissions.includes('assignment.confirm');
@@ -117,20 +115,14 @@ export default function ShiftsPage() {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [cancelling, setCancelling] = useState<ServiceRequest | null>(null);
+  const [publishing, setPublishing] = useState<ServiceRequest | null>(null);
   const [reason, setReason] = useState('');
 
-  const [cursors, setCursors] = useState<(string | null)[]>([null]);
-  const [pageIndex, setPageIndex] = useState(0);
-  const cursor = cursors[pageIndex] ?? null;
-
-  function startOver() {
-    setCursors([null]);
-    setPageIndex(0);
-  }
+  const pager = useCursorPager();
 
   const queueKey = ['shifts', facilityId, status, categoryId, applied, from, to];
   const queue = useQuery({
-    queryKey: [...queueKey, cursor],
+    queryKey: [...queueKey, pager.cursor],
     queryFn: () => {
       const parts = [
         'scopeType=FACILITY',
@@ -141,7 +133,7 @@ export default function ShiftsPage() {
         applied ? `search=${encodeURIComponent(applied)}` : '',
         from ? `from=${from}` : '',
         to ? `to=${to}` : '',
-        cursor ? `cursor=${cursor}` : '',
+        pager.cursor ? `cursor=${pager.cursor}` : '',
       ].filter(Boolean);
       return api.get<{ requests?: ServiceRequest[]; nextCursor?: string | null }>(
         `/api/v1/service-requests?${parts.join('&')}`,
@@ -153,7 +145,8 @@ export default function ShiftsPage() {
 
   const rows = queue.data?.requests ?? [];
   const nextCursor = queue.data?.nextCursor ?? null;
-  const filtered = categoryId !== 'all' || Boolean(applied) || Boolean(from) || Boolean(to);
+  const activeCount =
+    (categoryId !== 'all' ? 1 : 0) + (applied ? 1 : 0) + (from ? 1 : 0) + (to ? 1 : 0);
 
   function clearFilters() {
     setCategoryId('all');
@@ -161,7 +154,7 @@ export default function ShiftsPage() {
     setApplied('');
     setFrom('');
     setTo('');
-    startOver();
+    pager.startOver();
   }
 
   const cancel = useQueueAction<{ id: string }>({
@@ -171,17 +164,91 @@ export default function ShiftsPage() {
     success: 'Shift cancelled',
   });
 
-  // The same call "Publish a shift" makes as its second step — exposed here
-  // as its own action so a draft stuck behind a since-fixed blocker (facility
-  // verification, most often) can be retried without recreating it.
+  // The same call "Publish a shift" makes as its second step — exposed here as its own action so
+  // a draft stuck behind a since-fixed blocker (facility verification, most often) can be retried
+  // without recreating it.
   const publish = useQueueAction<{ id: string }>({
     queueKey,
     run: ({ id }) => api.post(`/api/v1/service-requests/${id}/publish`, { facilityId }),
     success: 'Shift published',
   });
 
+  const roleOf = (row: ServiceRequest) =>
+    nameOf(reference.data?.professionalCategories, row.professionalCategoryId);
   const hoursOf = (row: ServiceRequest) =>
-    (new Date(row.endsAt).getTime() - new Date(row.startsAt).getTime()) / 3_600_000;
+    Math.round((new Date(row.endsAt).getTime() - new Date(row.startsAt).getTime()) / 60_000);
+  const describe = (row: ServiceRequest) =>
+    `${roleOf(row)}, ${formatShiftWindow(row.startsAt, row.endsAt)}`;
+
+  const columns: Column<ServiceRequest>[] = [
+    {
+      id: 'role',
+      header: 'Profession',
+      role: 'identity',
+      cell: (row) => (
+        <Link href={`/facility/shifts/${row.id}`} className="hover:underline">
+          <span className="block font-medium">{roleOf(row)}</span>
+          {row.specialtyId ? (
+            <span className="block text-sm font-normal text-muted-foreground">
+              {nameOf(reference.data?.specialties, row.specialtyId)}
+            </span>
+          ) : null}
+          {row.cadreLevelId ? (
+            <span className="block text-sm font-normal text-muted-foreground">
+              {nameOf(reference.data?.cadreLevels, row.cadreLevelId)}
+              {row.supervisionAvailable ? ' · supervised' : ''}
+            </span>
+          ) : null}
+        </Link>
+      ),
+    },
+    {
+      id: 'when',
+      header: 'When',
+      cell: (row) => (
+        <>
+          <span className="block">{formatShiftWindow(row.startsAt, row.endsAt)}</span>
+          <span className="block text-sm text-muted-foreground">{formatMinutes(hoursOf(row))}</span>
+        </>
+      ),
+    },
+    {
+      id: 'type',
+      header: 'Type',
+      cell: (row) => (
+        <span className="flex flex-wrap gap-1">
+          <Badge variant="secondary">{humanise(row.shiftType)}</Badge>
+          {row.urgency !== 'ROUTINE' ? (
+            <Badge variant={row.urgency === 'EMERGENCY' ? 'destructive' : 'warning'}>
+              {humanise(row.urgency)}
+            </Badge>
+          ) : null}
+        </span>
+      ),
+    },
+    {
+      id: 'rate',
+      header: 'Rate per hour',
+      align: 'right',
+      numeric: true,
+      cell: (row) => formatNaira(row.hourlyRateKobo),
+    },
+    {
+      id: 'filled',
+      header: 'Places filled',
+      align: 'right',
+      numeric: true,
+      cell: (row) => `${row.confirmedCount ?? 0} of ${row.headcount}`,
+    },
+    {
+      id: 'status',
+      header: 'Status',
+      role: 'status',
+      cell: (row) => <StatusBadge status={row.status} />,
+    },
+  ];
+
+  const nothing = NOTHING_HERE[status] ?? { title: 'No shifts' };
 
   return (
     <>
@@ -195,11 +262,11 @@ export default function ShiftsPage() {
         value={status}
         onValueChange={(value) => {
           setStatus(value);
-          startOver();
+          pager.startOver();
         }}
-        className="mb-5"
+        className="mb-4"
       >
-        <TabsList>
+        <TabsList aria-label="Shift status">
           {STATUSES.map((value) => (
             <TabsTrigger key={value} value={value}>
               {humanise(value)}
@@ -208,312 +275,218 @@ export default function ShiftsPage() {
         </TabsList>
       </Tabs>
 
-      <Card className="mb-6">
-        <CardContent className="pt-6">
-          <form
-            className="flex flex-wrap items-end gap-3"
-            onSubmit={(event) => {
-              event.preventDefault();
-              setApplied(search.trim());
-              startOver();
+      <FilterBar
+        searchLabel="Search notes"
+        searchPlaceholder="Ward, contact, notes"
+        searchValue={search}
+        onSearchChange={setSearch}
+        onSubmit={() => {
+          setApplied(search.trim());
+          pager.startOver();
+        }}
+        activeCount={activeCount}
+        onClear={clearFilters}
+        busy={queue.isFetching && !queue.isPending}
+        summary={!queue.isPending && rows.length > 0 ? `${rows.length} on this page` : undefined}
+      >
+        <Field label="Profession" className="md:min-w-[14rem]">
+          {(a11y) => (
+            <Select
+              value={categoryId}
+              onValueChange={(value) => {
+                setCategoryId(value);
+                pager.startOver();
+              }}
+            >
+              <SelectTrigger {...a11y}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Every profession</SelectItem>
+                {(reference.data?.professionalCategories ?? []).map((entry) => (
+                  <SelectItem key={entry.id} value={entry.id}>
+                    {entry.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </Field>
+        <Field label="Starts after">
+          <Input
+            type="date"
+            value={from}
+            onChange={(event) => {
+              setFrom(event.target.value);
+              pager.startOver();
             }}
-          >
-            <div className="min-w-[220px] flex-1 space-y-1.5">
-              <Label htmlFor="shift-search">Search notes</Label>
-              <Input
-                id="shift-search"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Ward, contact, anything written on the shift"
-              />
-            </div>
-
-            <div className="min-w-[200px] space-y-1.5">
-              <Label>Profession</Label>
-              <Select
-                value={categoryId}
-                onValueChange={(value) => {
-                  setCategoryId(value);
-                  startOver();
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Every profession</SelectItem>
-                  {(reference.data?.professionalCategories ?? []).map((entry) => (
-                    <SelectItem key={entry.id} value={entry.id}>
-                      {entry.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="shift-from">Starts after</Label>
-              <Input
-                id="shift-from"
-                type="date"
-                value={from}
-                onChange={(event) => {
-                  setFrom(event.target.value);
-                  startOver();
-                }}
-                className="w-40"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="shift-to">Starts before</Label>
-              <Input
-                id="shift-to"
-                type="date"
-                value={to}
-                onChange={(event) => {
-                  setTo(event.target.value);
-                  startOver();
-                }}
-                className="w-40"
-              />
-            </div>
-
-            <Button type="submit" loading={queue.isFetching}>
-              <Search />
-              Search
-            </Button>
-
-            {filtered ? (
-              <Button type="button" variant="ghost" onClick={clearFilters}>
-                Clear
-              </Button>
-            ) : null}
-          </form>
-
-          {!queue.isPending && rows.length > 0 ? (
-            <p className="mt-3 text-xs text-muted-foreground">{rows.length} on this page</p>
-          ) : null}
-        </CardContent>
-      </Card>
+          />
+        </Field>
+        <Field label="Starts before">
+          <Input
+            type="date"
+            value={to}
+            onChange={(event) => {
+              setTo(event.target.value);
+              pager.startOver();
+            }}
+          />
+        </Field>
+      </FilterBar>
 
       {queue.isPending ? (
-        <Card className="p-4">
-          <div className="space-y-3">
-            {Array.from({ length: 5 }).map((_, index) => (
-              <Skeleton key={index} className="h-9 w-full" />
-            ))}
-          </div>
-        </Card>
-      ) : queue.isError ? (
-        <Alert variant="destructive">
-          <TriangleAlert />
-          <AlertDescription>These shifts could not be loaded.</AlertDescription>
-        </Alert>
-      ) : rows.length === 0 ? (
-        <EmptyState
-          icon={<CalendarPlus />}
-          title={filtered ? 'Nothing matches that' : `No ${status.toLowerCase()} shifts`}
-          description={
-            filtered
-              ? 'Try a different profession, date range, or clear the filters.'
-              : status === 'PUBLISHED'
-                ? 'Publish one and it becomes available to match against.'
-                : undefined
-          }
+        <TableSkeleton label="Loading shifts" columns={5} />
+      ) : queue.isError && !queue.data ? (
+        <ErrorState
+          error={queue.error}
+          onRetry={() => void queue.refetch()}
+          retrying={queue.isFetching}
         />
+      ) : rows.length === 0 ? (
+        activeCount > 0 ? (
+          <FilteredEmpty noun="shifts" activeCount={activeCount} onClear={clearFilters} />
+        ) : (
+          <EmptyState
+            icon={<CalendarPlus />}
+            title={nothing.title}
+            description={nothing.description}
+          />
+        )
       ) : (
-        <Card>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Profession</TableHead>
-                <TableHead className="w-[130px]">Type</TableHead>
-                <TableHead className="w-[160px]">Starts</TableHead>
-                <TableHead className="text-right">Rate</TableHead>
-                <TableHead className="w-[80px] text-right">Filled</TableHead>
-                <TableHead className="w-[110px]">Status</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((row) => {
-                const filled = row.confirmedCount ?? 0;
-                const hours = hoursOf(row);
-                const isPublishing = publish.isPending && publish.variables?.id === row.id;
-
-                return (
-                  <TableRow key={row.id}>
-                    <TableCell>
-                      <Link href={`/facility/shifts/${row.id}`} className="hover:underline">
-                        <p className="font-medium">
-                          {nameOf(reference.data?.professionalCategories, row.professionalCategoryId)}
-                        </p>
-                        {row.specialtyId ? (
-                          <p className="text-xs text-muted-foreground">
-                            {nameOf(reference.data?.specialties, row.specialtyId)}
-                          </p>
-                        ) : null}
-                        {row.cadreLevelId ? (
-                          <p className="text-xs text-muted-foreground">
-                            {nameOf(reference.data?.cadreLevels, row.cadreLevelId)}
-                            {row.supervisionAvailable ? ' · supervised' : ''}
-                          </p>
-                        ) : null}
-                      </Link>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap gap-1">
-                        <Badge variant="secondary">{humanise(row.shiftType)}</Badge>
-                        {row.urgency !== 'ROUTINE' ? (
-                          <Badge variant={row.urgency === 'EMERGENCY' ? 'destructive' : 'warning'}>
-                            {humanise(row.urgency)}
-                          </Badge>
-                        ) : null}
-                      </div>
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap text-xs">
-                      <p>{formatWhen(row.startsAt)}</p>
-                      <p className="text-muted-foreground">{hours} hours</p>
-                    </TableCell>
-                    <TableCell className="tabular text-right">
-                      {formatNaira(row.hourlyRateKobo)}
-                    </TableCell>
-                    <TableCell className="tabular text-right">
-                      {filled}/{row.headcount}
-                    </TableCell>
-                    <TableCell>
-                      <StatusBadge status={row.status} />
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap justify-end gap-2">
-                        {row.status === 'DRAFT' && canPublish ? (
-                          <Button
-                            size="sm"
-                            loading={isPublishing}
-                            onClick={() => publish.mutate({ id: row.id })}
-                          >
-                            <Send />
-                            Publish
-                          </Button>
-                        ) : null}
-                        {(row.status === 'PUBLISHED' || row.status === 'FILLED') && canStaff ? (
-                          <Link
-                            href={`/facility/shifts/${row.id}`}
-                            className={buttonVariants({ variant: 'outline', size: 'sm' })}
-                          >
-                            <Users />
-                            Find staff
-                          </Link>
-                        ) : (
-                          <Link
-                            href={`/facility/shifts/${row.id}`}
-                            className={buttonVariants({ variant: 'outline', size: 'sm' })}
-                          >
-                            View
-                          </Link>
-                        )}
-                        {(row.status === 'PUBLISHED' || row.status === 'DRAFT' || row.status === 'FILLED') &&
-                        canPublish ? (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="text-destructive-text hover:bg-destructive/10 hover:text-destructive-text"
-                            onClick={() => {
-                              setCancelling(row);
-                              setReason('');
-                            }}
-                          >
-                            Cancel
-                          </Button>
-                        ) : null}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </Card>
+        <DataTable
+          caption={`${humanise(status)} shifts`}
+          rows={rows}
+          columns={columns}
+          getKey={(row) => row.id}
+          actionHeader="Next step"
+          action={(row) => {
+            const canCancel =
+              canPublish &&
+              (row.status === 'PUBLISHED' || row.status === 'DRAFT' || row.status === 'FILLED');
+            return (
+              <div className="flex flex-col gap-2 md:flex-row md:justify-end">
+                {row.status === 'DRAFT' && canPublish ? (
+                  <Button
+                    size="sm"
+                    aria-label={`Publish shift: ${describe(row)}`}
+                    onClick={() => setPublishing(row)}
+                  >
+                    <Send />
+                    Publish
+                  </Button>
+                ) : (row.status === 'PUBLISHED' || row.status === 'FILLED') && canStaff ? (
+                  <Link
+                    href={`/facility/shifts/${row.id}`}
+                    aria-label={`Find staff for shift: ${describe(row)}`}
+                    className={buttonVariants({ variant: 'outline', size: 'sm' })}
+                  >
+                    <Users />
+                    Find staff
+                  </Link>
+                ) : (
+                  <Link
+                    href={`/facility/shifts/${row.id}`}
+                    aria-label={`View shift: ${describe(row)}`}
+                    className={buttonVariants({ variant: 'outline', size: 'sm' })}
+                  >
+                    View
+                  </Link>
+                )}
+                {canCancel ? (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    aria-label={`Cancel shift: ${describe(row)}`}
+                    className="text-destructive-text hover:bg-destructive/10 hover:text-destructive-text"
+                    onClick={() => {
+                      setCancelling(row);
+                      setReason('');
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                ) : null}
+              </div>
+            );
+          }}
+        />
       )}
 
-      {rows.length > 0 && (pageIndex > 0 || nextCursor) ? (
-        <div className="mt-5 flex items-center justify-between gap-3">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={pageIndex === 0 || queue.isFetching}
-            onClick={() => setPageIndex((index) => Math.max(0, index - 1))}
-          >
-            <ChevronLeft />
-            Previous
-          </Button>
+      <Pager
+        pageIndex={pager.pageIndex}
+        hasNext={Boolean(nextCursor)}
+        busy={queue.isFetching}
+        onPrevious={pager.goPrevious}
+        onNext={() => pager.goNext(nextCursor)}
+      />
 
-          <p className="tabular text-xs text-muted-foreground">
-            Page {pageIndex + 1}
-            {queue.isFetching ? ' · loading' : ''}
-          </p>
+      <ConfirmDialog
+        open={publishing !== null}
+        onOpenChange={(next) => !next && setPublishing(null)}
+        title="Publish this shift"
+        object={publishing ? describe(publishing) : ''}
+        consequence={
+          publishing ? (
+            <>
+              It becomes visible to practitioners and can be offered to them at{' '}
+              <span className="tabular font-medium">{formatNaira(publishing.hourlyRateKobo)}</span>{' '}
+              an hour for{' '}
+              {publishing.headcount === 1 ? 'one place' : `${publishing.headcount} places`}. Its
+              terms cannot be changed once it is published.
+            </>
+          ) : null
+        }
+        reversible="You can cancel it afterwards, but not edit it."
+        confirmLabel="Publish shift"
+        loading={publish.isPending}
+        onConfirm={() =>
+          publishing &&
+          publish.mutate({ id: publishing.id }, { onSuccess: () => setPublishing(null) })
+        }
+      />
 
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={!nextCursor || queue.isFetching}
-            onClick={() => {
-              if (!nextCursor) return;
-              setCursors((current) => {
-                const next = current.slice(0, pageIndex + 1);
-                next.push(nextCursor);
-                return next;
-              });
-              setPageIndex((index) => index + 1);
-            }}
-          >
-            Next
-            <ChevronRight />
-          </Button>
-        </div>
-      ) : null}
-
-      <Dialog open={cancelling !== null} onOpenChange={(next: boolean) => !next && setCancelling(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Cancel this shift</DialogTitle>
-            <DialogDescription>
-              Any invitation still waiting for an answer is withdrawn, and anybody already
-              confirmed is released from the shift and sent a message saying so. Your reason is
-              kept on the record; it is not sent to them.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="cancel-reason">Reason</Label>
-            <Textarea
-              id="cancel-reason"
-              rows={2}
-              placeholder="Why the shift is no longer needed."
-              value={reason}
-              onChange={(event) => setReason(event.target.value)}
-            />
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setCancelling(null)}>
-              Keep it
-            </Button>
-            <Button
-              variant="destructive"
-              disabled={reason.trim().length < 3}
-              loading={cancel.isPending}
-              onClick={() =>
-                cancelling &&
-                cancel.mutate({ id: cancelling.id }, { onSuccess: () => setCancelling(null) })
-              }
-            >
-              Cancel the shift
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={cancelling !== null}
+        onOpenChange={(next) => !next && setCancelling(null)}
+        title="Cancel this shift"
+        object={
+          cancelling
+            ? `${describe(cancelling)} · ${cancelling.confirmedCount ?? 0} of ${cancelling.headcount} confirmed`
+            : ''
+        }
+        consequence={
+          <>
+            {cancelling && (cancelling.confirmedCount ?? 0) > 0 ? (
+              <>
+                {cancelling.confirmedCount === 1
+                  ? 'The confirmed practitioner is'
+                  : `All ${cancelling.confirmedCount} confirmed practitioners are`}{' '}
+                released from the shift and sent a message saying so.{' '}
+              </>
+            ) : null}
+            Any invitation still waiting for an answer is withdrawn. Your reason is kept on the
+            record; it is not sent to them.
+          </>
+        }
+        reversible={false}
+        destructive
+        confirmLabel="Cancel the shift"
+        cancelLabel="Keep the shift"
+        loading={cancel.isPending}
+        confirmDisabled={reason.trim().length < 3}
+        onConfirm={() =>
+          cancelling &&
+          cancel.mutate({ id: cancelling.id }, { onSuccess: () => setCancelling(null) })
+        }
+      >
+        <Field
+          label="Reason"
+          hint="Why the shift is no longer needed. At least 3 characters."
+          required
+        >
+          <Textarea rows={2} value={reason} onChange={(event) => setReason(event.target.value)} />
+        </Field>
+      </ConfirmDialog>
     </>
   );
 }

@@ -25,17 +25,23 @@ export function section(page: Page, title: string): Locator {
 /**
  * Chooses an option in a Radix select by the label written above it.
  *
- * The consoles label selects with a sibling `<Label>` rather than `htmlFor`,
- * because a Radix trigger is a button and not a form control, so the
- * accessible-name route does not reach it. The field wrapper does.
+ * A select's trigger is a button, so it is found as the combobox its label is attached to. That
+ * is how `Field` and the bound labels in the consoles work. A few older forms still put a sibling
+ * `<Label>` beside it with no `htmlFor`; for those the field is found by the label's text instead.
  */
 export async function choose(scope: Page | Locator, label: string, option: string | RegExp) {
   // The listbox renders in a portal at the end of <body>, outside any scope.
   const page = 'goto' in scope ? scope : scope.page();
-  const field = scope
-    .locator('div.space-y-1\\.5')
-    .filter({ has: page.getByText(label, { exact: true }) });
-  await field.getByRole('combobox').first().click();
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const bound = scope.getByRole('combobox', { name: new RegExp(`^${escaped}( \\(required\\))?$`) });
+  if ((await bound.count()) > 0) {
+    await bound.first().click();
+  } else {
+    const field = scope
+      .locator('div.space-y-1\\.5')
+      .filter({ has: page.getByText(label, { exact: true }) });
+    await field.getByRole('combobox').first().click();
+  }
   await page.getByRole('option', { name: option }).first().click();
 }
 

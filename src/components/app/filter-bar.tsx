@@ -67,7 +67,7 @@ export function FilterBar({
 
   const search = hasSearch ? (
     <div className="min-w-0 flex-1">
-      <Label htmlFor={searchId} className="mb-1.5 block text-sm font-medium">
+      <Label htmlFor={searchId} className="mb-1.5 block text-base font-medium leading-snug">
         {searchLabel ?? 'Search'}
       </Label>
       <div className="relative">

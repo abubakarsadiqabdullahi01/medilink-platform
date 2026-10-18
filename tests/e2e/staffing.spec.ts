@@ -38,10 +38,16 @@ test('the scheduler publishes a shift', async ({ page }) => {
   await dialog.getByLabel('Ends', { exact: true }).fill(lagosLocal(endsAt));
   await dialog.getByLabel('Notes for the practitioner (optional)').fill(marker);
   // The estimate is the page doing the arithmetic in kobo before anybody commits.
-  await expect(dialog.getByText(/8 hours ×/)).toBeVisible();
-  await dialog.getByRole('button', { name: 'Publish', exact: true }).click();
+  await expect(dialog.getByText(/8h ×/)).toBeVisible();
 
-  await expectToast(page, 'Shift published');
+  // Publishing is a deliberate step: the shift is read back first, and nothing is sent until the
+  // person says so on that screen.
+  await dialog.getByRole('button', { name: 'Review before publishing' }).click();
+  await expect(dialog.getByText(marker)).toBeVisible();
+  await dialog.getByRole('button', { name: 'Publish this shift' }).click();
+
+  await expect(dialog.getByText(/shift is published/)).toBeVisible({ timeout: 60_000 });
+  await dialog.getByRole('button', { name: 'Close' }).click();
   await expect(dialog).toBeHidden();
 
   // Found again by what was written on it, which is how a scheduler with a

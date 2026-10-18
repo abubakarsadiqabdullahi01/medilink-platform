@@ -40,6 +40,7 @@ export function ConfirmDialog({
   consequence,
   reversible,
   confirmLabel,
+  cancelLabel = 'Cancel',
   destructive = false,
   loading = false,
   confirmDisabled = false,
@@ -56,6 +57,8 @@ export function ConfirmDialog({
   /** `true`, `false`, or the way back in words ("Ask the practitioner to resubmit"). */
   reversible: boolean | string;
   confirmLabel: string;
+  /** When "Cancel" would be confusable with the action itself — "Keep the shift". */
+  cancelLabel?: string;
   destructive?: boolean;
   loading?: boolean;
   /** For a decision that needs something first — a reason. Say what it needs beside the field. */
@@ -120,7 +123,7 @@ export function ConfirmDialog({
             disabled={loading}
             data-confirm-cancel
           >
-            Cancel
+            {cancelLabel}
           </Button>
           <Button
             type="button"
