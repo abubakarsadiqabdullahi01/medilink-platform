@@ -14,7 +14,6 @@ import {
 import { cn } from '@/lib/utils';
 import { api } from '@/lib/ui/api';
 import {
-  BLOCKER_GUIDE,
   useEligibility,
   usePractitionerSetup,
   type ApplicationState,
@@ -24,10 +23,11 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { StatusBadge, humanise } from '@/components/app/status-badge';
+import { StatusBadge } from '@/components/app/status-badge';
 import { ReturnedNotice } from '@/app/practitioner/profile/returned-notice';
 import { PageHeader } from '@/components/app/page-shell';
 import { MyInvitations } from '@/components/app/my-invitations';
+import { headline, reasonLines } from '@/modules/practitioners/domain/not-offered';
 import { formatWhen } from '@/components/app/format';
 
 interface Assignment {
@@ -151,12 +151,12 @@ function Overview() {
     retry: false,
   });
 
-  const reasons = (eligibility.data?.blockers ?? []).map((blocker) => ({
-    blocker,
-    guide: BLOCKER_GUIDE[blocker] ?? { says: humanise(blocker) },
-  }));
-  const yours = reasons.filter((reason) => reason.guide.href);
-  const ours = reasons.filter((reason) => !reason.guide.href);
+  // Every reason, once each, from one place: which document and where it stands, what else keeps an
+  // approved account from being offered shifts, and who can clear each.
+  const reasons = eligibility.data ? reasonLines(eligibility.data) : [];
+  const yours = reasons.filter((reason) => reason.owner === 'you');
+  const ours = reasons.filter((reason) => reason.owner === 'medilink');
+  const standing = eligibility.data ? headline(eligibility.data) : 'not_eligible';
 
   const open = (invitations.data ?? []).filter((row) => row.status === 'INVITED');
   const next = [...(assignments.data ?? [])]
@@ -193,29 +193,31 @@ function Overview() {
           {eligibility.isPending ? (
             <Skeleton className="h-24 w-full" />
           ) : eligibility.data ? (
-            <Card
-              className={cn(eligibility.data.eligible ? 'border-success/40' : 'border-warning/40')}
-            >
+            <Card className={cn(standing === 'offered' ? 'border-success/40' : 'border-warning/40')}>
               <CardContent className="flex items-start gap-3 pt-6">
-                {eligibility.data.eligible ? (
+                {standing === 'offered' ? (
                   <CircleCheck className="mt-0.5 size-5 shrink-0 text-success" />
                 ) : (
                   <CircleAlert className="mt-0.5 size-5 shrink-0 text-warning" />
                 )}
                 <div className="min-w-0">
                   <p className="font-medium">
-                    {eligibility.data.eligible
+                    {standing === 'offered'
                       ? 'You can be offered shifts'
-                      : 'You cannot be offered shifts yet'}
+                      : standing === 'approved_but_not_offered'
+                        ? 'You are approved, but you will not be offered shifts yet'
+                        : 'You cannot be offered shifts yet'}
                   </p>
-                  {eligibility.data.eligible ? (
+                  {standing === 'offered' ? (
                     <p className="mt-1 text-sm text-muted-foreground">
                       Everything the platform requires is in place.
                     </p>
                   ) : (
                     <>
                       <p className="mt-1 text-sm text-muted-foreground">
-                        These are the reasons, in full. Nothing is being withheld.
+                        {standing === 'approved_but_not_offered'
+                          ? 'Nothing is wrong with your registration or documents. These are the reasons, in full.'
+                          : 'These are the reasons, in full. Nothing is being withheld.'}
                       </p>
 
                       <div className="mt-4 grid gap-x-10 gap-y-4 2xl:grid-cols-2">
@@ -225,15 +227,15 @@ function Overview() {
                               Yours to do
                             </p>
                             <ul className="mt-2 space-y-2">
-                              {yours.map(({ blocker, guide }) => (
-                                <li key={blocker} className="text-sm leading-relaxed">
-                                  {guide.says}{' '}
-                                  {guide.href && guide.action ? (
+                              {yours.map((reason) => (
+                                <li key={`${reason.code}-${reason.text}`} className="text-sm leading-relaxed">
+                                  {reason.text}{' '}
+                                  {reason.href && reason.action ? (
                                     <Link
-                                      href={guide.href}
+                                      href={reason.href}
                                       className="font-medium text-primary underline-offset-4 hover:underline"
                                     >
-                                      {guide.action}
+                                      {reason.action}
                                     </Link>
                                   ) : null}
                                 </li>
@@ -248,12 +250,12 @@ function Overview() {
                               Waiting on Medilink
                             </p>
                             <ul className="mt-2 space-y-2">
-                              {ours.map(({ blocker, guide }) => (
+                              {ours.map((reason) => (
                                 <li
-                                  key={blocker}
+                                  key={`${reason.code}-${reason.text}`}
                                   className="text-sm leading-relaxed text-muted-foreground"
                                 >
-                                  {guide.says}
+                                  {reason.text}
                                 </li>
                               ))}
                             </ul>

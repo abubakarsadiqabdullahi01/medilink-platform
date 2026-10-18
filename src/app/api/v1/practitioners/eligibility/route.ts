@@ -1,10 +1,12 @@
 import { handleGuardedRequest } from '@/lib/http/guarded-handler';
 import { eligibilityQuerySchema } from '@/modules/practitioners/presentation/schemas';
-import { getEligibility } from '@/modules/practitioners/application/eligibility';
+import { getNotOfferedView } from '@/modules/practitioners/application/not-offered';
 
 /**
  * GET /api/v1/practitioners/eligibility — every reason one practitioner is
- * not yet eligible to be matched, or none.
+ * not yet eligible to be matched, or none, with which documents are outstanding
+ * and where each stands, and what else keeps an approved practitioner from
+ * being offered shifts (M02-07).
  *
  * SELF for a practitioner checking their own account, PLATFORM for
  * compliance looking at someone else's — the same "the caller states the
@@ -28,7 +30,7 @@ export async function GET(request: Request) {
       if (!userId) {
         return { eligible: false, blockers: ['account_not_usable'] };
       }
-      return getEligibility(userId);
+      return getNotOfferedView(userId);
     },
   });
 }
