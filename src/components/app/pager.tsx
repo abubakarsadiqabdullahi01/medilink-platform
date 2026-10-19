@@ -13,7 +13,12 @@ export function Pager({
   busy = false,
   onPrevious,
   onNext,
+  previousLabel = 'Previous',
+  nextLabel = 'Next',
 }: {
+  /** "Newer" / "Older" for a list that is ordered by time; the default is for everything else. */
+  previousLabel?: string;
+  nextLabel?: string;
   pageIndex: number;
   hasNext: boolean;
   busy?: boolean;
@@ -26,14 +31,14 @@ export function Pager({
     <nav aria-label="Pages" className="mt-5 flex items-center justify-between gap-3">
       <Button variant="outline" disabled={pageIndex === 0 || busy} onClick={onPrevious}>
         <ChevronLeft />
-        Previous
+        {previousLabel}
       </Button>
       <p role="status" aria-live="polite" className="tabular text-sm text-muted-foreground">
         Page {pageIndex + 1}
         {busy ? ' · loading' : ''}
       </p>
       <Button variant="outline" disabled={!hasNext || busy} onClick={onNext}>
-        Next
+        {nextLabel}
         <ChevronRight />
       </Button>
     </nav>
