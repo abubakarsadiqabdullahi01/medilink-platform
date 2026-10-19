@@ -68,7 +68,11 @@ test('an administrator takes the case and closes it with a finding', async ({ pa
   await page.getByLabel('Search what was reported').fill(marker);
   await page.getByRole('button', { name: 'Search' }).click();
 
-  await page.getByRole('button').filter({ hasText: marker }).click();
+  await page
+    .getByRole('row')
+    .filter({ hasText: marker })
+    .getByRole('button', { name: /Open the case/ })
+    .click();
   await page.getByRole('button', { name: 'Take this case' }).click();
   await expectToast(page, 'Case taken');
 
@@ -76,6 +80,7 @@ test('an administrator takes the case and closes it with a finding', async ({ pa
   await page
     .getByLabel(/What was found/)
     .fill('Alarm volume resets on battery swap; biomedical engineering is changing the default.');
-  await page.getByRole('button', { name: 'Close incident' }).click();
+  await page.getByRole('button', { name: 'Review and close' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Close incident' }).click();
   await expectToast(page, 'Incident closed');
 });

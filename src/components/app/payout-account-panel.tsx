@@ -82,8 +82,14 @@ export function PayoutAccountPanel({
   readyAt: string | null | undefined;
 }) {
   const queryClient = useQueryClient();
-  const [details, setDetails] = useState<{ practitionerName: string; accounts: OfficerAccount[] } | null>(null);
-  const [deciding, setDeciding] = useState<{ account: OfficerAccount; decision: 'verify' | 'reject' } | null>(null);
+  const [details, setDetails] = useState<{
+    practitionerName: string;
+    accounts: OfficerAccount[];
+  } | null>(null);
+  const [deciding, setDeciding] = useState<{
+    account: OfficerAccount;
+    decision: 'verify' | 'reject';
+  } | null>(null);
   const [text, setText] = useState('');
   const stepUp = useStepUp('Showing and checking a bank account is part of moving money.');
 
@@ -106,10 +112,18 @@ export function PayoutAccountPanel({
   });
 
   const decide = useMutation({
-    mutationFn: ({ account, decision }: { account: OfficerAccount; decision: 'verify' | 'reject' }) =>
+    mutationFn: ({
+      account,
+      decision,
+    }: {
+      account: OfficerAccount;
+      decision: 'verify' | 'reject';
+    }) =>
       api.post(`/api/v1/payout-accounts/${account.id}/review`, {
         decision,
-        ...(decision === 'reject' ? { note: text.trim() } : { overrideReason: text.trim() || undefined }),
+        ...(decision === 'reject'
+          ? { note: text.trim() }
+          : { overrideReason: text.trim() || undefined }),
       }),
     onSuccess: (_data, { decision }) => {
       toast.success(decision === 'verify' ? 'Verified' : 'Refused', {
@@ -128,7 +142,10 @@ export function PayoutAccountPanel({
   const wait = readyAt && new Date(readyAt) > new Date() ? new Date(readyAt) : null;
   const note = standing ? STANDING[standing] : null;
   const needsReason = deciding?.decision === 'verify' && deciding.account.problems.length > 0;
-  const canConfirm = deciding?.decision === 'reject' ? text.trim().length > 0 : !needsReason || text.trim().length >= 10;
+  const canConfirm =
+    deciding?.decision === 'reject'
+      ? text.trim().length > 0
+      : !needsReason || text.trim().length >= 10;
 
   return (
     <>
@@ -168,7 +185,9 @@ export function PayoutAccountPanel({
           {deciding?.decision === 'reject' || needsReason ? (
             <div className="space-y-1.5">
               <Label htmlFor="account-reason">
-                {deciding?.decision === 'reject' ? 'Why is it being refused?' : 'Why is it still the right account?'}
+                {deciding?.decision === 'reject'
+                  ? 'Why is it being refused?'
+                  : 'Why is it still the right account?'}
               </Label>
               <Textarea
                 id="account-reason"
@@ -196,12 +215,17 @@ export function PayoutAccountPanel({
       </Dialog>
 
       <Card className="mb-6">
-        <CardHeader className="flex-row items-center justify-between gap-3 space-y-0 pb-3">
-          <CardTitle className="flex items-center gap-2 text-sm">
-            <Landmark className="size-4" aria-hidden="true" />
+        <CardHeader className="flex-row flex-wrap items-center justify-between gap-3 space-y-0 pb-3">
+          <CardTitle className="flex items-center gap-2 whitespace-nowrap text-sm">
+            <Landmark className="size-4 shrink-0" aria-hidden="true" />
             Where to pay them
           </CardTitle>
-          <Button variant="outline" size="sm" loading={reveal.isPending} onClick={() => reveal.mutate()}>
+          <Button
+            variant="outline"
+            size="sm"
+            loading={reveal.isPending}
+            onClick={() => reveal.mutate()}
+          >
             <Eye />
             Show account details
           </Button>
@@ -211,7 +235,9 @@ export function PayoutAccountPanel({
             <Alert variant={note.tone}>
               <AlertDescription>
                 {note.text}
-                {standing === 'cooling_off' && wait ? ` Payouts can go to it from ${formatWhen(wait.toISOString())}.` : ''}
+                {standing === 'cooling_off' && wait
+                  ? ` Payouts can go to it from ${formatWhen(wait.toISOString())}.`
+                  : ''}
               </AlertDescription>
             </Alert>
           ) : null}
@@ -225,10 +251,13 @@ export function PayoutAccountPanel({
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="font-medium">{account.bankName}</p>
-                      <p className="mt-1 font-mono text-lg tracking-wide">{account.accountNumber}</p>
+                      <p className="mt-1 font-mono text-lg tracking-wide">
+                        {account.accountNumber}
+                      </p>
                       <p className="mt-1 text-sm">{account.accountName}</p>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        Registered as {details.practitionerName} · given {formatDate(account.createdAt)}
+                        Registered as {details.practitionerName} · given{' '}
+                        {formatDate(account.createdAt)}
                       </p>
                     </div>
                     <StatusBadge status={account.status} />
@@ -249,10 +278,16 @@ export function PayoutAccountPanel({
 
                   {account.status === 'PENDING' ? (
                     <div className="flex flex-wrap gap-2">
-                      <Button variant="success" onClick={() => setDeciding({ account, decision: 'verify' })}>
+                      <Button
+                        variant="success"
+                        onClick={() => setDeciding({ account, decision: 'verify' })}
+                      >
                         Verify
                       </Button>
-                      <Button variant="outline" onClick={() => setDeciding({ account, decision: 'reject' })}>
+                      <Button
+                        variant="outline"
+                        onClick={() => setDeciding({ account, decision: 'reject' })}
+                      >
                         Refuse
                       </Button>
                     </div>

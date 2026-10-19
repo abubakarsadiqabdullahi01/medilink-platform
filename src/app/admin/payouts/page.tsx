@@ -18,7 +18,7 @@ import { PayoutAccountPanel, type AccountState } from '@/components/app/payout-a
 import { StatusBadge } from '@/components/app/status-badge';
 import { EmptyState, PageHeader } from '@/components/app/page-shell';
 import { ErrorState, ListSkeleton } from '@/components/app/states';
-import { useStepUp } from '@/components/app/step-up';
+import { isStepUpRequired, useStepUp } from '@/components/app/step-up';
 import { formatDate, formatNaira, formatWhen } from '@/components/app/format';
 import { lagosDate } from '@/lib/lagos-date';
 
@@ -136,7 +136,6 @@ export default function PayoutsPage() {
     },
     onError: (error) => {
       if (stepUp.handle(error, () => prepare.mutate())) return;
-      toast.error('Could not prepare it', { description: errorMessage(error) });
     },
   });
 
@@ -157,9 +156,6 @@ export default function PayoutsPage() {
     },
     onError: (error, payout) => {
       if (stepUp.handle(error, () => release.mutate(payout))) return;
-      toast.error(byHand ? 'Could not release it' : 'The gateway refused it', {
-        description: errorMessage(error),
-      });
     },
   });
 
@@ -178,7 +174,6 @@ export default function PayoutsPage() {
     },
     onError: (error, payout) => {
       if (stepUp.handle(error, () => settle.mutate(payout))) return;
-      toast.error('Could not record it', { description: errorMessage(error) });
     },
   });
 
@@ -195,9 +190,13 @@ export default function PayoutsPage() {
     },
     onError: (error, variables) => {
       if (stepUp.handle(error, () => withdraw.mutate(variables))) return;
-      toast.error('Could not do that', { description: errorMessage(error) });
     },
   });
+
+  // A failed confirmation is read inside the dialog, which stays open with what was typed. A
+  // step-up refusal is not a failure: the password prompt handles it and the action runs again.
+  const failure = (error: unknown) =>
+    error && !isStepUpRequired(error) ? errorMessage(error) : null;
 
   function startRecording(payout: Payout) {
     setRecording(payout);
@@ -393,7 +392,10 @@ export default function PayoutsPage() {
 
       <ConfirmDialog
         open={preparing}
-        onOpenChange={setPreparing}
+        onOpenChange={(next) => {
+          setPreparing(next);
+          if (!next) prepare.reset();
+        }}
         title="Prepare a payout"
         object={
           <>
@@ -408,15 +410,25 @@ export default function PayoutsPage() {
             from the ledger when you confirm.
           </>
         }
-        reversible="Until it is released, you can cancel it and what it was holding is freed."
+        reversible={{
+          tone: 'open',
+          label: 'You can cancel it before it is released.',
+          detail: 'Cancelling frees what it was holding.',
+        }}
         confirmLabel="Prepare payout"
         loading={prepare.isPending}
+        error={failure(prepare.error)}
         onConfirm={() => prepare.mutate()}
       />
 
       <ConfirmDialog
         open={releasing !== null}
-        onOpenChange={(open) => !open && setReleasing(null)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setReleasing(null);
+            release.reset();
+          }
+        }}
         title="Release this payout"
         object={
           releasing ? (
@@ -444,11 +456,21 @@ export default function PayoutsPage() {
         }
         reversible={
           byHand
-            ? 'If the transfer is never made, record it as not paid and the money can be prepared again.'
+            ? {
+                tone: 'open',
+                label: 'Finance can still record it as not paid.',
+                detail:
+                  'If the transfer is never made, record it as not paid and the money can be prepared again.',
+              }
             : false
         }
         confirmLabel="Release payout"
         loading={release.isPending}
+        error={
+          release.error && !isStepUpRequired(release.error)
+            ? `${byHand ? 'It could not be released.' : 'The gateway refused it.'} ${errorMessage(release.error)}`
+            : null
+        }
         onConfirm={() => releasing && release.mutate(releasing)}
       >
         {byHand ? null : (
@@ -460,7 +482,12 @@ export default function PayoutsPage() {
 
       <ConfirmDialog
         open={recording !== null}
-        onOpenChange={(open) => !open && setRecording(null)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRecording(null);
+            settle.reset();
+          }
+        }}
         title="Record the transfer"
         object={
           recording ? (
@@ -481,6 +508,7 @@ export default function PayoutsPage() {
         reversible={false}
         confirmLabel="Record transfer"
         loading={settle.isPending}
+        error={failure(settle.error)}
         confirmDisabled={transfer.reference.trim().length < 3 || transfer.paidOn === ''}
         onConfirm={() => recording && settle.mutate(recording)}
       >
@@ -508,6 +536,7 @@ export default function PayoutsPage() {
           if (!open) {
             setWithdrawing(null);
             setReason('');
+            withdraw.reset();
           }
         }}
         title={
@@ -524,23 +553,27 @@ export default function PayoutsPage() {
         }
         consequence={
           withdrawing?.kind === 'cancel' ? (
-            <>
-              Nothing has been released, so nothing has moved. This payout is cancelled and cannot
-              be reopened; what it was holding can be prepared again.
-            </>
+            <>Nothing has been released, so nothing has moved. This payout is cancelled.</>
           ) : (
             <>
               Use this only if the money did not leave the bank. If it did, record the transfer
-              instead, or the practitioner will be paid twice. This payout is closed as not paid,
-              and what it was holding can be prepared again.
+              instead, or the practitioner will be paid twice. This payout is closed as not paid.
             </>
           )
         }
-        reversible={false}
+        reversible={{
+          tone: 'open',
+          label:
+            withdrawing?.kind === 'cancel'
+              ? 'This payout cannot be reopened.'
+              : 'This payout cannot be reopened as it was.',
+          detail: 'What it was holding can be prepared again, as a new payout.',
+        }}
         destructive
         confirmLabel={withdrawing?.kind === 'cancel' ? 'Cancel payout' : 'Record as not paid'}
         cancelLabel={withdrawing?.kind === 'cancel' ? 'Keep the payout' : 'Back'}
         loading={withdraw.isPending}
+        error={failure(withdraw.error)}
         confirmDisabled={reason.trim().length === 0}
         onConfirm={() => withdrawing && withdraw.mutate(withdrawing)}
       >

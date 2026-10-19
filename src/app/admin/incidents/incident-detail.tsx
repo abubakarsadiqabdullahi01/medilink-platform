@@ -147,7 +147,6 @@ export function IncidentDetail({ incident, onBack }: { incident: Incident; onBac
       setConfirming(false);
       refresh();
     },
-    onError: (error) => toast.error('Could not close it', { description: errorMessage(error) }),
   });
 
   const noteLength = note.trim().length;
@@ -381,7 +380,10 @@ export function IncidentDetail({ incident, onBack }: { incident: Incident; onBac
 
       <ConfirmDialog
         open={confirming}
-        onOpenChange={setConfirming}
+        onOpenChange={(next) => {
+          setConfirming(next);
+          if (!next) close.reset();
+        }}
         title="Close this incident"
         object={
           <>
@@ -410,6 +412,7 @@ export function IncidentDetail({ incident, onBack }: { incident: Incident; onBac
         confirmLabel="Close incident"
         cancelLabel="Not yet"
         loading={close.isPending}
+        error={close.error ? errorMessage(close.error) : null}
         onConfirm={() => close.mutate()}
       />
     </>

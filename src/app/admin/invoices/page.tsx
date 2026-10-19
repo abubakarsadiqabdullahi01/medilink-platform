@@ -26,7 +26,7 @@ import { Money } from '@/components/app/money';
 import { EmptyState, PageHeader } from '@/components/app/page-shell';
 import { ErrorState, ListSkeleton } from '@/components/app/states';
 import { StatusBadge } from '@/components/app/status-badge';
-import { useStepUp } from '@/components/app/step-up';
+import { isStepUpRequired, useStepUp } from '@/components/app/step-up';
 import { formatDate, formatMinutes, formatNaira, parseNairaToKobo } from '@/components/app/format';
 
 interface FacilitySummary {
@@ -180,7 +180,6 @@ export default function InvoicesPage() {
     },
     onError: (error, invoice) => {
       if (stepUp.handle(error, () => issue.mutate(invoice))) return;
-      toast.error('Could not issue it', { description: errorMessage(error) });
     },
   });
 
@@ -200,7 +199,6 @@ export default function InvoicesPage() {
     },
     onError: (error, invoice) => {
       if (stepUp.handle(error, () => voidIt.mutate(invoice))) return;
-      toast.error('Could not void it', { description: errorMessage(error) });
     },
   });
 
@@ -222,9 +220,13 @@ export default function InvoicesPage() {
     },
     onError: (error, invoice) => {
       if (stepUp.handle(error, () => pay.mutate(invoice))) return;
-      toast.error('Could not record it', { description: errorMessage(error) });
     },
   });
+
+  // A failed confirmation is read inside the dialog, which stays open with what was typed. A
+  // step-up refusal is not a failure: the password prompt handles it and the action runs again.
+  const failure = (error: unknown) =>
+    error && !isStepUpRequired(error) ? errorMessage(error) : null;
 
   const describe = (invoice: Invoice) =>
     `${invoice.number} · ${facilityName} · ${formatDate(invoice.periodStart)} – ${formatDate(invoice.periodEnd)}`;
@@ -235,7 +237,12 @@ export default function InvoicesPage() {
 
       <ConfirmDialog
         open={issuing !== null}
-        onOpenChange={(open) => !open && setIssuing(null)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setIssuing(null);
+            issue.reset();
+          }
+        }}
         title="Issue this invoice"
         object={
           issuing ? (
@@ -257,6 +264,7 @@ export default function InvoicesPage() {
         reversible={false}
         confirmLabel="Issue invoice"
         loading={issue.isPending}
+        error={failure(issue.error)}
         onConfirm={() => issuing && issue.mutate(issuing)}
       />
 
@@ -266,6 +274,7 @@ export default function InvoicesPage() {
           if (!open) {
             setVoiding(null);
             setVoidReason('');
+            voidIt.reset();
           }
         }}
         title="Void this draft"
@@ -281,16 +290,21 @@ export default function InvoicesPage() {
         consequence={
           <>
             The draft is cancelled and what the ledger credited for it is reversed. Its{' '}
-            {voiding ? shifts(voiding.lines.length) : 'shifts'} can be invoiced again by raising a
-            new draft. If a payout has already been prepared or made for anybody on it, the system
-            refuses. An issued invoice cannot be voided here.
+            {voiding ? shifts(voiding.lines.length) : 'shifts'} can be invoiced again. If a payout
+            has already been prepared or made for anybody on it, the system refuses. An issued
+            invoice cannot be voided here.
           </>
         }
-        reversible={false}
+        reversible={{
+          tone: 'final',
+          label: 'This cannot be undone.',
+          detail: 'Raising a new draft for the period bills the same shifts again.',
+        }}
         destructive
         confirmLabel="Void invoice"
         cancelLabel="Keep the draft"
         loading={voidIt.isPending}
+        error={failure(voidIt.error)}
         confirmDisabled={voidReason.trim().length < 10}
         onConfirm={() => voiding && voidIt.mutate(voiding)}
       >
@@ -310,7 +324,12 @@ export default function InvoicesPage() {
 
       <ConfirmDialog
         open={paying !== null}
-        onOpenChange={(open) => !open && setPaying(null)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPaying(null);
+            pay.reset();
+          }
+        }}
         title="Record a payment received"
         object={
           paying ? (
@@ -335,6 +354,7 @@ export default function InvoicesPage() {
         reversible={false}
         confirmLabel="Record payment"
         loading={pay.isPending}
+        error={failure(pay.error)}
         confirmDisabled={!paymentReady}
         onConfirm={() => paying && pay.mutate(paying)}
       >

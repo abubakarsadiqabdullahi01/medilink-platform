@@ -446,7 +446,24 @@ function FiguresAsTable({
       <summary className="flex min-h-11 cursor-pointer items-center text-sm font-medium text-primary underline-offset-4 hover:underline">
         Show these figures as a table
       </summary>
-      <div className="overflow-x-auto pb-1">
+      {/* On a phone a three-column table of seven-figure amounts runs off the edge and the last
+          column is the one that goes; each row becomes its own small list instead. */}
+      <ul className="divide-y sm:hidden" aria-label={caption}>
+        {rows.map((cells, rowIndex) => (
+          <li key={rowIndex} className="py-3">
+            <p className="font-medium">{cells[0]}</p>
+            <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5">
+              {head.slice(1).map((label, index) => (
+                <div key={label} className="contents">
+                  <dt className="text-muted-foreground">{label}</dt>
+                  <dd className="tabular text-right">{cells[index + 1]}</dd>
+                </div>
+              ))}
+            </dl>
+          </li>
+        ))}
+      </ul>
+      <div className="hidden overflow-x-auto pb-1 sm:block">
         <Table>
           <caption className="sr-only">{caption}</caption>
           <TableHeader>

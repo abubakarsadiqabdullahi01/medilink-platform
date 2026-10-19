@@ -1,6 +1,6 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { CircleAlert, Info, Undo2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -84,6 +84,12 @@ export function ConfirmDialog({
   /** Extra fields the decision needs: a reason, a step-up prompt. */
   children?: ReactNode;
 }) {
+  // A tall dialog on a phone shows its failure below the fold; bring it into view when it arrives.
+  const errorRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (error) errorRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [error]);
+
   const structured = typeof reversible === 'object' ? reversible : null;
   const final = structured ? structured.tone === 'final' : reversible === false;
   const focusCancel = destructive || final;
@@ -140,6 +146,7 @@ export function ConfirmDialog({
           {children}
           {error ? (
             <p
+              ref={errorRef}
               role="alert"
               className="flex items-start gap-1.5 text-sm font-medium text-destructive-text"
             >

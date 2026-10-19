@@ -120,9 +120,10 @@ test('an administrator takes the case and decides it', async ({ page }) => {
   await page.getByRole('button', { name: 'Search' }).click();
 
   await page
-    .getByRole('button')
+    .getByRole('row')
     .filter({ hasText: world().practitioner.fullName })
     .filter({ hasText: shiftLabel() })
+    .getByRole('button', { name: /Open the case/ })
     .click();
 
   await page.getByRole('button', { name: 'Start reviewing' }).click();
@@ -131,7 +132,12 @@ test('an administrator takes the case and decides it', async ({ page }) => {
   await page
     .getByLabel(/Your finding/)
     .fill('The ward paper log shows handover at the scheduled time; the approved hours stand.');
-  await page.getByRole('button', { name: 'Dismiss', exact: true }).click();
+  await page.getByRole('button', { name: 'Dismiss…' }).click();
+  // A decision is read back before it is made.
+  await page
+    .getByRole('dialog', { name: 'Dismiss this dispute' })
+    .getByRole('button', { name: 'Dismiss dispute' })
+    .click();
   await expectToast(page, 'Dismissed');
 
   // The decision reaches the facility's side too: the shift is out of dispute.

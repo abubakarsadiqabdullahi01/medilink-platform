@@ -6,7 +6,6 @@ import { toast } from 'sonner';
 import { TriangleAlert } from 'lucide-react';
 import { api, errorMessage } from '@/lib/ui/api';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -138,7 +137,6 @@ export default function SanctionsPage() {
       setPasted('');
       void queryClient.invalidateQueries({ queryKey: ['sanctions'] });
     },
-    onError: (error) => toast.error('Could not add it', { description: errorMessage(error) }),
   });
 
   const remove = useMutation({
@@ -150,7 +148,6 @@ export default function SanctionsPage() {
       setRemoveReason('');
       void queryClient.invalidateQueries({ queryKey: ['sanctions'] });
     },
-    onError: (error) => toast.error('Could not remove it', { description: errorMessage(error) }),
   });
 
   const single = {
@@ -185,10 +182,11 @@ export default function SanctionsPage() {
       ),
     },
     {
+      // Words, wrapping: the longest list name is nine words, and as a badge in the status slot of
+      // a phone card it took the whole width and left the person's name one letter wide.
       id: 'list',
       header: 'List',
-      role: 'status',
-      cell: (entry) => <Badge variant="outline">{listLabel(entry.sourceList)}</Badge>,
+      cell: (entry) => listLabel(entry.sourceList),
     },
     {
       id: 'reason',
@@ -202,7 +200,12 @@ export default function SanctionsPage() {
     <>
       <ConfirmDialog
         open={adding !== null}
-        onOpenChange={(next) => !next && setAdding(null)}
+        onOpenChange={(next) => {
+          if (!next) {
+            setAdding(null);
+            add.reset();
+          }
+        }}
         title={adding && adding.length > 1 ? `Add ${adding.length} entries` : 'Add to the list'}
         object={
           adding ? (
@@ -224,12 +227,17 @@ export default function SanctionsPage() {
             {adding && adding.length > 1 ? ' All of them go in, or none do.' : ''}
           </>
         }
-        reversible="Each entry can be removed again, with a reason."
+        reversible={{
+          tone: 'open',
+          label: 'Each entry can be removed again.',
+          detail: 'Removing needs a reason, and everybody is screened again.',
+        }}
         confirmLabel={
           adding && adding.length > 1 ? `Add ${adding.length} entries` : 'Add to the list'
         }
         cancelLabel="Not yet"
         loading={add.isPending}
+        error={add.error ? errorMessage(add.error) : null}
         onConfirm={() => adding && add.mutate(adding)}
       >
         {adding && adding.length > 1 ? (
@@ -273,6 +281,7 @@ export default function SanctionsPage() {
           if (!open) {
             setRemoving(null);
             setRemoveReason('');
+            remove.reset();
           }
         }}
         title="Remove from the list"
@@ -294,11 +303,16 @@ export default function SanctionsPage() {
             Everybody is screened again at once. The reason is kept with your name.
           </>
         }
-        reversible="The entry can be added again, and everybody is screened against it again."
+        reversible={{
+          tone: 'open',
+          label: 'It can be added again.',
+          detail: 'Everybody is screened against it again when it is.',
+        }}
         destructive
         confirmLabel="Remove"
         cancelLabel="Keep it on the list"
         loading={remove.isPending}
+        error={remove.error ? errorMessage(remove.error) : null}
         confirmDisabled={removeReason.trim().length < 5}
         onConfirm={() => removing && remove.mutate(removing)}
       >

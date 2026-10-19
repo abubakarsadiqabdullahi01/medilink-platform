@@ -165,7 +165,6 @@ export function DisputeDetail({ dispute, onBack }: { dispute: Dispute; onBack: (
       settled();
       onBack();
     },
-    onError: (error) => toast.error('Could not record it', { description: errorMessage(error) }),
   });
 
   return (
@@ -447,7 +446,12 @@ export function DisputeDetail({ dispute, onBack }: { dispute: Dispute; onBack: (
 
       <ConfirmDialog
         open={deciding !== null}
-        onOpenChange={(next) => !next && setDeciding(null)}
+        onOpenChange={(next) => {
+          if (!next) {
+            setDeciding(null);
+            resolve.reset();
+          }
+        }}
         title={deciding === 'UPHELD' ? 'Uphold this dispute' : 'Dismiss this dispute'}
         object={
           <>
@@ -478,6 +482,7 @@ export function DisputeDetail({ dispute, onBack }: { dispute: Dispute; onBack: (
         confirmLabel={deciding === 'UPHELD' ? 'Uphold dispute' : 'Dismiss dispute'}
         cancelLabel="Not yet"
         loading={resolve.isPending}
+        error={resolve.error ? errorMessage(resolve.error) : null}
         onConfirm={() => deciding && resolve.mutate(deciding)}
       >
         <figure className="rounded-md border bg-muted/40 px-3 py-2">

@@ -127,7 +127,6 @@ export function UnhonouredDetail({ record, onBack }: { record: Unhonoured; onBac
       void queryClient.invalidateQueries({ queryKey: ['tile'] });
       onBack();
     },
-    onError: (error) => toast.error('Could not record it', { description: errorMessage(error) }),
   });
 
   return (
@@ -324,7 +323,10 @@ export function UnhonouredDetail({ record, onBack }: { record: Unhonoured; onBac
 
       <ConfirmDialog
         open={confirming}
-        onOpenChange={setConfirming}
+        onOpenChange={(next) => {
+          setConfirming(next);
+          if (!next) decide.reset();
+        }}
         title="Record whose fault it was"
         object={
           <>
@@ -343,6 +345,7 @@ export function UnhonouredDetail({ record, onBack }: { record: Unhonoured; onBac
         confirmLabel="Record the decision"
         cancelLabel="Not yet"
         loading={decide.isPending}
+        error={decide.error ? errorMessage(decide.error) : null}
         onConfirm={() => decide.mutate()}
       >
         <figure className="rounded-md border bg-muted/40 px-3 py-2">
@@ -421,7 +424,6 @@ function ExcusalRequests({
       setDeciding(null);
       if (input.decision === 'grant') onDecided();
     },
-    onError: (error) => toast.error('Could not decide it', { description: errorMessage(error) }),
   });
 
   if (excusals.isPending)
@@ -504,7 +506,12 @@ function ExcusalRequests({
 
       <ConfirmDialog
         open={deciding !== null}
-        onOpenChange={(next) => !next && setDeciding(null)}
+        onOpenChange={(next) => {
+          if (!next) {
+            setDeciding(null);
+            decide.reset();
+          }
+        }}
         title={deciding?.decision === 'grant' ? 'Excuse the practitioner' : 'Refuse the request'}
         object={
           <>
@@ -533,6 +540,7 @@ function ExcusalRequests({
         confirmLabel={deciding?.decision === 'grant' ? 'Excuse them' : 'Refuse the request'}
         cancelLabel="Not yet"
         loading={decide.isPending}
+        error={decide.error ? errorMessage(decide.error) : null}
         onConfirm={() => deciding && decide.mutate(deciding)}
       >
         {notes.trim() ? (

@@ -16,7 +16,7 @@ import { Field } from '@/components/app/field';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
 import { PageHeader } from '@/components/app/page-shell';
 import { ErrorState, ListSkeleton } from '@/components/app/states';
-import { useStepUp } from '@/components/app/step-up';
+import { isStepUpRequired, useStepUp } from '@/components/app/step-up';
 import { Timeline } from '@/components/app/timeline';
 import { actionLabel, formatAgo, formatWhen } from '@/components/app/format';
 import { ERASURE_RETAINED } from '@/modules/audit-compliance/domain/erasure';
@@ -122,7 +122,6 @@ export function RequestDetail({
       void queryClient.invalidateQueries({ queryKey: ['request-history', request.id] });
       onBack();
     },
-    onError: (error) => toast.error('Could not record that', { description: errorMessage(error) }),
   });
 
   const erase = useMutation({
@@ -145,7 +144,6 @@ export function RequestDetail({
     },
     onError: (error) => {
       if (stepUp.handle(error, () => erase.mutate())) return;
-      toast.error('Could not erase', { description: errorMessage(error) });
     },
   });
 
@@ -160,6 +158,7 @@ export function RequestDetail({
           if (!next) {
             setErasing(false);
             setConfirmation('');
+            erase.reset();
           }
         }}
         title={`Erase ${request.subjectName}`}
@@ -182,6 +181,7 @@ export function RequestDetail({
         confirmLabel="Erase this person"
         cancelLabel="Do not erase"
         loading={erase.isPending}
+        error={erase.error && !isStepUpRequired(erase.error) ? errorMessage(erase.error) : null}
         confirmDisabled={confirmation.trim() !== 'ERASE'}
         onConfirm={() => erase.mutate()}
       >
@@ -207,7 +207,12 @@ export function RequestDetail({
 
       <ConfirmDialog
         open={closing !== null}
-        onOpenChange={(next) => !next && setClosing(null)}
+        onOpenChange={(next) => {
+          if (!next) {
+            setClosing(null);
+            close.reset();
+          }
+        }}
         title={closing === 'COMPLETED' ? 'Record the request as answered' : 'Refuse the request'}
         object={
           <>
@@ -236,6 +241,7 @@ export function RequestDetail({
         confirmLabel={closing === 'COMPLETED' ? 'Record as answered' : 'Refuse the request'}
         cancelLabel="Not yet"
         loading={close.isPending}
+        error={close.error ? errorMessage(close.error) : null}
         onConfirm={() => closing && close.mutate(closing)}
       >
         <figure className="rounded-md border bg-muted/40 px-3 py-2">
