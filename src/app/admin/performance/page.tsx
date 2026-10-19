@@ -4,17 +4,10 @@ import { useQuery } from '@tanstack/react-query';
 import { Gauge } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { api } from '@/lib/ui/api';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
+import { DataTable, type Column } from '@/components/app/data-table';
 import { EmptyState, PageHeader } from '@/components/app/page-shell';
 import { ErrorState } from '@/components/app/states';
 import { formatWhen } from '@/components/app/format';
@@ -35,8 +28,60 @@ interface Report {
   }[];
 }
 
+type Row = Report['routes'][number];
+
 /** The targets the system is held to: normal routes under 300 ms at the 95th percentile. */
 const TARGET_MS = 300;
+const TARGET_QUERIES = 25;
+
+/** Over either target, in words as well as colour. */
+const overTarget = (row: Row) => row.p95Ms > TARGET_MS || row.meanQueries > TARGET_QUERIES;
+
+const columns: Column<Row>[] = [
+  {
+    id: 'route',
+    header: 'Route',
+    role: 'identity',
+    cell: (row) => <span className="font-mono text-base">{row.route}</span>,
+  },
+  {
+    id: 'target',
+    header: 'Against target',
+    role: 'status',
+    cell: (row) =>
+      overTarget(row) ? (
+        <Badge variant="warning">Over target</Badge>
+      ) : (
+        <Badge variant="secondary">Within target</Badge>
+      ),
+  },
+  { id: 'calls', header: 'Calls', align: 'right', numeric: true, cell: (row) => row.count },
+  { id: 'p50', header: 'p50 ms', align: 'right', numeric: true, cell: (row) => row.p50Ms },
+  {
+    id: 'p95',
+    header: 'p95 ms',
+    align: 'right',
+    numeric: true,
+    cell: (row) => (
+      <span className={cn(row.p95Ms > TARGET_MS && 'font-medium text-warning')}>{row.p95Ms}</span>
+    ),
+  },
+  { id: 'max', header: 'Max ms', align: 'right', numeric: true, cell: (row) => row.maxMs },
+  { id: 'db', header: 'DB ms', align: 'right', numeric: true, cell: (row) => row.meanDbMs },
+  {
+    id: 'queries',
+    header: 'Queries',
+    align: 'right',
+    numeric: true,
+    cell: (row) => (
+      <span className={cn(row.meanQueries > TARGET_QUERIES && 'font-medium text-warning')}>
+        {row.meanQueries}
+      </span>
+    ),
+  },
+  { id: 'kb', header: 'KB', align: 'right', numeric: true, cell: (row) => row.meanKb },
+  { id: 'slow', header: 'Slow', align: 'right', numeric: true, cell: (row) => row.slow || '—' },
+];
 
 /**
  * Which routes are slow, from real traffic.
@@ -60,7 +105,11 @@ export default function PerformancePage() {
         title="Performance"
         description="How long each route takes, slowest first, from the requests this server has handled since it started. Each response also carries a Server-Timing header you can read in the browser's network panel."
         action={
-          <Button variant="outline" onClick={() => void report.refetch()} loading={report.isFetching}>
+          <Button
+            variant="outline"
+            onClick={() => void report.refetch()}
+            loading={report.isFetching}
+          >
             Refresh
           </Button>
         }
@@ -81,55 +130,19 @@ export default function PerformancePage() {
           description="Use the system and the routes it calls appear here."
         />
       ) : (
-        <Card>
-          <CardContent className="overflow-x-auto pt-6">
-            <p className="mb-3 text-xs text-muted-foreground">
-              Since {formatWhen(report.data.since)}. Rows over {TARGET_MS} ms at the 95th percentile
-              are marked.
-            </p>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Route</TableHead>
-                  <TableHead className="text-right">Calls</TableHead>
-                  <TableHead className="text-right">p50</TableHead>
-                  <TableHead className="text-right">p95</TableHead>
-                  <TableHead className="text-right">Max</TableHead>
-                  <TableHead className="text-right">DB ms</TableHead>
-                  <TableHead className="text-right">Queries</TableHead>
-                  <TableHead className="text-right">KB</TableHead>
-                  <TableHead className="text-right">Slow</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {report.data.routes.map((row) => (
-                  <TableRow key={row.route}>
-                    <TableCell className="font-mono text-xs">{row.route}</TableCell>
-                    <TableCell className="tabular text-right">{row.count}</TableCell>
-                    <TableCell className="tabular text-right">{row.p50Ms}</TableCell>
-                    <TableCell
-                      className={cn(
-                        'tabular text-right',
-                        row.p95Ms > TARGET_MS && 'font-medium text-warning',
-                      )}
-                    >
-                      {row.p95Ms}
-                    </TableCell>
-                    <TableCell className="tabular text-right">{row.maxMs}</TableCell>
-                    <TableCell className="tabular text-right">{row.meanDbMs}</TableCell>
-                    <TableCell
-                      className={cn('tabular text-right', row.meanQueries > 25 && 'font-medium text-warning')}
-                    >
-                      {row.meanQueries}
-                    </TableCell>
-                    <TableCell className="tabular text-right">{row.meanKb}</TableCell>
-                    <TableCell className="tabular text-right">{row.slow || ''}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+        <>
+          <p className="mb-3 text-base text-muted-foreground">
+            Since {formatWhen(report.data.since)}. Rows over {TARGET_MS} ms at the 95th percentile,
+            or over {TARGET_QUERIES} queries a call, say so.
+          </p>
+          <DataTable
+            caption="Routes by time taken"
+            rows={report.data.routes}
+            columns={columns}
+            getKey={(row) => row.route}
+            rowTone={(row) => (overTarget(row) ? 'warning' : undefined)}
+          />
+        </>
       )}
     </>
   );

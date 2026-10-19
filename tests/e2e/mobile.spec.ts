@@ -56,6 +56,6 @@ test('the console menu opens on a phone and reaches another page', async ({ page
 
   // The sidebar is off-canvas at this width; its trigger has to work.
   await page.getByRole('button', { name: 'Open navigation' }).click();
-  await page.getByRole('link', { name: 'My shifts' }).click();
+  await page.getByRole('link', { name: 'My shifts', exact: true }).click();
   await expect(page).toHaveURL(/\/practitioner\/shifts$/);
 });

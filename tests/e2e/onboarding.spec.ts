@@ -150,7 +150,7 @@ test('submits one checked by eye, uploading the document to storage', async ({ p
     buffer: PDF,
   });
   // The file went browser → storage on a signed URL; the app never held it.
-  await expect(page.getByText('indemnity-2026.pdf')).toBeVisible();
+  await expect(page.getByText('indemnity-2026.pdf', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Submit', exact: true }).click();
 
   await expectToast(page, 'Submitted for review');
@@ -175,7 +175,7 @@ test('the newcomer finishes the application and submits it for approval', async 
   await page.goto('/practitioner/profile');
 
   // Opens on availability: the details are in, this is not.
-  await page.getByRole('button', { name: 'Add', exact: true }).click();
+  await page.getByRole('button', { name: 'Add to my pattern' }).click();
   await expect(page.getByText('Monday').first()).toBeVisible();
   await page.getByRole('button', { name: /^Continue/ }).click();
   await page.getByRole('button', { name: /^Continue/ }).click();
