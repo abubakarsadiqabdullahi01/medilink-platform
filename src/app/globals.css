@@ -190,6 +190,29 @@
   }
 }
 
+/* A section that arrives as it is scrolled to (components/app/reveal.tsx). Visible by default; the
+   component hides it only once the page is running and the section is below the fold. */
+@layer components {
+  .reveal {
+    transition:
+      opacity var(--duration-slow) var(--ease-out),
+      transform var(--duration-slow) var(--ease-out);
+  }
+  .reveal[data-reveal='hidden'] {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .reveal {
+      transition: none;
+    }
+    .reveal[data-reveal='hidden'] {
+      opacity: 1;
+      transform: none;
+    }
+  }
+}
+
 @layer utilities {
   /* Used by the shell so a long queue scrolls inside the page rather than
      taking the sidebar with it. */

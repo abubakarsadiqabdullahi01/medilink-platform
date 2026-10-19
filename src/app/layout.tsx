@@ -23,7 +23,13 @@ const sans = localFont({
   display: 'swap',
 });
 
+// Where the site lives, so the share card and any other absolute address in the metadata resolve.
+// Read from the environment at request time on the dynamic pages; the fallback is only for a
+// machine with none set.
+const SITE = process.env.APP_URL ?? 'http://localhost:3000';
+
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE),
   title: 'Medilink',
   description: 'Verified healthcare workforce and locum management for Nigeria.',
   applicationName: 'Medilink',
