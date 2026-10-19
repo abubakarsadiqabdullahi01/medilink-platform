@@ -18,6 +18,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { ConfirmDialog } from '@/components/app/confirm-dialog';
 import { PageHeader, QueueSkeleton } from '@/components/app/page-shell';
 import { ErrorState } from '@/components/app/states';
 import { formatDate } from '@/components/app/format';
@@ -76,6 +77,7 @@ export default function AgreementsPage() {
   const [effectiveFrom, setEffectiveFrom] = useState('');
   const [body, setBody] = useState('');
   const [reading, setReading] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
 
   const publish = useMutation({
     mutationFn: () =>
@@ -88,19 +90,28 @@ export default function AgreementsPage() {
       }),
     onSuccess: () => {
       toast.success('Published', {
-        description: 'The previous version is retired. Everybody it binds is asked to accept this one.',
+        description:
+          'The previous version is retired. Everybody it binds is asked to accept this one.',
       });
       setIdentifier('');
       setTitle('');
       setBody('');
       setEffectiveFrom('');
+      setConfirming(false);
       void queryClient.invalidateQueries({ queryKey: ['agreement-versions'] });
     },
     onError: (error) => toast.error('Could not publish it', { description: errorMessage(error) }),
   });
 
-  const ready = identifier.trim().length >= 3 && title.trim().length >= 3 && body.trim().length >= MIN_BODY;
+  const ready =
+    identifier.trim().length >= 3 && title.trim().length >= 3 && body.trim().length >= MIN_BODY;
   const chosen = KINDS.find((row) => row.value === kind);
+  const inForce = versions.data?.find((row) => row.kind === kind && !row.retiredAt);
+  const missing = [
+    identifier.trim().length < 3 ? 'an identifier' : null,
+    title.trim().length < 3 ? 'a title' : null,
+    body.trim().length < MIN_BODY ? `the text (at least ${MIN_BODY} characters)` : null,
+  ].filter(Boolean);
 
   return (
     <>
@@ -140,10 +151,10 @@ export default function AgreementsPage() {
                           </p>
                         </div>
                         <div className="flex flex-wrap gap-2">
-                          <Badge variant="secondary">In force from {formatDate(current.effectiveFrom)}</Badge>
-                          <Badge variant="outline">
-                            {current.acceptances} accepted
+                          <Badge variant="secondary">
+                            In force from {formatDate(current.effectiveFrom)}
                           </Badge>
+                          <Badge variant="outline">{current.acceptances} accepted</Badge>
                         </div>
                         <Button
                           variant="outline"
@@ -165,7 +176,9 @@ export default function AgreementsPage() {
                     )}
                     {retired.length > 0 ? (
                       <details className="text-xs text-muted-foreground">
-                        <summary className="cursor-pointer">Earlier versions ({retired.length})</summary>
+                        <summary className="cursor-pointer">
+                          Earlier versions ({retired.length})
+                        </summary>
                         <ul className="mt-2 space-y-1">
                           {retired.map((row) => (
                             <li key={row.id}>
@@ -208,7 +221,9 @@ export default function AgreementsPage() {
                     ))}
                   </SelectContent>
                 </Select>
-                {chosen ? <p className="text-xs text-muted-foreground">Binds: {chosen.binds}</p> : null}
+                {chosen ? (
+                  <p className="text-xs text-muted-foreground">Binds: {chosen.binds}</p>
+                ) : null}
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="agreement-identifier">Identifier</Label>
@@ -235,7 +250,9 @@ export default function AgreementsPage() {
               <div className="space-y-1.5">
                 <Label htmlFor="agreement-effective">
                   Takes effect{' '}
-                  <span className="font-normal text-muted-foreground">— optional, defaults to now</span>
+                  <span className="font-normal text-muted-foreground">
+                    — optional, defaults to now
+                  </span>
                 </Label>
                 <Input
                   id="agreement-effective"
@@ -266,12 +283,51 @@ export default function AgreementsPage() {
                 it binds sees the new one as not yet accepted.
               </AlertDescription>
             </Alert>
-            <Button disabled={!ready} loading={publish.isPending} onClick={() => publish.mutate()}>
-              Publish
-            </Button>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <Button disabled={!ready} onClick={() => setConfirming(true)}>
+                Review and publish
+              </Button>
+              {!ready ? (
+                <p className="text-sm text-muted-foreground">Still needed: {missing.join(', ')}.</p>
+              ) : null}
+            </div>
           </CardContent>
         </Card>
       </div>
+
+      <ConfirmDialog
+        open={confirming}
+        onOpenChange={setConfirming}
+        title="Publish this version"
+        object={`${chosen?.label ?? 'Agreement'} · ${title.trim()} (${identifier.trim()})`}
+        consequence={
+          <>
+            {inForce ? (
+              <>
+                The version now in force, <span className="font-medium">{inForce.title}</span> (
+                {inForce.acceptances} accepted), is retired
+                {effectiveFrom
+                  ? ` when this one takes effect on ${formatDate(effectiveFrom)}`
+                  : ' at once'}
+                .{' '}
+              </>
+            ) : (
+              <>Nothing is in force for this kind yet, so nothing is retired. </>
+            )}
+            Everybody it binds is asked to accept this version. {chosen?.binds}
+          </>
+        }
+        reversible={false}
+        confirmLabel="Publish version"
+        cancelLabel="Keep editing"
+        loading={publish.isPending}
+        onConfirm={() => publish.mutate()}
+      >
+        <p className="text-sm text-muted-foreground">
+          Every version is kept for good, with who accepted it and when. If this one has a mistake,
+          the way to correct it is to publish another.
+        </p>
+      </ConfirmDialog>
     </>
   );
 }
