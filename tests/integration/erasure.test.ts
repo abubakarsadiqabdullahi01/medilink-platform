@@ -435,7 +435,7 @@ describe('when erasure cannot go ahead', () => {
   it('waits while a dispute is open', async () => {
     const s = await subject();
     await prisma.dispute.create({
-      data: { assignmentId: s.assignmentId, raisedBy: s.userId, raisedParty: 'PRACTITIONER', category: 'PAY', reason: 'The rate is wrong on my timesheet.', status: 'OPEN' },
+      data: { assignmentId: s.assignmentId, raisedBy: s.userId, raisedParty: 'PRACTITIONER', category: 'PAY', reason: 'The rate is wrong on my timesheet.', status: 'OPEN', respondBy: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) },
     });
 
     await expect(executeErasure({ requestId: s.requestId, actorId: s.officerId })).rejects.toMatchObject({ code: 'erasure_blocked' });

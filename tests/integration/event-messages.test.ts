@@ -23,7 +23,7 @@ import {
   notifyTimesheetSubmitted,
 } from '@/modules/notifications/application/event-handlers';
 import { buildBookingWorld, eligiblePractitioner } from './support/booking-world';
-import { createCredentialType, createUser } from './support/fixtures';
+import { createCredentialType, createUser, grant } from './support/fixtures';
 
 /**
  * Who is told what, and when (NOT-01).
@@ -306,6 +306,45 @@ describe('a dispute opened', () => {
     expect(message?.body).not.toContain('Amina');
   });
 
+  it('tells the other side by when they are asked to reply, in Lagos time, and not the officers', async () => {
+    const { practitioner, representativeId, assignment } = await bookedShift();
+    const officer = await createUser({ fullName: 'Disputes Officer' });
+    await grant({ userId: officer.id, roleKey: 'operations_officer', permissions: ['dispute.manage'], scopeType: 'PLATFORM' });
+    const disputeId = crypto.randomUUID();
+
+    await notifyDisputeOpened({
+      disputeId,
+      assignmentId: assignment.id,
+      userId: practitioner.id,
+      raisedParty: 'PRACTITIONER',
+      // 11:00 UTC on Monday 26 October is 12:00 in Nigeria.
+      respondBy: '2026-10-26T11:00:00.000Z',
+    });
+
+    const messages = await messagesAbout(disputeId);
+    const toThem = messages.find((m) => m.userId === representativeId)!;
+    const toOfficer = messages.find((m) => m.userId === officer.id)!;
+    expect(toThem.body).toContain('Reply by Mon 26 Oct, 12:00 WAT.');
+    // The officers pick a case up; they are not asked to reply to it.
+    expect(toOfficer.body).not.toContain('Reply by');
+  });
+
+  it('goes without a date for an event written before there was one', async () => {
+    const { practitioner, representativeId, assignment } = await bookedShift();
+    const disputeId = crypto.randomUUID();
+
+    await notifyDisputeOpened({
+      disputeId,
+      assignmentId: assignment.id,
+      userId: practitioner.id,
+      raisedParty: 'PRACTITIONER',
+    });
+
+    const [message] = (await messagesAbout(disputeId)).filter((m) => m.userId === representativeId);
+    expect(message!.body).not.toContain('Reply by');
+    expect(message!.body).toContain('A dispute was opened');
+  });
+
   it('tells the practitioner when the facility opened the case', async () => {
     const { practitioner, representativeId, assignment } = await bookedShift();
     const disputeId = crypto.randomUUID();
@@ -337,6 +376,7 @@ describe('the worker', () => {
     EVENTS.TimesheetSubmitted,
     EVENTS.TimesheetApproved,
     EVENTS.DisputeOpened,
+    EVENTS.DisputeResponded,
   ])('has a consumer for %s, so the event is not marked processed unread', (eventType) => {
     expect(handlers[eventType]).toBeTypeOf('function');
   });

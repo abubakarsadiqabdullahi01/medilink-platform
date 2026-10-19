@@ -36,6 +36,7 @@ export const EVENTS = {
   DisputeUnderReview: 'dispute.under_review',
   DisputeResolved: 'dispute.resolved',
   DisputeWithdrawn: 'dispute.withdrawn',
+  DisputeResponded: 'dispute.responded',
   ClinicalIncidentReported: 'clinical_incident.reported',
   SuggestionAnswered: 'suggestion.answered',
 } as const;

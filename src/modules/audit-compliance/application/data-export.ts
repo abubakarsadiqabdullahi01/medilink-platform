@@ -398,9 +398,15 @@ export async function exportSubjectData(userId: string) {
         reason: true,
         status: true,
         outcome: true,
+        decisionReason: true,
         resolvedAt: true,
         resolutionNotes: true,
         withdrawnAt: true,
+        // By when the other side was asked to reply, and what they wrote (M14-03).
+        respondBy: true,
+        responseNote: true,
+        respondedAt: true,
+        respondedBy: true,
         createdAt: true,
         evidence: {
           select: { id: true, attachedBy: true, note: true, createdAt: true },
@@ -604,9 +610,11 @@ export async function exportSubjectData(userId: string) {
       ? (({ clearedBy, ...row }) => ({ ...row, clearedByAReviewer: clearedBy !== null }))(screening)
       : null,
     files,
-    disputes: disputes.map(({ raisedBy, evidence, ...row }) => ({
+    disputes: disputes.map(({ raisedBy, respondedBy, evidence, ...row }) => ({
       ...row,
       raisedByYou: raisedBy === userId,
+      // Who replied, as "you" or not; null when nobody has.
+      respondedByYou: respondedBy === null ? null : respondedBy === userId,
       evidence: evidence.map(({ attachedBy, ...item }) => ({ ...item, attachedBy: by(userId, attachedBy) })),
     })),
     incidentsYouReported: incidents.map(({ subjectUserId, ...row }) => ({

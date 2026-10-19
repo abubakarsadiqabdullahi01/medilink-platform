@@ -2,6 +2,7 @@
 
 import {
   CalendarCheck,
+  Gavel,
   Inbox,
   LayoutDashboard,
   ReceiptText,
@@ -57,6 +58,12 @@ const SECTIONS: NavSection[] = [
         label: 'Earnings',
         icon: Wallet,
         permission: 'invoice.read',
+      },
+      {
+        href: '/practitioner/disputes',
+        label: 'Disputes',
+        icon: Gavel,
+        permission: 'dispute.manage',
       },
     ],
   },

@@ -26,12 +26,19 @@ export const ROUTES: RouteDefinition[] = [
   { method: 'GET', path: '/api/v1/disputes', permission: 'dispute.manage', scopeType: 'FACILITY' },
   { method: 'GET', path: '/api/v1/disputes/:id', permission: 'dispute.manage', scopeType: 'PLATFORM' },
   { method: 'GET', path: '/api/v1/disputes/:id', permission: 'dispute.manage', scopeType: 'FACILITY' },
+  // A practitioner reading their own case, as themselves.
+  { method: 'GET', path: '/api/v1/disputes/:id', permission: 'dispute.manage', scopeType: 'SELF' },
+  // Every case over the practitioner's own shifts. No id: whose it is comes from the session.
+  { method: 'GET', path: '/api/v1/disputes/mine', permission: 'dispute.manage', scopeType: 'SELF' },
   { method: 'POST', path: '/api/v1/disputes/:id/review', permission: 'dispute.manage', scopeType: 'PLATFORM' },
   { method: 'POST', path: '/api/v1/disputes/:id/resolve', permission: 'dispute.manage', scopeType: 'PLATFORM' },
   // A party acts as themselves (SELF) or, for a facility, as the facility they name
   // (FACILITY): the same route, the scope chosen by whether `facilityId` is given.
   { method: 'POST', path: '/api/v1/disputes/:id/withdraw', permission: 'dispute.manage', scopeType: 'SELF' },
   { method: 'POST', path: '/api/v1/disputes/:id/withdraw', permission: 'dispute.manage', scopeType: 'FACILITY' },
+  // The other side's one written reply: SELF for a practitioner, FACILITY for the facility.
+  { method: 'POST', path: '/api/v1/disputes/:id/respond', permission: 'dispute.manage', scopeType: 'SELF' },
+  { method: 'POST', path: '/api/v1/disputes/:id/respond', permission: 'dispute.manage', scopeType: 'FACILITY' },
   { method: 'POST', path: '/api/v1/disputes/:id/evidence/upload-url', permission: 'dispute.manage', scopeType: 'SELF' },
   { method: 'POST', path: '/api/v1/disputes/:id/evidence/upload-url', permission: 'dispute.manage', scopeType: 'FACILITY' },
   { method: 'POST', path: '/api/v1/disputes/:id/evidence', permission: 'dispute.manage', scopeType: 'SELF' },

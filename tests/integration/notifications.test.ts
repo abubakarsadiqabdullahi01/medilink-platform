@@ -391,6 +391,31 @@ describe('a dispute, from the point of view of the people in it', () => {
     }
   });
 
+  it('tells the side that opened a case that the other side has replied, and says nothing of what it says', async () => {
+    const { world, nurse, assignment, representativeId } = await worldWithAssignment();
+    const ids = { assignmentId: assignment.id, userId: nurse.id, facilityId: world.facilityId };
+
+    // The practitioner opened it, so it is the practitioner who is told, and not the hospital that replied.
+    await publish(EVENTS.DisputeResponded, ids, { raisedParty: 'PRACTITIONER', responseNote: 'SECRET-WORDS-OF-THE-REPLY' });
+    const told = await messagesFor(nurse.id);
+    expect(told).toHaveLength(1);
+    expect(told[0]!.kind).toBe('dispute.responded');
+    expect(told[0]!.body).toMatch(/replied/i);
+    expect(told[0]!.body).toContain('Medilink');
+    expect(told[0]!.body).not.toContain('SECRET-WORDS-OF-THE-REPLY');
+    expect(await messagesFor(representativeId)).toHaveLength(0);
+  });
+
+  it('tells the hospital when the practitioner replies to a case it opened', async () => {
+    const { world, nurse, assignment, representativeId } = await worldWithAssignment();
+    const ids = { assignmentId: assignment.id, userId: nurse.id, facilityId: world.facilityId };
+
+    await publish(EVENTS.DisputeResponded, ids, { raisedParty: 'FACILITY' });
+
+    expect(await messagesFor(representativeId)).toHaveLength(1);
+    expect(await messagesFor(nurse.id)).toHaveLength(0);
+  });
+
   it('tells only the other side when it is withdrawn', async () => {
     const { world, nurse, assignment, representativeId } = await worldWithAssignment();
     await publish(

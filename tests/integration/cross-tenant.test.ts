@@ -355,10 +355,44 @@ const CASES: Case[] = [
   },
   onPlatform('disputes/[id]/resolve', 'POST', (c) => ({
     ...ID(c.t.disputeId),
-    body: { outcome: 'UPHELD', notes: 'The hours were wrong on the timesheet.' },
+    body: { outcome: 'UPHELD', decisionReason: 'RECORD_WAS_WRONG', notes: 'The hours were wrong on the timesheet.' },
   })),
   onPlatform('disputes/[id]/review', 'POST', (c) => ({ ...ID(c.t.disputeId), body: {} })),
   onPlatform('disputes/[id]', 'GET', (c) => ID(c.t.disputeId)),
+  // A party reading the case: a hospital names its facility, a practitioner reads it as themselves.
+  // Naming your own facility, or your own scope, passes the guard; what refuses is that the case
+  // is not yours.
+  {
+    route: 'disputes/[id]',
+    method: 'GET',
+    attackers: ['owner', 'practitioner'],
+    controlRoles: ['owner', 'practitioner'],
+    control: 'same',
+    declares: true,
+    request: (c) => {
+      const query: Record<string, string> = c.role === 'owner' ? { facilityId: c.declare } : { as: 'self' };
+      return { ...ID(c.t.disputeId), query };
+    },
+  },
+  // The other side's one written reply. In this world the practitioner raised the case, so the
+  // rightful caller is the hospital; a practitioner attacking acts as themselves, which passes the
+  // guard and is refused because the case is not theirs.
+  {
+    route: 'disputes/[id]/respond',
+    method: 'POST',
+    attackers: ['owner', 'practitioner'],
+    controlRoles: ['owner'],
+    control: 'same',
+    declares: true,
+    lenientControl: true,
+    request: (c) => ({
+      ...ID(c.t.disputeId),
+      body: {
+        ...(c.role === 'owner' ? { facilityId: c.declare } : {}),
+        response: 'The ward diary shows the practitioner signed out when the shift ended, not later.',
+      },
+    }),
+  },
   {
     route: 'disputes/[id]/withdraw',
     method: 'POST',
@@ -831,6 +865,7 @@ const NO_TENANT_IDENTIFIER: Record<string, string> = {
   'dashboard/practitioner': 'the caller’s own figures, read from the session; takes no identifier',
   'data-requests': 'the caller’s own request, or the platform’s queue; takes no identifier',
   disputes: 'the platform’s queue; takes no identifier',
+  'disputes/mine': 'the caller’s own cases, found from the session; takes no identifier',
   'facilities/register': 'creates for the caller; takes no identifier',
   'finance/invoices': 'the platform’s list; takes no identifier',
   'finance/reconciliation': 'platform-only check of the whole ledger, which no hospital owns; takes no identifier and reads ids and amounts only',

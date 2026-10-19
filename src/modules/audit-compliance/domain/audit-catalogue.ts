@@ -627,6 +627,11 @@ export const AUDIT_CATALOGUE: Record<string, AuditAction> = {
     entity: 'disputes.disputes',
     what: 'A practitioner or a facility opened a dispute about a shift, with the category, which side raised it and the reason given.',
   },
+  'dispute.responded': {
+    category: 'safety',
+    entity: 'disputes.disputes',
+    what: 'The other side of a dispute wrote its one reply, with who wrote it, the reply, and whether it came after the date asked for.',
+  },
   'dispute.review_started': {
     category: 'safety',
     entity: 'disputes.disputes',
@@ -635,12 +640,12 @@ export const AUDIT_CATALOGUE: Record<string, AuditAction> = {
   'dispute.upheld': {
     category: 'safety',
     entity: 'disputes.disputes',
-    what: 'An officer decided a dispute in favour of the party who raised it, with the reasons.',
+    what: 'An officer decided a dispute in favour of the party who raised it, with the reason it turned on and the notes.',
   },
   'dispute.dismissed': {
     category: 'safety',
     entity: 'disputes.disputes',
-    what: 'An officer decided a dispute against the party who raised it, with the reasons.',
+    what: 'An officer decided a dispute against the party who raised it, with the reason it turned on and the notes.',
   },
   'dispute.withdrawn': {
     category: 'safety',

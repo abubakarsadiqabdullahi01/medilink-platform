@@ -234,6 +234,7 @@ export const ACTION_LABELS: Record<string, string> = {
   'dispute.evidence_read': 'Dispute evidence viewed',
   'dispute.evidence_upload_requested': 'Evidence upload started',
   'dispute.opened': 'Dispute opened',
+  'dispute.responded': 'Dispute replied to',
   'dispute.review_started': 'Dispute review started',
   'dispute.upheld': 'Dispute upheld',
   'dispute.withdrawn': 'Dispute withdrawn',

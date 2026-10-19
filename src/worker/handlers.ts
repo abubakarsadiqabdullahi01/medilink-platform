@@ -102,6 +102,7 @@ export const handlers: Record<string, EventHandler> = {
   },
 
   // What happens to a dispute after it is opened (opening is above), told to the people in it.
+  [EVENTS.DisputeResponded]: (payload) => notifyDisputeStage('dispute.responded', payload),
   [EVENTS.DisputeUnderReview]: (payload) => notifyDisputeStage('dispute.under_review', payload),
   [EVENTS.DisputeResolved]: (payload) => notifyDisputeStage('dispute.resolved', payload),
   [EVENTS.DisputeWithdrawn]: (payload) => notifyDisputeStage('dispute.withdrawn', payload),

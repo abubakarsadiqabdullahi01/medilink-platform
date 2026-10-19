@@ -13,10 +13,22 @@ import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
 import { Detail, DetailGrid, PageHeader } from '@/components/app/page-shell';
 import { DocumentDialog } from '@/components/app/document-dialog';
 import { actionLabel, formatAgo, formatWhen } from '@/components/app/format';
+import {
+  DECISION_REASONS,
+  DECISION_REASON_WORDS,
+  type DecisionReasonValue,
+} from '@/modules/disputes/domain/dispute';
 
 /**
  * One dispute, adjudicated with the evidence in front of you.
@@ -46,9 +58,17 @@ export interface Dispute {
   reason: string;
   status: string;
   outcome: string | null;
+  decisionReason: DecisionReasonValue | null;
   resolutionNotes: string | null;
   resolvedAt: string | null;
   withdrawnAt: string | null;
+  /** By when the other side is asked to reply; a marker, it locks nothing. */
+  respondBy: string;
+  responseNote: string | null;
+  respondedAt: string | null;
+  /** Where it stands for whoever decides it. */
+  stage: 'waiting_for_response' | 'ready_to_decide' | 'under_review' | 'closed';
+  responseOverdue: boolean;
   createdAt: string;
 }
 
@@ -74,12 +94,14 @@ const OUTCOMES = [
   {
     value: 'UPHELD' as const,
     label: 'Uphold',
+    reasonLabel: 'Reason to uphold',
     variant: 'success' as const,
     consequence: 'Agrees with whoever raised it. The timesheet reopens so the figures can be put right.',
   },
   {
     value: 'DISMISSED' as const,
     label: 'Dismiss',
+    reasonLabel: 'Reason to dismiss',
     variant: 'destructive' as const,
     consequence: 'The shift stands as recorded. Nothing about the payment changes.',
   },
@@ -88,6 +110,8 @@ const OUTCOMES = [
 export function DisputeDetail({ dispute, onBack }: { dispute: Dispute; onBack: () => void }) {
   const queryClient = useQueryClient();
   const [note, setNote] = useState('');
+  // One reason per outcome, so a reason can only ever be sent with the outcome it belongs to.
+  const [reasons, setReasons] = useState<Partial<Record<'UPHELD' | 'DISMISSED', DecisionReasonValue>>>({});
   /**
    * The status as this screen last changed it.
    *
@@ -143,6 +167,7 @@ export function DisputeDetail({ dispute, onBack }: { dispute: Dispute; onBack: (
       api.post(`/api/v1/disputes/${dispute.id}/resolve`, {
         id: dispute.id,
         outcome,
+        decisionReason: reasons[outcome],
         notes: note.trim(),
       }),
     onSuccess: (_result, outcome) => {
@@ -215,6 +240,38 @@ export function DisputeDetail({ dispute, onBack }: { dispute: Dispute; onBack: (
               </CardContent>
             </Card>
 
+            {/* The other side's one reply, or how long they have. The date is a marker: it
+                locks nothing, and the officer may decide before or after it. */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm">
+                  The {dispute.raisedParty === 'PRACTITIONER' ? 'facility' : 'practitioner'}’s reply
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3" data-testid="dispute-reply">
+                {dispute.respondedAt && dispute.responseNote ? (
+                  <div className="rounded-md bg-muted px-3 py-2 text-sm">
+                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Written {formatWhen(dispute.respondedAt)}
+                      {new Date(dispute.respondedAt) > new Date(dispute.respondBy)
+                        ? ', after the reply-by date'
+                        : ''}
+                    </p>
+                    <p className="mt-1 whitespace-pre-wrap leading-relaxed">{dispute.responseNote}</p>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                    <span>
+                      {open
+                        ? `No reply yet. They are asked to reply by ${formatWhen(dispute.respondBy)}.`
+                        : 'They did not reply.'}
+                    </span>
+                    {open && dispute.responseOverdue ? <Badge variant="warning">Past the date</Badge> : null}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
             {status === 'RESOLVED' ? (
               <Card>
                 <CardHeader className="pb-3">
@@ -227,6 +284,11 @@ export function DisputeDetail({ dispute, onBack }: { dispute: Dispute; onBack: (
                     </Detail>
                     <Detail label="Decided">
                       {dispute.resolvedAt ? formatWhen(dispute.resolvedAt) : '—'}
+                    </Detail>
+                    <Detail label="It turned on">
+                      {dispute.decisionReason
+                        ? DECISION_REASON_WORDS[dispute.decisionReason]
+                        : 'Not recorded — decided before reasons were kept.'}
                     </Detail>
                   </DetailGrid>
                   {dispute.resolutionNotes ? (
@@ -294,26 +356,64 @@ export function DisputeDetail({ dispute, onBack }: { dispute: Dispute; onBack: (
                     ) : null}
                   </div>
 
+                  {status === 'OPEN' && dispute.stage === 'waiting_for_response' && !dispute.respondedAt ? (
+                    <Alert variant="info">
+                      <Gavel />
+                      <AlertDescription>
+                        The other side is asked to reply by {formatWhen(dispute.respondBy)} and has not
+                        yet. You can decide now, but they will not have been heard.
+                      </AlertDescription>
+                    </Alert>
+                  ) : null}
+
                   <div className="space-y-2">
-                    {OUTCOMES.map((option) => (
-                      <div
-                        key={option.value}
-                        className="flex flex-wrap items-center gap-3 rounded-lg border p-3"
-                      >
-                        <span className="min-w-0 flex-1 text-sm text-muted-foreground">
-                          {option.consequence}
-                        </span>
-                        <Button
-                          variant={option.variant}
-                          size="sm"
-                          disabled={note.trim().length < MIN_NOTE || resolve.isPending}
-                          loading={resolve.isPending && resolve.variables === option.value}
-                          onClick={() => resolve.mutate(option.value)}
+                    {OUTCOMES.map((option) => {
+                      const reason = reasons[option.value];
+                      return (
+                        <div
+                          key={option.value}
+                          className="space-y-3 rounded-lg border p-3"
                         >
-                          {option.label}
-                        </Button>
-                      </div>
-                    ))}
+                          <p className="text-sm text-muted-foreground">{option.consequence}</p>
+                          <div className="flex flex-wrap items-end gap-3">
+                            <div className="min-w-[220px] flex-1 space-y-1.5">
+                              <Label htmlFor={`reason-${option.value}`}>{option.reasonLabel}</Label>
+                              <Select
+                                value={reason ?? ''}
+                                onValueChange={(value) =>
+                                  setReasons((current) => ({
+                                    ...current,
+                                    [option.value]: value as DecisionReasonValue,
+                                  }))
+                                }
+                              >
+                                <SelectTrigger id={`reason-${option.value}`}>
+                                  <SelectValue placeholder="What it turned on" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {DECISION_REASONS[option.value].map((value) => (
+                                    <SelectItem key={value} value={value}>
+                                      {DECISION_REASON_WORDS[value]}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <Button
+                              variant={option.variant}
+                              size="sm"
+                              disabled={
+                                note.trim().length < MIN_NOTE || !reason || resolve.isPending
+                              }
+                              loading={resolve.isPending && resolve.variables === option.value}
+                              onClick={() => resolve.mutate(option.value)}
+                            >
+                              {option.label}
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </CardContent>
               </Card>

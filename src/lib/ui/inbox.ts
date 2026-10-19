@@ -29,10 +29,12 @@ const LINKS: Record<string, Partial<Record<ConsoleName, string>>> = {
   'credential.verified': { practitioner: '/practitioner/profile' },
   'credential.rejected': { practitioner: '/practitioner/profile' },
   'credential.info_requested': { practitioner: '/practitioner/profile' },
-  'dispute.opened': { admin: '/admin/disputes' },
-  'dispute.under_review': { admin: '/admin/disputes' },
-  'dispute.resolved': { admin: '/admin/disputes' },
-  'dispute.withdrawn': { admin: '/admin/disputes' },
+  // Both sides have a screen for a case now (M14-03), so a text about one links to it.
+  'dispute.opened': { admin: '/admin/disputes', facility: '/facility/disputes', practitioner: '/practitioner/disputes' },
+  'dispute.responded': { facility: '/facility/disputes', practitioner: '/practitioner/disputes' },
+  'dispute.under_review': { admin: '/admin/disputes', facility: '/facility/disputes', practitioner: '/practitioner/disputes' },
+  'dispute.resolved': { admin: '/admin/disputes', facility: '/facility/disputes', practitioner: '/practitioner/disputes' },
+  'dispute.withdrawn': { admin: '/admin/disputes', facility: '/facility/disputes', practitioner: '/practitioner/disputes' },
 };
 
 export function inboxHref(kind: string, console: ConsoleName | null): string | null {

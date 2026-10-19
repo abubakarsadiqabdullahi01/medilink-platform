@@ -359,7 +359,7 @@ export const DATA_CATEGORIES: DataCategory[] = [
     key: 'disputes',
     name: 'Disputes',
     tables: ['disputes.disputes', 'disputes.dispute_evidence'],
-    holds: 'What was disputed, by whom, the evidence each side gave and the decision.',
+    holds: 'What was disputed, by whom, the evidence each side gave, the other side’s one written reply and the date it was asked for, and the decision with the reason it turned on.',
     purpose: 'To settle a disagreement about a shift or its pay.',
     basis: 'Contract, and the legitimate interest of both parties in a fair decision.',
     owner: 'Operations',

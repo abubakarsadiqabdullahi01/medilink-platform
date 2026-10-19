@@ -264,6 +264,7 @@ async function buildTenant(label: string): Promise<Tenant> {
       raisedParty: 'PRACTITIONER',
       category: 'HOURS',
       reason: `${label}: the hours on the timesheet are not the hours I worked.`,
+      respondBy: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     },
   });
   const evidence = await prisma.disputeEvidence.create({
