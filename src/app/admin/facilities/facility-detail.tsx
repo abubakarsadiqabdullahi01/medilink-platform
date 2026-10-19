@@ -330,7 +330,7 @@ export function FacilityDetail({ facility, onBack }: { facility: Facility; onBac
                           onChange={(event) =>
                             (set as (next: boolean) => void)(event.target.checked)
                           }
-                          className="mt-1 size-5 shrink-0 rounded border-input accent-primary"
+                          className="mt-0.5 size-6 shrink-0 rounded border-input accent-primary"
                         />
                         <span>{label as string}</span>
                       </label>

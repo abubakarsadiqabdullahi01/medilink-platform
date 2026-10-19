@@ -239,7 +239,7 @@ export function AvailabilitySection() {
     <label className="flex min-h-11 items-center gap-3">
       <input
         type="checkbox"
-        className="size-5"
+        className="size-6 shrink-0 accent-primary"
         checked={checked}
         onChange={(event) => onChange(event.target.checked)}
       />

@@ -326,7 +326,7 @@ export default function LevelsPage() {
                 <label className="flex items-center gap-2 pb-2 text-sm">
                   <input
                     type="checkbox"
-                    className="size-4"
+                    className="size-6 shrink-0 accent-primary"
                     checked={category.supervisionRequired}
                     onChange={(event) =>
                       setCategory({ ...category, supervisionRequired: event.target.checked })
