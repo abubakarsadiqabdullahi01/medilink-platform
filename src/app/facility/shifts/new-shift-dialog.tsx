@@ -117,12 +117,15 @@ type Step = 'form' | 'review' | 'done';
 export function NewShiftDialog({
   facilityId,
   trigger,
+  defaultOpen = false,
 }: {
   facilityId: string;
   /** The control that opens it, when the page has a better place for it than the default button. */
   trigger?: ReactNode;
+  /** Already open when it first appears — for `NewShiftLauncher`, which loads it on the first press. */
+  defaultOpen?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   const [step, setStep] = useState<Step>('form');
   const [publishedId, setPublishedId] = useState<string | null>(null);
   const reference = useReference();

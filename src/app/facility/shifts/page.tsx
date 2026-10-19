@@ -31,7 +31,7 @@ import { Pager } from '@/components/app/pager';
 import { ErrorState, FilteredEmpty, TableSkeleton } from '@/components/app/states';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
 import { formatMinutes, formatNaira, formatShiftWindow } from '@/components/app/format';
-import { NewShiftDialog } from './new-shift-dialog';
+import { NewShiftLauncher } from './new-shift-launcher';
 
 interface ServiceRequest {
   id: string;
@@ -255,7 +255,7 @@ export default function ShiftsPage() {
       <PageHeader
         title="Shifts"
         description="A published shift can be offered to practitioners. Its terms cannot be changed after publishing — cancel it and publish another instead, so nobody accepts one thing and works another."
-        action={facilityId && canPublish ? <NewShiftDialog facilityId={facilityId} /> : null}
+        action={facilityId && canPublish ? <NewShiftLauncher facilityId={facilityId} /> : null}
       />
 
       <Tabs

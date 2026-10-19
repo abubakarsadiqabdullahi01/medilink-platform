@@ -18,7 +18,7 @@ import { facilityAttention, type FacilitySummaryJson } from '@/lib/ui/facility-t
 import { useNow } from '@/lib/ui/now';
 import { useSession } from '@/lib/ui/session';
 import { Badge } from '@/components/ui/badge';
-import { Button, buttonVariants } from '@/components/ui/button';
+import { buttonVariants } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -34,7 +34,7 @@ import { waitingFor } from '@/components/app/queue-age';
 import { formatClock, formatNairaTight, formatShiftWindow } from '@/components/app/format';
 import { humanise } from '@/components/app/status-badge';
 import { FacilityAgreements } from './facility-agreements';
-import { NewShiftDialog } from './shifts/new-shift-dialog';
+import { NewShiftLauncher } from './shifts/new-shift-launcher';
 
 /**
  * A ward manager's morning: is today covered, what is still open, who is waiting on whom, has
@@ -104,15 +104,7 @@ export default function FacilityDashboard() {
         action={
           facilityId && can('service_request.publish') ? (
             mayPublish ? (
-              <NewShiftDialog
-                facilityId={facilityId}
-                trigger={
-                  <Button size="lg">
-                    <CalendarPlus />
-                    Publish a shift
-                  </Button>
-                }
-              />
+              <NewShiftLauncher facilityId={facilityId} size="lg" />
             ) : (
               <Link href="/facility/profile" className={buttonVariants({ size: 'lg' })}>
                 Finish verification
