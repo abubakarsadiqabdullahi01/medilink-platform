@@ -6,6 +6,7 @@ import {
   type SlotLike,
   type TimeWindow,
 } from '../domain/availability';
+import { LOOKAHEAD_DAYS, nextOffered, slotStanding, type SlotStanding } from '../domain/offered';
 import { AvailabilityErrors } from '../domain/errors';
 
 /**
@@ -33,10 +34,30 @@ export interface BlockView {
   reason: string;
 }
 
+export interface SlotWithStanding extends SlotView {
+  /** Whether it is doing anything today; see `slotStanding`. */
+  standing: SlotStanding;
+}
+
+/** What the matcher can actually use, worked out by the same model that answers it. */
+export interface EffectiveAvailability {
+  /**
+   * The first stretch they can be offered from now on, or null if there is none. `openEnded` is
+   * true when it runs to the edge of what was looked at, so its end is not a date to show: somebody
+   * offered every day is offered after the look-ahead too.
+   */
+  next: { startsAt: Date; endsAt: Date; openEnded: boolean } | null;
+  /** How far ahead that looked. */
+  lookaheadDays: number;
+  /** Whether anything they entered is still in play: a pattern not ended, a window not over. */
+  hasUsableSlots: boolean;
+}
+
 export interface AvailabilityView {
   userId: string;
-  slots: SlotView[];
+  slots: SlotWithStanding[];
   blocks: BlockView[];
+  effective: EffectiveAvailability;
 }
 
 function toSlotView(row: SlotView): SlotView {
@@ -53,7 +74,19 @@ function toSlotView(row: SlotView): SlotView {
   };
 }
 
-export async function getAvailability(userId: string): Promise<AvailabilityView> {
+function nextStretch(slots: SlotLike[], away: TimeWindow[], now: Date): EffectiveAvailability['next'] {
+  const window = nextOffered(slots, away, now);
+  if (!window) return null;
+  const horizon = now.getTime() + LOOKAHEAD_DAYS * 24 * 60 * 60 * 1000;
+  return { ...window, openEnded: window.endsAt.getTime() >= horizon };
+}
+
+/**
+ * The practitioner's diary as the matcher reads it: what they entered, where each entry stands
+ * today, and the next stretch they can be offered. All of it from the one model in
+ * `domain/offered`, so the screen cannot say something the matcher does not do.
+ */
+export async function getAvailability(userId: string, now: Date = new Date()): Promise<AvailabilityView> {
   const [slots, blocks] = await Promise.all([
     prisma.availabilitySlot.findMany({
       where: { userId, deletedAt: null },
@@ -65,16 +98,35 @@ export async function getAvailability(userId: string): Promise<AvailabilityView>
     }),
   ]);
 
+  const away = blocks.map((row) => ({ startsAt: row.startsAt, endsAt: row.endsAt }));
+  const withStanding = slots.map((row) => ({
+    ...toSlotView(row),
+    standing: slotStanding(row as SlotLike, away, now),
+  }));
+
   return {
     userId,
-    slots: slots.map(toSlotView),
+    slots: withStanding,
     blocks: blocks.map((row) => ({
       id: row.id,
       startsAt: row.startsAt,
       endsAt: row.endsAt,
       reason: row.reason,
     })),
+    effective: {
+      next: nextStretch(slots as SlotLike[], away, now),
+      lookaheadDays: LOOKAHEAD_DAYS,
+      hasUsableSlots: withStanding.some((slot) => slot.standing !== 'finished'),
+    },
   };
+}
+
+/** What `getAvailability` knows that "will they be offered a shift" needs, and no more. */
+export async function availabilitySummary(
+  userId: string,
+  now: Date = new Date(),
+): Promise<EffectiveAvailability> {
+  return (await getAvailability(userId, now)).effective;
 }
 
 export interface AddSlotParams {

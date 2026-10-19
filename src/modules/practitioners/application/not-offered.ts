@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/db';
 import { withdrawnFromMatching } from '@/modules/audit-compliance/application/consent';
+import { availabilitySummary } from '@/modules/availability/application/availability';
 import { getEligibility } from './eligibility';
 import {
   credentialNeeds,
@@ -11,8 +12,9 @@ import {
 /**
  * Everything that stands between one practitioner and being offered a shift, for them to read
  * (M02-07): the eligibility rule's blockers exactly as `getEligibility` gives them, which
- * documents are outstanding and where each stands, and the two things that keep an approved
- * practitioner from being offered work although the rule is satisfied.
+ * documents are outstanding and where each stands, and what else keeps an approved practitioner
+ * from being offered work although the rule is satisfied: they turned off being shown, they have
+ * said nothing about when they can work, or everything they offered lies in time they are away.
  *
  * `getEligibility` is what matching and every booking step call, so it is left as it is. This adds
  * to what is *shown*, and cannot change who is matched.
@@ -25,7 +27,7 @@ export async function getNotOfferedView(userId: string, now: Date = new Date()):
     select: { professionalCategoryId: true },
   });
 
-  const [required, submissions, withdrawn, usableSlots] = await Promise.all([
+  const [required, submissions, withdrawn, availability] = await Promise.all([
     profile
       ? prisma.credentialRequirement.findMany({
           where: { professionalCategoryId: profile.professionalCategoryId, isMandatory: true },
@@ -37,18 +39,9 @@ export async function getNotOfferedView(userId: string, now: Date = new Date()):
       select: { credentialTypeId: true, status: true, createdAt: true, reviewNotes: true },
     }),
     withdrawnFromMatching([userId]),
-    // A weekly pattern that has not ended, or a one-off that has not finished. A slot in the past is
-    // not something a shift can be matched against, so it does not count as having said when.
-    prisma.availabilitySlot.count({
-      where: {
-        userId,
-        deletedAt: null,
-        OR: [
-          { kind: 'RECURRING_WEEKLY', OR: [{ effectiveUntil: null }, { effectiveUntil: { gt: now } }] },
-          { kind: 'ONE_OFF', endsAt: { gt: now } },
-        ],
-      },
-    }),
+    // Read from the model the matcher uses, so what a practitioner is told is what matching does:
+    // whether anything they entered is still in play, and whether any of it survives their time away.
+    availabilitySummary(userId, now),
   ]);
 
   const credentials: CredentialNeed[] = credentialNeeds({
@@ -60,7 +53,8 @@ export async function getNotOfferedView(userId: string, now: Date = new Date()):
 
   const alsoStopsOffers: ExtraReason[] = [];
   if (withdrawn.has(userId)) alsoStopsOffers.push('consent_withdrawn');
-  if (usableSlots === 0) alsoStopsOffers.push('no_availability');
+  if (!availability.hasUsableSlots) alsoStopsOffers.push('no_availability');
+  else if (!availability.next) alsoStopsOffers.push('time_away');
 
   return { ...base, credentials, alsoStopsOffers };
 }

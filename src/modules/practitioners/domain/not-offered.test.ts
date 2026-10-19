@@ -80,9 +80,40 @@ describe('what each reason says, and who clears it', () => {
     ]) {
       expect(owners[code], code).toBe('medilink');
     }
-    for (const code of ['profile_incomplete', 'credential_missing', 'credential_expired', 'consent_withdrawn', 'no_availability']) {
+    for (const code of [
+      'profile_incomplete',
+      'credential_missing',
+      'credential_expired',
+      'consent_withdrawn',
+      'no_availability',
+      'time_away',
+    ]) {
       expect(owners[code], code).toBe('you');
     }
+  });
+});
+
+describe('everything offered is in time away', () => {
+  const view = (over: Partial<NotOfferedView> = {}): NotOfferedView => ({ eligible: true, blockers: [], ...over });
+
+  it('says so, tells them it is theirs, and points at where the time away is kept', () => {
+    const lines = reasonLines(view({ eligible: true, alsoStopsOffers: ['time_away'] }));
+
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({
+      code: 'time_away',
+      owner: 'you',
+      href: '/practitioner/profile?tab=availability',
+      action: 'See your time away',
+    });
+    expect(lines[0]!.text).toMatch(/time you marked as away/);
+    expect(lines[0]!.text).toMatch(/nothing to match a shift against/);
+  });
+
+  it('is a different sentence from never having said when, because the remedy is different', () => {
+    expect(REASON_GUIDE.time_away.says).not.toBe(REASON_GUIDE.no_availability.says);
+    expect(REASON_GUIDE.no_availability.says).toMatch(/not said when you can work/);
+    expect(REASON_GUIDE.time_away.says).not.toMatch(/not said/);
   });
 });
 
@@ -303,6 +334,7 @@ describe('the lines the practitioner reads', () => {
   it('never claims you can be offered shifts while anything stops it', () => {
     expect(headline(view({ eligible: false, blockers: ['identity_unverified'] }))).toBe('not_eligible');
     expect(headline(view({ eligible: true, alsoStopsOffers: ['no_availability'] }))).toBe('approved_but_not_offered');
+    expect(headline(view({ eligible: true, alsoStopsOffers: ['time_away'] }))).toBe('approved_but_not_offered');
     expect(headline(view({ eligible: true, alsoStopsOffers: [] }))).toBe('offered');
     // Both: the account is the first thing to put right.
     expect(headline(view({ eligible: false, blockers: ['profile_incomplete'], alsoStopsOffers: ['consent_withdrawn'] }))).toBe('not_eligible');

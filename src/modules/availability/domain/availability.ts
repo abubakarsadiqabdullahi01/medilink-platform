@@ -79,7 +79,12 @@ function expandRecurring(slot: SlotLike, window: TimeWindow): TimeWindow[] {
         : DAY_MINUTES - slot.startMinute + slot.endMinute;
     const endsAt = new Date(startsAt.getTime() + lengthMinutes * MINUTE);
 
-    if (slot.effectiveFrom && endsAt.getTime() <= slot.effectiveFrom.getTime()) continue;
+    // An occurrence belongs to the day it starts, and the pattern's bounds are compared with when
+    // it starts: in force from `effectiveFrom` (inclusive) until `effectiveUntil` (exclusive). A
+    // night that begins the evening before a pattern does is not offered, though it runs into the
+    // morning the pattern is in force; the last night of a pattern that ends at midnight is offered
+    // whole. Comparing the end against `effectiveFrom`, as this once did, offered that first night.
+    if (slot.effectiveFrom && startsAt.getTime() < slot.effectiveFrom.getTime()) continue;
     if (slot.effectiveUntil && startsAt.getTime() >= slot.effectiveUntil.getTime()) continue;
 
     windows.push({ startsAt, endsAt });
