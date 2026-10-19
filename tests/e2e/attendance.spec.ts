@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { formatWhen } from '../../src/components/app/format';
+import { formatShiftWindow, formatWhen } from '../../src/components/app/format';
 import { signIn } from './support/session';
 import { card, expectToast } from './support/ui';
 import { world } from './support/world';
@@ -18,7 +18,8 @@ async function rosterRow(page: Page) {
   await page.goto('/facility/roster');
   await page.getByLabel('Search by practitioner').fill(world().practitioner.fullName);
   await page.getByRole('button', { name: 'Search' }).click();
-  return page.getByRole('row').filter({ hasText: formatWhen(world().liveShift.startsAt) });
+  const { startsAt, endsAt } = world().liveShift;
+  return page.getByRole('row').filter({ hasText: formatShiftWindow(startsAt, endsAt) });
 }
 
 /** Issues a code from the roster and reads it off the dialog, as a ward would. */

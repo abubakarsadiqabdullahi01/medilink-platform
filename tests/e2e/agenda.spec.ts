@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { formatWhen } from '../../src/components/app/format';
+import { formatShiftWindow, formatWhen } from '../../src/components/app/format';
 import { signIn } from './support/session';
 import { card } from './support/ui';
 import { world } from './support/world';
@@ -47,7 +47,8 @@ test('a facility reads its roster by day', async ({ page }) => {
   await signIn(page, world().scheduler);
   await page.goto('/facility/roster');
 
-  const row = page.getByRole('row').filter({ hasText: formatWhen(world().liveShift.startsAt) });
+  const { startsAt, endsAt } = world().liveShift;
+  const row = page.getByRole('row').filter({ hasText: formatShiftWindow(startsAt, endsAt) });
   await expect(row).toBeVisible();
   // A day heading row sits above the shift, in Lagos time.
   const heading = lagosDay(world().liveShift.startsAt) === today() ? 'Today' : 'Tomorrow';

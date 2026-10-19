@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { formatNaira, formatWhen } from '../../src/components/app/format';
+import { formatNaira, formatShiftWindow, formatWhen } from '../../src/components/app/format';
 import { signIn, switchTo } from './support/session';
 import { card, choose, eventually, expectToast, lagosLocal } from './support/ui';
 import { world } from './support/world';
@@ -19,12 +19,18 @@ test.describe.configure({ mode: 'serial' });
 const HOUR = 60 * 60 * 1000;
 const shift = () => world().afterShift;
 const shiftLabel = () => formatWhen(shift().startsAt);
+// How the facility's own screens (roster, timesheets) write the shift: one window, Lagos time.
+const windowLabel = () => formatShiftWindow(shift().startsAt, shift().endsAt);
 // Eight hours at the rate agreed when it was offered, in kobo and then naira.
 const expected = () => formatNaira(8 * shift().hourlyRateKobo);
 
+/** The nurse's timesheet for the shift: a row of the table (the desktop layout), found by who and when. */
 async function facilityTimesheet(page: Page) {
   await page.goto('/facility/timesheets');
-  return card(page, world().practitioner.fullName).filter({ hasText: shiftLabel() });
+  return page
+    .getByRole('row')
+    .filter({ hasText: world().practitioner.fullName })
+    .filter({ hasText: windowLabel() });
 }
 
 test('the ward records the shift by hand when no code could be exchanged', async ({ page }) => {
@@ -33,7 +39,7 @@ test('the ward records the shift by hand when no code could be exchanged', async
   await page.getByLabel('Search by practitioner').fill(world().practitioner.fullName);
   await page.getByRole('button', { name: 'Search' }).click();
 
-  const row = page.getByRole('row').filter({ hasText: shiftLabel() });
+  const row = page.getByRole('row').filter({ hasText: windowLabel() });
   await row.getByRole('button', { name: 'Record by hand' }).click();
 
   const dialog = page.getByRole('dialog', { name: 'Record this shift by hand' });
@@ -61,7 +67,11 @@ test('the nurse submits the timesheet the worker priced', async ({ page }) => {
   });
   await expect(sheet.getByText('8h', { exact: true }).first()).toBeVisible();
 
+  // Sending is a review: the hours are read back, and nothing goes until she says so there.
   await submit.click();
+  const review = page.getByRole('dialog', { name: 'Send these hours to the facility' });
+  await expect(review.getByText('8h', { exact: true })).toBeVisible();
+  await review.getByRole('button', { name: 'Send to the facility' }).click();
   await expectToast(page, 'Submitted');
   await expect(submit).toBeHidden();
 });
@@ -70,8 +80,18 @@ test('the facility will not reject without a reason, and approves', async ({ pag
   await signIn(page, world().scheduler);
   const sheet = await facilityTimesheet(page);
 
-  await expect(sheet.getByRole('button', { name: 'Reject' })).toBeDisabled();
+  // Rejecting asks for the reason first, and the button that sends it waits for one.
+  await sheet.getByRole('button', { name: /^Reject/ }).click();
+  const reject = page.getByRole('dialog', { name: 'Reject this timesheet' });
+  await expect(reject.getByRole('button', { name: 'Reject timesheet' })).toBeDisabled();
+  await reject.getByRole('button', { name: 'Not now' }).click();
+  await expect(reject).toBeHidden();
+
+  // Approving commits the figure, so it is read back — with the person and the shift — and confirmed.
   await sheet.getByRole('button', { name: `Approve ${expected()}` }).click();
+  const approve = page.getByRole('dialog', { name: 'Approve this timesheet' });
+  await expect(approve.getByText(expected())).toBeVisible();
+  await approve.getByRole('button', { name: 'Approve timesheet' }).click();
   await expectToast(page, 'Approved — the shift is now completed');
 });
 
@@ -118,5 +138,10 @@ test('an administrator takes the case and decides it', async ({ page }) => {
   await switchTo(page, world().scheduler);
   await page.goto('/facility/timesheets');
   await page.getByRole('tab', { name: 'approved' }).click();
-  await expect(card(page, world().practitioner.fullName).filter({ hasText: shiftLabel() })).toBeVisible();
+  await expect(
+    page
+      .getByRole('row')
+      .filter({ hasText: world().practitioner.fullName })
+      .filter({ hasText: windowLabel() }),
+  ).toBeVisible();
 });
