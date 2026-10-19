@@ -475,7 +475,7 @@ export default function LandingPage() {
             </div>
             <SiteImage
               src="images/landing/facility-ward-manager.webp"
-              alt="A ward manager and a nurse reviewing a weekly roster together at a nurses’ station."
+              alt="A nurse and a ward manager at a nurses’ station, checking a roster together beside a computer."
               width={1600}
               height={1067}
               sizes="(min-width: 1024px) 560px, 100vw"
@@ -488,11 +488,11 @@ export default function LandingPage() {
           <Reveal className="mx-auto grid max-w-7xl items-center gap-10 px-5 sm:px-8 lg:grid-cols-2 lg:gap-16">
             <SiteImage
               src="images/landing/practitioner-phone.webp"
-              alt="A nurse in scrubs checking her phone in a hospital corridor at the start of her shift."
-              width={1200}
-              height={1500}
-              sizes="(min-width: 1024px) 440px, (min-width: 640px) 420px, 100vw"
-              className="mx-auto w-full max-w-[420px] shadow-card lg:order-first"
+              alt="A nurse in teal scrubs checking her phone in a busy ward corridor, with patients waiting on benches behind her."
+              width={1600}
+              height={1067}
+              sizes="(min-width: 1024px) 560px, 100vw"
+              className="shadow-card lg:order-first"
             />
             <div>
               <p className="text-xs font-semibold uppercase tracking-wider text-primary">

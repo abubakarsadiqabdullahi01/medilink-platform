@@ -24,12 +24,17 @@ blocking time 50–80 ms. The page's JavaScript is 120 kB first load, shared wit
 itself adds 1.4 kB, because it stays a server component. The one failing audit is back/forward cache, a result of the
 site-wide `Cache-Control: no-store`, left as it is.
 
-Full Playwright suite on the production build: 72 of 72, including the accessibility scan of the landing page, sign-in,
-register, contact and the consoles, and the phone-width checks.
+With the photographs in place the figures are the same shape: **Performance 95–97, Accessibility 100, Best Practices 100,
+SEO 100**, layout shift 0, LCP 2.6 s warm. That is at the edge of the 2.5 s target and moves by a few tenths between runs; the
+LCP is the hero photograph, which is unchanged, and the three new photographs are below the fold and load only when
+scrolled to (the only image fetched on load is the hero, at 25 kB).
+
+Full Playwright suite on the production build, before and after the photographs: 72 of 72, including the accessibility scan
+of the landing page, sign-in, register, contact and the consoles, and the phone-width checks.
 
 Found on the way: a `favicon.ico` was requested by every browser and was a 404; Next was putting the page description in
 the body for a dynamic page, so a link preview or Lighthouse never saw it; and an image that fails before React is
 attached to hear about it never fires `onError`, so optional pictures are now detected when the app is built.
 
-Not done, on purpose: a service worker, a video, and Hausa. The photographs and illustrations are not in the repository
-yet; see `images.md`.
+Not done, on purpose: a service worker, a video, and Hausa. The three photographs are in; the four illustrations are not
+yet (see `images.md`), so empty states and the 404 still show their icons.
