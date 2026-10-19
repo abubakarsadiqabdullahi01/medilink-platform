@@ -1,30 +1,26 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { CircleCheck, LockKeyhole, Mail, Search, UserPlus, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { api, ApiError, errorMessage } from '@/lib/ui/api';
+import { phoneProblem } from '@/lib/ui/phone-problem';
 import { useSession } from '@/lib/ui/session';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { EmptyState, QueueSkeleton } from '@/components/app/page-shell';
+import { ConfirmDialog } from '@/components/app/confirm-dialog';
+import { DataTable, type Column } from '@/components/app/data-table';
+import { Field } from '@/components/app/field';
+import { EmptyState } from '@/components/app/page-shell';
+import { ErrorState, ListSkeleton } from '@/components/app/states';
 import { StatusBadge } from '@/components/app/status-badge';
-import { ErrorState } from '@/components/app/states';
+import { SuccessScreen } from '@/components/app/success-screen';
 import { StepUpDialog, isStepUpRequired } from '@/components/app/step-up';
 import { formatDate } from '@/components/app/format';
 
@@ -77,6 +73,10 @@ const MIN_REVOKE_REASON = 5;
  *
  * Every call here needs a freshly re-entered password, so the list itself
  * sits behind one.
+ *
+ * Changing who can act for a hospital is the most consequential thing on these screens, so every
+ * change that takes something away — removing a role, changing one, removing everything — is
+ * read back first: who, what they lose, and the way back. Giving access is read back too.
  */
 export function StaffManager({
   scopeType,
@@ -117,7 +117,8 @@ export function StaffManager({
     retry: false,
   });
 
-  const labelOf = (key: string) => roles.find((role) => role.key === key)?.label ?? key;
+  const roleOf = (key: string) => roles.find((role) => role.key === key);
+  const labelOf = (key: string) => roleOf(key)?.label ?? key;
   const live = (grants.data?.grants ?? []).filter(
     (grant) => !grant.revokedAt && roles.some((role) => role.key === grant.roleKey),
   );
@@ -134,12 +135,17 @@ export function StaffManager({
   const invitationsKey = ['staff-invitations', scopeId ?? 'none'];
   const invitations = useQuery({
     queryKey: invitationsKey,
-    queryFn: () => api.get<{ invitations: Invitation[] }>(`/api/v1/staff-invitations?facilityId=${scopeId}`),
+    queryFn: () =>
+      api.get<{ invitations: Invitation[] }>(`/api/v1/staff-invitations?facilityId=${scopeId}`),
     enabled: isFacility,
     retry: false,
   });
   const [invitePhone, setInvitePhone] = useState('');
+  const [inviteTouched, setInviteTouched] = useState(false);
   const [inviteRole, setInviteRole] = useState<string>(roles[0]?.key ?? '');
+  const [invited, setInvited] = useState<{ phone: string; roleKey: string } | null>(null);
+  const invitePhoneRef = useRef<HTMLInputElement>(null);
+  const inviteProblem = phoneProblem(invitePhone);
 
   const invite = useMutation({
     mutationFn: () =>
@@ -152,7 +158,9 @@ export function StaffManager({
       toast.success('Invitation sent', {
         description: 'They get one text. Nothing changes until they say yes, and it lasts a week.',
       });
+      setInvited({ phone: invitePhone.trim(), roleKey: inviteRole });
       setInvitePhone('');
+      setInviteTouched(false);
       void queryClient.invalidateQueries({ queryKey: invitationsKey });
     },
     onError: (error) => onFailure(error, 'Could not send the invitation'),
@@ -170,9 +178,13 @@ export function StaffManager({
 
   // ---- adding somebody
   const [phone, setPhone] = useState('');
+  const [phoneTouched, setPhoneTouched] = useState(false);
   const [found, setFound] = useState<FoundUser | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [roleKey, setRoleKey] = useState<string>(roles[0]?.key ?? '');
+  const [granting, setGranting] = useState(false);
+  const phoneRef = useRef<HTMLInputElement>(null);
+  const findProblem = phoneProblem(phone);
 
   const find = useMutation({
     mutationFn: () =>
@@ -199,7 +211,9 @@ export function StaffManager({
         description: `As ${labelOf(roleKey).toLowerCase()}. It applies from their next page load.`,
       });
       setPhone('');
+      setPhoneTouched(false);
       setFound(null);
+      setGranting(false);
       void queryClient.invalidateQueries({ queryKey: queueKey });
     },
     onError: (error) => onFailure(error, 'Could not give access'),
@@ -213,7 +227,9 @@ export function StaffManager({
     mutationFn: (target: Grant) =>
       api.post(`/api/v1/grants/${target.id}/revoke`, { scopeType, scopeId, reason: reason.trim() }),
     onSuccess: (_data, target) => {
-      toast.success(`${target.fullName} no longer has access as ${labelOf(target.roleKey).toLowerCase()}`);
+      toast.success(
+        `${target.fullName} no longer has access as ${labelOf(target.roleKey).toLowerCase()}`,
+      );
       setRevoking(null);
       setReason('');
       void queryClient.invalidateQueries({ queryKey: queueKey });
@@ -268,9 +284,59 @@ export function StaffManager({
   });
 
   const locked = grants.isError && isStepUpRequired(grants.error);
+  const wayBack = isFacility
+    ? 'Invite them again and they accept; the removal stays in the record.'
+    : 'Find them by phone number and give access again; the removal stays in the record.';
+
+  const grantColumns: Column<Grant>[] = [
+    {
+      id: 'person',
+      header: 'Person',
+      role: 'identity',
+      cell: (row) => (
+        <span className="flex flex-wrap items-center gap-2">
+          {row.fullName}
+          {row.userId === session.user.id ? <Badge variant="secondary">You</Badge> : null}
+        </span>
+      ),
+    },
+    { id: 'role', header: 'Role', cell: (row) => labelOf(row.roleKey) },
+    { id: 'since', header: 'Since', cell: (row) => formatDate(row.grantedAt) },
+  ];
+
+  const invitationColumns: Column<Invitation>[] = [
+    {
+      id: 'phone',
+      header: 'Phone number',
+      role: 'identity',
+      cell: (row) => <span className="tabular">{row.phone}</span>,
+    },
+    { id: 'role', header: 'Role', cell: (row) => labelOf(row.roleKey) },
+    {
+      id: 'sent',
+      header: 'Sent',
+      cell: (row) => `${formatDate(row.createdAt)} by ${row.invitedBy.fullName}`,
+    },
+    { id: 'answer', header: 'Answer by', cell: (row) => formatDate(row.expiresAt) },
+    {
+      id: 'text',
+      header: 'Text message',
+      cell: (row) => (
+        <span className={cn(row.text === 'failed' && 'font-medium text-destructive-text')}>
+          {row.text === 'sent'
+            ? 'The text was sent.'
+            : row.text === 'failed'
+              ? 'The text has not reached them yet. It is being tried again.'
+              : 'The text is about to be sent.'}
+        </span>
+      ),
+    },
+  ];
+
+  const newRole = roleOf(newRoleKey);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <StepUpDialog
         open={stepUpOpen}
         onOpenChange={setStepUpOpen}
@@ -310,194 +376,204 @@ export function StaffManager({
           {isFacility ? (
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-sm">
-                  <Mail className="size-4 text-muted-foreground" aria-hidden="true" />
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Mail className="size-5 text-muted-foreground" aria-hidden="true" />
                   Invite someone
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4">
-                <p className="text-sm text-muted-foreground">
-                  They get one text and say yes or no themselves; nothing changes until they do. They
-                  do not need an account yet: if they have not registered, they can do it at{' '}
-                  <span className="font-mono">{signupPath}</span> with this number and the invitation
-                  will be waiting.
-                </p>
-                <form
-                  className="space-y-4"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    if (invitePhone.trim() && inviteRole) guarded(() => invite.mutate());
-                  }}
-                >
-                  <div className="space-y-1.5">
-                    <Label htmlFor="invite-phone">Their phone number</Label>
-                    <Input
-                      id="invite-phone"
-                      inputMode="tel"
-                      placeholder="0803 123 4567"
-                      value={invitePhone}
-                      onChange={(event) => setInvitePhone(event.target.value)}
-                    />
-                  </div>
-
-                  <fieldset className="space-y-2">
-                    <legend className="mb-1 text-sm font-medium">What they would be able to do</legend>
-                    {roles.map((role) => (
-                      <button
-                        key={role.key}
-                        type="button"
-                        onClick={() => setInviteRole(role.key)}
-                        aria-pressed={inviteRole === role.key}
-                        className={cn(
-                          'flex w-full gap-3 rounded-lg border p-3 text-left transition-colors',
-                          inviteRole === role.key ? 'border-primary bg-accent/50' : 'hover:border-primary/40',
-                        )}
+              <CardContent>
+                {invited ? (
+                  <SuccessScreen
+                    bare
+                    title="Invitation sent"
+                    description={
+                      <>
+                        To <span className="tabular font-medium">{invited.phone}</span>, as{' '}
+                        {labelOf(invited.roleKey).toLowerCase()}.
+                      </>
+                    }
+                    steps={[
+                      'They get one text and say yes or no themselves. Nothing changes until they do.',
+                      <>
+                        If they have not registered yet, they can do it at{' '}
+                        <span className="font-mono">{signupPath}</span> with this number and the
+                        invitation will be waiting.
+                      </>,
+                      'It lasts a week. You can see it, and cancel it, under Invitations below.',
+                    ]}
+                    actions={
+                      <Button size="lg" variant="outline" onClick={() => setInvited(null)}>
+                        Invite someone else
+                      </Button>
+                    }
+                  />
+                ) : (
+                  <div className="space-y-4">
+                    <p className="text-base leading-relaxed text-muted-foreground">
+                      They get one text and say yes or no themselves; nothing changes until they do.
+                      They do not need an account yet: if they have not registered, they can do it
+                      at <span className="font-mono">{signupPath}</span> with this number and the
+                      invitation will be waiting.
+                    </p>
+                    <form
+                      className="space-y-4"
+                      noValidate
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        setInviteTouched(true);
+                        if (inviteProblem) {
+                          invitePhoneRef.current?.focus();
+                          return;
+                        }
+                        if (inviteRole) guarded(() => invite.mutate());
+                      }}
+                    >
+                      <Field
+                        label="Their phone number"
+                        required
+                        hint="A Nigerian mobile number, for example 0803 123 4567."
+                        error={inviteTouched ? inviteProblem : undefined}
                       >
-                        <span
-                          className={cn(
-                            'mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border',
-                            inviteRole === role.key ? 'border-primary bg-primary' : 'border-input',
-                          )}
-                          aria-hidden="true"
-                        >
-                          {inviteRole === role.key ? (
-                            <CircleCheck className="size-3 text-primary-foreground" />
-                          ) : null}
-                        </span>
-                        <span className="min-w-0">
-                          <span className="block text-sm font-medium">{role.label}</span>
-                          <span className="mt-0.5 block text-xs text-muted-foreground">
-                            {role.description}
-                          </span>
-                        </span>
-                      </button>
-                    ))}
-                  </fieldset>
+                        <Input
+                          ref={invitePhoneRef}
+                          inputMode="tel"
+                          autoComplete="off"
+                          placeholder="0803 123 4567"
+                          value={invitePhone}
+                          onBlur={() => invitePhone && setInviteTouched(true)}
+                          onChange={(event) => setInvitePhone(event.target.value)}
+                        />
+                      </Field>
 
-                  <Button type="submit" disabled={!invitePhone.trim() || !inviteRole} loading={invite.isPending}>
-                    Send invitation as {labelOf(inviteRole).toLowerCase()}
-                  </Button>
-                </form>
+                      <RoleChoice
+                        legend="What they would be able to do"
+                        roles={roles}
+                        value={inviteRole}
+                        onChange={setInviteRole}
+                      />
+
+                      <Button
+                        type="submit"
+                        loading={invite.isPending}
+                        disabled={!inviteRole}
+                        className="h-auto min-h-11 w-full whitespace-normal py-2 sm:w-auto"
+                      >
+                        Send invitation as {labelOf(inviteRole).toLowerCase()}
+                      </Button>
+                    </form>
+                  </div>
+                )}
               </CardContent>
             </Card>
           ) : null}
 
           {!isFacility || holdsPlatform ? (
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <UserPlus className="size-4 text-muted-foreground" aria-hidden="true" />
-                {isFacility ? 'Add someone directly (Medilink only)' : 'Give someone access'}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <form
-                className="flex flex-wrap items-end gap-2"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  if (phone.trim()) guarded(() => find.mutate());
-                }}
-              >
-                <div className="min-w-0 flex-1 space-y-1.5">
-                  <Label htmlFor="staff-phone">Their phone number</Label>
-                  <Input
-                    id="staff-phone"
-                    inputMode="tel"
-                    placeholder="0803 123 4567"
-                    value={phone}
-                    onChange={(event) => {
-                      setPhone(event.target.value);
-                      setFound(null);
-                      setNotFound(false);
-                    }}
-                  />
-                </div>
-                <Button type="submit" variant="outline" disabled={!phone.trim()} loading={find.isPending}>
-                  <Search />
-                  Find
-                </Button>
-              </form>
-
-              {notFound ? (
-                <Alert variant="warning">
-                  <AlertDescription>
-                    Nobody has an account with that number yet. Ask them to create one at{' '}
-                    <span className="font-mono">{signupPath}</span>, then find them again.
-                  </AlertDescription>
-                </Alert>
-              ) : null}
-
-              {found ? (
-                <div className="space-y-4 rounded-md border p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="font-medium">{found.fullName}</p>
-                      <p className="font-mono text-xs text-muted-foreground">{found.phone}</p>
-                    </div>
-                    <StatusBadge status={found.status} />
-                  </div>
-
-                  <fieldset className="space-y-2">
-                    <legend className="mb-1 text-sm font-medium">What they can do</legend>
-                    {roles.map((role) => (
-                      <button
-                        key={role.key}
-                        type="button"
-                        onClick={() => setRoleKey(role.key)}
-                        aria-pressed={roleKey === role.key}
-                        className={cn(
-                          'flex w-full gap-3 rounded-lg border p-3 text-left transition-colors',
-                          roleKey === role.key ? 'border-primary bg-accent/50' : 'hover:border-primary/40',
-                        )}
-                      >
-                        <span
-                          className={cn(
-                            'mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border',
-                            roleKey === role.key ? 'border-primary bg-primary' : 'border-input',
-                          )}
-                          aria-hidden="true"
-                        >
-                          {roleKey === role.key ? (
-                            <CircleCheck className="size-3 text-primary-foreground" />
-                          ) : null}
-                        </span>
-                        <span className="min-w-0">
-                          <span className="block text-sm font-medium">{role.label}</span>
-                          <span className="mt-0.5 block text-xs text-muted-foreground">
-                            {role.description}
-                          </span>
-                        </span>
-                      </button>
-                    ))}
-                  </fieldset>
-
-                  <Button
-                    disabled={!roleKey || found.status === 'SUSPENDED'}
-                    loading={grant.isPending}
-                    onClick={() => guarded(() => grant.mutate())}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <UserPlus className="size-5 text-muted-foreground" aria-hidden="true" />
+                  {isFacility ? 'Add someone directly (Medilink only)' : 'Give someone access'}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <form
+                  className="space-y-3"
+                  noValidate
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    setPhoneTouched(true);
+                    if (findProblem) {
+                      phoneRef.current?.focus();
+                      return;
+                    }
+                    guarded(() => find.mutate());
+                  }}
+                >
+                  <Field
+                    label="Their phone number"
+                    required
+                    hint="A Nigerian mobile number, for example 0803 123 4567."
+                    error={phoneTouched ? findProblem : undefined}
                   >
-                    Give access as {labelOf(roleKey).toLowerCase()}
+                    <Input
+                      ref={phoneRef}
+                      inputMode="tel"
+                      autoComplete="off"
+                      placeholder="0803 123 4567"
+                      value={phone}
+                      onBlur={() => phone && setPhoneTouched(true)}
+                      onChange={(event) => {
+                        setPhone(event.target.value);
+                        setFound(null);
+                        setNotFound(false);
+                      }}
+                    />
+                  </Field>
+                  <Button type="submit" variant="outline" loading={find.isPending}>
+                    <Search />
+                    Find
                   </Button>
-                  {found.status === 'SUSPENDED' ? (
-                    <p className="text-xs text-muted-foreground">
-                      This account is suspended and cannot be given access.
-                    </p>
-                  ) : null}
-                </div>
-              ) : null}
-            </CardContent>
-          </Card>
+                </form>
+
+                {notFound ? (
+                  <Alert variant="warning">
+                    <AlertDescription>
+                      Nobody has an account with that number yet. Ask them to create one at{' '}
+                      <span className="font-mono">{signupPath}</span>, then find them again.
+                    </AlertDescription>
+                  </Alert>
+                ) : null}
+
+                {found ? (
+                  <div className="space-y-4 rounded-md border p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="font-medium">{found.fullName}</p>
+                        <p className="tabular text-sm text-muted-foreground">{found.phone}</p>
+                      </div>
+                      <StatusBadge status={found.status} />
+                    </div>
+
+                    <RoleChoice
+                      legend="What they can do"
+                      roles={roles}
+                      value={roleKey}
+                      onChange={setRoleKey}
+                    />
+
+                    <Button
+                      className="h-auto min-h-11 w-full whitespace-normal py-2 sm:w-auto"
+                      disabled={!roleKey || found.status === 'SUSPENDED'}
+                      onClick={() => {
+                        grant.reset();
+                        setGranting(true);
+                      }}
+                    >
+                      Give access as {labelOf(roleKey).toLowerCase()}
+                    </Button>
+                    {found.status === 'SUSPENDED' ? (
+                      <p className="text-sm text-muted-foreground">
+                        This account is suspended and cannot be given access.
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+              </CardContent>
+            </Card>
           ) : null}
 
           {isFacility ? (
-            <section className="space-y-3">
-              <h2 className="flex items-center gap-2 text-sm font-medium">
-                <Mail className="size-4 text-muted-foreground" aria-hidden="true" />
+            <section aria-labelledby="staff-invitations-heading" className="space-y-3">
+              <h2
+                id="staff-invitations-heading"
+                className="flex items-center gap-2 text-lg font-semibold"
+              >
+                <Mail className="size-5 text-muted-foreground" aria-hidden="true" />
                 Invitations
               </h2>
               {invitations.isPending ? (
-                <QueueSkeleton rows={1} />
-              ) : invitations.isError ? (
+                <ListSkeleton rows={1} label="Loading invitations" />
+              ) : invitations.isError && !invitations.data ? (
                 <ErrorState
                   error={invitations.error}
                   onRetry={() => void invitations.refetch()}
@@ -508,21 +584,22 @@ export function StaffManager({
                 <InvitationList
                   rows={invitations.data?.invitations ?? []}
                   labelOf={labelOf}
-                  cancelling={cancelInvite.isPending}
+                  columns={invitationColumns}
+                  cancellingId={cancelInvite.isPending ? cancelInvite.variables?.id : undefined}
                   onCancel={(row) => guarded(() => cancelInvite.mutate(row))}
                 />
               )}
             </section>
           ) : null}
 
-          <section className="space-y-3">
-            <h2 className="flex items-center gap-2 text-sm font-medium">
-              <Users className="size-4 text-muted-foreground" aria-hidden="true" />
+          <section aria-labelledby="staff-access-heading" className="space-y-3">
+            <h2 id="staff-access-heading" className="flex items-center gap-2 text-lg font-semibold">
+              <Users className="size-5 text-muted-foreground" aria-hidden="true" />
               Who has access
             </h2>
             {grants.isPending ? (
-              <QueueSkeleton rows={2} />
-            ) : grants.isError ? (
+              <ListSkeleton rows={2} label="Loading who has access" />
+            ) : grants.isError && !grants.data ? (
               <ErrorState
                 error={grants.error}
                 onRetry={() => void grants.refetch()}
@@ -530,69 +607,70 @@ export function StaffManager({
                 compact
               />
             ) : live.length === 0 ? (
-              <EmptyState icon={<Users />} title="Nobody yet" description="Add someone above." />
+              <EmptyState
+                icon={<Users />}
+                title="Nobody yet"
+                description={
+                  isFacility && !holdsPlatform ? 'Invite someone above.' : 'Add someone above.'
+                }
+              />
             ) : (
-              <div className="space-y-2">
-                {live.map((row) => (
-                  <Card key={row.id}>
-                    <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
-                      <div className="min-w-0">
-                        <p className="flex items-center gap-2 font-medium">
-                          {row.fullName}
-                          {row.userId === session.user.id ? <Badge variant="secondary">You</Badge> : null}
-                        </p>
-                        <p className="mt-0.5 text-xs text-muted-foreground">
-                          {labelOf(row.roleKey)} · since {formatDate(row.grantedAt)}
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          aria-label={`Change role for ${row.fullName}`}
-                          onClick={() => {
-                            setChanging(row);
-                            setNewRoleKey('');
-                            setChangeReason('');
-                          }}
-                        >
-                          Change role
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          aria-label={`Remove access for ${row.fullName}`}
-                          onClick={() => setRevoking(row)}
-                        >
-                          Remove access
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="text-destructive-text"
-                          aria-label={`Remove all access now for ${row.fullName}`}
-                          onClick={() => {
-                            setRemovingAll(row);
-                            setEmergencyReason('');
-                          }}
-                        >
-                          Remove all access now
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
+              <DataTable
+                caption="People with access"
+                rows={live}
+                columns={grantColumns}
+                getKey={(row) => row.id}
+                actionHeader="Change"
+                action={(row) => (
+                  <div className="flex flex-col gap-2 md:flex-row md:flex-wrap md:justify-end">
+                    <Button
+                      variant="outline"
+                      aria-label={`Change role for ${row.fullName}`}
+                      onClick={() => {
+                        change.reset();
+                        setChanging(row);
+                        setNewRoleKey('');
+                        setChangeReason('');
+                      }}
+                    >
+                      Change role
+                    </Button>
+                    <Button
+                      variant="outline"
+                      aria-label={`Remove access for ${row.fullName}`}
+                      onClick={() => {
+                        revoke.reset();
+                        setRevoking(row);
+                        setReason('');
+                      }}
+                    >
+                      Remove access
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="text-destructive-text"
+                      aria-label={`Remove all access now for ${row.fullName}`}
+                      onClick={() => {
+                        removeAll.reset();
+                        setRemovingAll(row);
+                        setEmergencyReason('');
+                      }}
+                    >
+                      Remove all access now
+                    </Button>
+                  </div>
+                )}
+              />
             )}
 
             {past.length > 0 ? (
-              <details className="rounded-md border px-4 py-3 text-sm">
-                <summary className="cursor-pointer text-muted-foreground">
+              <details className="rounded-md border px-4 py-1 text-base">
+                <summary className="min-h-11 cursor-pointer py-2.5 text-muted-foreground">
                   Past access ({past.length})
                 </summary>
-                <ul className="mt-3 space-y-2">
+                <ul className="space-y-2 pb-3 pt-1">
                   {past.map((row) => (
-                    <li key={row.id} className="text-xs text-muted-foreground">
+                    <li key={row.id} className="text-sm text-muted-foreground">
                       <span className="font-medium text-foreground">{row.fullName}</span> ·{' '}
                       {labelOf(row.roleKey)} · {formatDate(row.grantedAt)} to{' '}
                       {row.revokedAt ? formatDate(row.revokedAt) : ''}
@@ -605,146 +683,224 @@ export function StaffManager({
         </>
       )}
 
-      <Dialog open={Boolean(changing)} onOpenChange={(next) => !next && setChanging(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Change {changing?.fullName}&apos;s role</DialogTitle>
-            <DialogDescription>
-              Now {changing ? labelOf(changing.roleKey).toLowerCase() : ''}. The old role ends as the
-              new one begins, so they are never without access in between. You can only give a role
-              you hold yourself.
-            </DialogDescription>
-          </DialogHeader>
-          <fieldset className="space-y-2">
-            <legend className="mb-1 text-sm font-medium">Their new role</legend>
-            {roles
-              .filter((role) => role.key !== changing?.roleKey)
-              .map((role) => (
-                <button
-                  key={role.key}
-                  type="button"
-                  onClick={() => setNewRoleKey(role.key)}
-                  aria-pressed={newRoleKey === role.key}
-                  className={cn(
-                    'flex w-full gap-3 rounded-lg border p-3 text-left transition-colors',
-                    newRoleKey === role.key ? 'border-primary bg-accent/50' : 'hover:border-primary/40',
-                  )}
-                >
-                  <span className="min-w-0">
-                    <span className="block text-sm font-medium">{role.label}</span>
-                    <span className="mt-0.5 block text-xs text-muted-foreground">{role.description}</span>
-                  </span>
-                </button>
-              ))}
-          </fieldset>
-          <div className="space-y-1.5">
-            <Label htmlFor="change-reason">Why</Label>
-            <Textarea
-              id="change-reason"
-              rows={2}
-              placeholder="Now deputy to the medical director, moved to the night rota…"
-              value={changeReason}
-              onChange={(event) => setChangeReason(event.target.value)}
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setChanging(null)}>
-              Leave it as it is
-            </Button>
-            <Button
-              disabled={!newRoleKey || changeReason.trim().length < MIN_REVOKE_REASON}
-              loading={change.isPending}
-              onClick={() => {
-                const target = changing;
-                if (target) guarded(() => change.mutate(target));
-              }}
-            >
-              Change role
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={granting}
+        onOpenChange={setGranting}
+        title="Give access"
+        object={found ? `${found.fullName} · ${found.phone}` : ''}
+        consequence={
+          <>
+            {found?.fullName ?? 'They'} will be able to act as{' '}
+            <strong>{labelOf(roleKey).toLowerCase()}</strong>
+            {scopeType === 'FACILITY' ? ' at this facility' : ' on the platform'}:{' '}
+            {roleOf(roleKey)?.description}
+          </>
+        }
+        reversible="You can remove it from the list afterwards; the grant stays in the record."
+        confirmLabel={`Give access as ${labelOf(roleKey).toLowerCase()}`}
+        loading={grant.isPending}
+        onConfirm={() => guarded(() => grant.mutate())}
+      />
 
-      <Dialog open={Boolean(removingAll)} onOpenChange={(next) => !next && setRemovingAll(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Remove all of {removingAll?.fullName}&apos;s access now</DialogTitle>
-            <DialogDescription>
-              Every role they hold {scopeType === 'FACILITY' ? 'at this facility' : 'on the platform'}{' '}
-              ends at once, on their next request. What they hold anywhere else is not touched.
-              {scopeType === 'FACILITY'
-                ? ' They, and the other people who can manage staff here, are told by text.'
-                : ''}{' '}
-              Use this when removing one role at a time is the risk.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-1.5">
-            <Label htmlFor="emergency-reason">Why</Label>
-            <Textarea
-              id="emergency-reason"
-              rows={3}
-              placeholder="Left without notice and still has the keys, account may be in somebody else’s hands…"
-              value={emergencyReason}
-              onChange={(event) => setEmergencyReason(event.target.value)}
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRemovingAll(null)}>
-              Keep their access
-            </Button>
-            <Button
-              variant="destructive"
-              disabled={emergencyReason.trim().length < MIN_REVOKE_REASON}
-              loading={removeAll.isPending}
-              onClick={() => {
-                const target = removingAll;
-                if (target) guarded(() => removeAll.mutate(target));
-              }}
-            >
-              Remove all access now
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={changing !== null}
+        onOpenChange={(open) => !open && setChanging(null)}
+        title={`Change ${changing?.fullName ?? ''}’s role`}
+        object={
+          changing
+            ? `${changing.fullName} · now ${labelOf(changing.roleKey).toLowerCase()}${
+                newRole ? ` → ${newRole.label.toLowerCase()}` : ''
+              }`
+            : ''
+        }
+        consequence={
+          newRole ? (
+            <>
+              From their next request they can act as <strong>{newRole.label.toLowerCase()}</strong>
+              : {newRole.description} The old role ends as the new one begins, so they are never
+              without access in between.
+            </>
+          ) : (
+            <>
+              Choose their new role below. The old role ends as the new one begins, so they are
+              never without access in between. You can only give a role you hold yourself.
+            </>
+          )
+        }
+        reversible="You can change it back the same way."
+        confirmLabel="Change role"
+        cancelLabel="Leave it as it is"
+        loading={change.isPending}
+        confirmDisabled={!newRoleKey || changeReason.trim().length < MIN_REVOKE_REASON}
+        onConfirm={() => {
+          const target = changing;
+          if (target) guarded(() => change.mutate(target));
+        }}
+      >
+        <RoleChoice
+          legend="Their new role"
+          roles={roles.filter((role) => role.key !== changing?.roleKey)}
+          value={newRoleKey}
+          onChange={setNewRoleKey}
+        />
+        <Field
+          label="Why"
+          required
+          hint={`At least ${MIN_REVOKE_REASON} characters. Kept in the record.`}
+        >
+          <Textarea
+            rows={2}
+            placeholder="Now deputy to the medical director, moved to the night rota…"
+            value={changeReason}
+            onChange={(event) => setChangeReason(event.target.value)}
+          />
+        </Field>
+      </ConfirmDialog>
 
-      <Dialog open={Boolean(revoking)} onOpenChange={(next) => !next && setRevoking(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Remove {revoking?.fullName}&apos;s access</DialogTitle>
-            <DialogDescription>
-              They lose {revoking ? labelOf(revoking.roleKey).toLowerCase() : ''} access on their
-              next request. The grant stays in the record with your reason.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-1.5">
-            <Label htmlFor="revoke-reason">Why</Label>
-            <Textarea
-              id="revoke-reason"
-              rows={3}
-              placeholder="Left the hospital, changed role, access given in error…"
-              value={reason}
-              onChange={(event) => setReason(event.target.value)}
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRevoking(null)}>
-              Keep their access
-            </Button>
-            <Button
-              variant="destructive"
-              disabled={reason.trim().length < MIN_REVOKE_REASON}
-              loading={revoke.isPending}
-              onClick={() => {
-                const target = revoking;
-                if (target) guarded(() => revoke.mutate(target));
-              }}
-            >
-              Remove access
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={revoking !== null}
+        onOpenChange={(open) => !open && setRevoking(null)}
+        title="Remove access"
+        object={revoking ? `${revoking.fullName} · ${labelOf(revoking.roleKey)}` : ''}
+        consequence={
+          <>
+            They lose {revoking ? labelOf(revoking.roleKey).toLowerCase() : ''} access on their next
+            request. Anything else they hold is not touched. The grant stays in the record with your
+            reason.
+          </>
+        }
+        reversible={wayBack}
+        destructive
+        confirmLabel="Remove access"
+        cancelLabel="Keep their access"
+        loading={revoke.isPending}
+        confirmDisabled={reason.trim().length < MIN_REVOKE_REASON}
+        onConfirm={() => {
+          const target = revoking;
+          if (target) guarded(() => revoke.mutate(target));
+        }}
+      >
+        <Field
+          label="Why"
+          required
+          hint={`At least ${MIN_REVOKE_REASON} characters. Kept in the record.`}
+        >
+          <Textarea
+            rows={3}
+            placeholder="Left the hospital, changed role, access given in error…"
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+          />
+        </Field>
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={removingAll !== null}
+        onOpenChange={(open) => !open && setRemovingAll(null)}
+        title="Remove all access now"
+        object={
+          removingAll
+            ? `${removingAll.fullName} · every role ${
+                scopeType === 'FACILITY' ? 'at this facility' : 'on the platform'
+              }`
+            : ''
+        }
+        consequence={
+          <>
+            Every role they hold {scopeType === 'FACILITY' ? 'at this facility' : 'on the platform'}{' '}
+            ends at once, on their next request. What they hold anywhere else is not touched.
+            {scopeType === 'FACILITY'
+              ? ' They, and the other people who can manage staff here, are told by text.'
+              : ''}{' '}
+            Use this when removing one role at a time is the risk.
+          </>
+        }
+        reversible={wayBack}
+        destructive
+        confirmLabel="Remove all access now"
+        cancelLabel="Keep their access"
+        loading={removeAll.isPending}
+        confirmDisabled={emergencyReason.trim().length < MIN_REVOKE_REASON}
+        onConfirm={() => {
+          const target = removingAll;
+          if (target) guarded(() => removeAll.mutate(target));
+        }}
+      >
+        <Field
+          label="Why"
+          required
+          hint={`At least ${MIN_REVOKE_REASON} characters. Kept in the record.`}
+        >
+          <Textarea
+            rows={3}
+            placeholder="Left without notice and still has the keys, account may be in somebody else’s hands…"
+            value={emergencyReason}
+            onChange={(event) => setEmergencyReason(event.target.value)}
+          />
+        </Field>
+      </ConfirmDialog>
     </div>
+  );
+}
+
+/**
+ * Which role, as a radio group: one tab stop, arrow keys to move, and the choice read out as
+ * "selected". Each is a card that says in plain words what the role can and cannot do, because
+ * that is the decision being made.
+ */
+function RoleChoice({
+  legend,
+  roles,
+  value,
+  onChange,
+}: {
+  legend: string;
+  roles: StaffRole[];
+  value: string;
+  onChange: (key: string) => void;
+}) {
+  const name = useId();
+  return (
+    <fieldset className="space-y-2">
+      <legend className="mb-1 text-base font-medium">{legend}</legend>
+      {roles.map((role) => {
+        const checked = value === role.key;
+        return (
+          <label
+            key={role.key}
+            className={cn(
+              'flex min-h-11 cursor-pointer gap-3 rounded-lg border p-3 transition-colors',
+              'focus-within:ring-2 focus-within:ring-ring',
+              checked ? 'border-primary bg-accent/50' : 'hover:border-primary/40',
+            )}
+          >
+            <input
+              type="radio"
+              name={name}
+              value={role.key}
+              checked={checked}
+              onChange={() => onChange(role.key)}
+              className="sr-only"
+            />
+            <span
+              aria-hidden="true"
+              className={cn(
+                'mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full border',
+                checked ? 'border-primary bg-primary' : 'border-input',
+              )}
+            >
+              {checked ? <CircleCheck className="size-3.5 text-primary-foreground" /> : null}
+            </span>
+            <span className="min-w-0">
+              <span className="block text-base font-medium">{role.label}</span>
+              <span className="mt-0.5 block text-sm leading-snug text-muted-foreground">
+                {role.description}
+              </span>
+            </span>
+          </label>
+        );
+      })}
+    </fieldset>
   );
 }
 
@@ -765,12 +921,14 @@ const INVITATION_STATUS: Record<Invitation['status'], string> = {
 function InvitationList({
   rows,
   labelOf,
-  cancelling,
+  columns,
+  cancellingId,
   onCancel,
 }: {
   rows: Invitation[];
   labelOf: (key: string) => string;
-  cancelling: boolean;
+  columns: Column<Invitation>[];
+  cancellingId: string | undefined;
   onCancel: (row: Invitation) => void;
 }) {
   const waiting = rows.filter((row) => row.status === 'PENDING');
@@ -779,52 +937,43 @@ function InvitationList({
   return (
     <>
       {waiting.length === 0 ? (
-        <EmptyState icon={<Mail />} title="Nothing waiting" description="Invite someone above." />
+        <EmptyState
+          compact
+          icon={<Mail />}
+          title="Nothing waiting"
+          description="Invite someone above."
+        />
       ) : (
-        <div className="space-y-2">
-          {waiting.map((row) => (
-            <Card key={row.id}>
-              <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
-                <div className="min-w-0">
-                  <p className="font-medium">
-                    <span className="font-mono">{row.phone}</span>
-                  </p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    {labelOf(row.roleKey)} · sent {formatDate(row.createdAt)} by {row.invitedBy.fullName} ·
-                    answer by {formatDate(row.expiresAt)}
-                  </p>
-                  <p
-                    className={cn(
-                      'mt-1 text-xs',
-                      row.text === 'failed' ? 'text-destructive-text' : 'text-muted-foreground',
-                    )}
-                  >
-                    {row.text === 'sent'
-                      ? 'The text was sent.'
-                      : row.text === 'failed'
-                        ? 'The text has not reached them yet. It is being tried again.'
-                        : 'The text is about to be sent.'}
-                  </p>
-                </div>
-                <Button variant="outline" size="sm" loading={cancelling} onClick={() => onCancel(row)}>
-                  Cancel
-                </Button>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+        <DataTable
+          caption="Invitations waiting for an answer"
+          rows={waiting}
+          columns={columns}
+          getKey={(row) => row.id}
+          actionHeader="Change"
+          action={(row) => (
+            <Button
+              variant="outline"
+              aria-label={`Cancel the invitation to ${row.phone}`}
+              loading={cancellingId === row.id}
+              onClick={() => onCancel(row)}
+            >
+              Cancel invitation
+            </Button>
+          )}
+        />
       )}
 
       {earlier.length > 0 ? (
-        <details className="rounded-md border px-4 py-3 text-sm">
-          <summary className="cursor-pointer text-muted-foreground">
+        <details className="rounded-md border px-4 py-1 text-base">
+          <summary className="min-h-11 cursor-pointer py-2.5 text-muted-foreground">
             Earlier invitations ({earlier.length})
           </summary>
-          <ul className="mt-3 space-y-2">
+          <ul className="space-y-2 pb-3 pt-1">
             {earlier.map((row) => (
-              <li key={row.id} className="text-xs text-muted-foreground">
-                <span className="font-mono text-foreground">{row.phone}</span> · {labelOf(row.roleKey)} ·{' '}
-                {INVITATION_STATUS[row.status]} · sent {formatDate(row.createdAt)}
+              <li key={row.id} className="text-sm text-muted-foreground">
+                <span className="tabular text-foreground">{row.phone}</span> ·{' '}
+                {labelOf(row.roleKey)} · {INVITATION_STATUS[row.status]} · sent{' '}
+                {formatDate(row.createdAt)}
               </li>
             ))}
           </ul>

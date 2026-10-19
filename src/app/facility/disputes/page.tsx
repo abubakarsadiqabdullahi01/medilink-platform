@@ -3,12 +3,11 @@
 import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { FileUp, Gavel, TriangleAlert } from 'lucide-react';
+import { FileUp, Gavel } from 'lucide-react';
 import { api, errorMessage } from '@/lib/ui/api';
 import { useFacilityId } from '@/lib/ui/facility';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import {
   Dialog,
   DialogContent,
@@ -17,9 +16,20 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { ConfirmDialog } from '@/components/app/confirm-dialog';
+import { DataTable, type Column } from '@/components/app/data-table';
+import { Field } from '@/components/app/field';
+import { FilterBar } from '@/components/app/filter-bar';
+import { EmptyState, PageHeader } from '@/components/app/page-shell';
+import { ErrorState, FilteredEmpty, ListSkeleton, TableSkeleton } from '@/components/app/states';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
-import { EmptyState, PageHeader, QueueSkeleton } from '@/components/app/page-shell';
 import { formatAgo, formatWhen } from '@/components/app/format';
 
 interface Case {
@@ -48,6 +58,13 @@ const LIVE = ['OPEN', 'UNDER_REVIEW'];
 const ACCEPTED = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/heic'];
 const MAX_BYTES = 10 * 1024 * 1024;
 
+const STATUS_FILTERS = [
+  ['all', 'Every case'],
+  ['live', 'Still open'],
+  ['RESOLVED', 'Decided'],
+  ['WITHDRAWN', 'Withdrawn'],
+] as const;
+
 /**
  * Disputes over this facility's shifts.
  *
@@ -57,18 +74,69 @@ const MAX_BYTES = 10 * 1024 * 1024;
  * the practitioner's own standing. Here the facility reads the case, sees what the
  * practitioner attached, adds its own and, if it raised the case, takes it back.
  * What it cannot do is edit or remove evidence, or decide anything.
+ *
+ * The list is every case the facility is a side of, the open ones first. The API has no
+ * filters, so "Still open" and the rest narrow what is already here, which is why there is no
+ * search: a facility does not have so many disputes that it needs one.
  */
 export default function FacilityDisputesPage() {
   const facilityId = useFacilityId();
   const [open, setOpen] = useState<Case | null>(null);
+  const [filter, setFilter] = useState<string>('all');
 
   const cases = useQuery({
     queryKey: ['facility-disputes', facilityId],
     queryFn: () => api.get<{ disputes: Case[] }>(`/api/v1/disputes?facilityId=${facilityId}`),
     enabled: Boolean(facilityId),
   });
-  const rows = cases.data?.disputes ?? [];
-  const live = rows.filter((row) => LIVE.includes(row.status));
+  const all = cases.data?.disputes ?? [];
+  const live = all.filter((row) => LIVE.includes(row.status));
+  const rows = all
+    .filter((row) =>
+      filter === 'all'
+        ? true
+        : filter === 'live'
+          ? LIVE.includes(row.status)
+          : row.status === filter,
+    )
+    // Open cases are the ones waiting on somebody, so they come first; the order within each
+    // group is the one the server gave.
+    .sort((a, b) => Number(LIVE.includes(b.status)) - Number(LIVE.includes(a.status)));
+
+  const activeCount = filter === 'all' ? 0 : 1;
+
+  const columns: Column<Case>[] = [
+    {
+      id: 'case',
+      header: 'Case',
+      role: 'identity',
+      cell: (row) => (
+        <>
+          {humanise(row.category)} · {row.practitionerName}
+        </>
+      ),
+    },
+    {
+      id: 'shift',
+      header: 'Shift',
+      cell: (row) => formatWhen(row.shiftStartsAt),
+    },
+    {
+      id: 'raised',
+      header: 'Raised',
+      cell: (row) => (
+        <>
+          {formatAgo(row.createdAt)} by {row.raisedByFacility ? 'you' : 'the practitioner'}
+        </>
+      ),
+    },
+    {
+      id: 'status',
+      header: 'Status',
+      role: 'status',
+      cell: (row) => <StatusBadge status={row.status} />,
+    },
+  ];
 
   return (
     <>
@@ -78,13 +146,14 @@ export default function FacilityDisputesPage() {
       />
 
       {!facilityId || cases.isPending ? (
-        <QueueSkeleton rows={2} />
-      ) : cases.isError ? (
-        <Alert variant="destructive">
-          <TriangleAlert />
-          <AlertDescription>The disputes could not be loaded.</AlertDescription>
-        </Alert>
-      ) : rows.length === 0 ? (
+        <TableSkeleton label="Loading disputes" columns={4} rows={3} />
+      ) : cases.isError && !cases.data ? (
+        <ErrorState
+          error={cases.error}
+          onRetry={() => void cases.refetch()}
+          retrying={cases.isFetching}
+        />
+      ) : all.length === 0 ? (
         <EmptyState
           icon={<Gavel />}
           title="No disputes"
@@ -100,29 +169,56 @@ export default function FacilityDisputesPage() {
               </AlertDescription>
             </Alert>
           ) : null}
-          <div className="space-y-3">
-            {rows.map((row) => (
-              <Card key={row.id}>
-                <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
-                  <div className="min-w-0">
-                    <p className="font-medium">
-                      {humanise(row.category)} · {row.practitionerName}
-                    </p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      Shift {formatWhen(row.shiftStartsAt)} · raised {formatAgo(row.createdAt)} by{' '}
-                      {row.raisedByFacility ? 'you' : 'the practitioner'}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <StatusBadge status={row.status} />
-                    <Button variant="outline" size="sm" onClick={() => setOpen(row)}>
-                      Open
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+
+          <FilterBar
+            activeCount={activeCount}
+            onClear={() => setFilter('all')}
+            busy={cases.isFetching}
+            summary={`${rows.length} of ${all.length} ${all.length === 1 ? 'case' : 'cases'}`}
+          >
+            <Field label="Show" className="md:min-w-[12rem]">
+              {(a11y) => (
+                <Select value={filter} onValueChange={setFilter}>
+                  <SelectTrigger {...a11y}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {STATUS_FILTERS.map(([value, label]) => (
+                      <SelectItem key={value} value={value}>
+                        {label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </Field>
+          </FilterBar>
+
+          {rows.length === 0 ? (
+            <FilteredEmpty
+              noun="cases"
+              activeCount={activeCount}
+              onClear={() => setFilter('all')}
+            />
+          ) : (
+            <DataTable
+              caption="Disputes over your shifts"
+              rows={rows}
+              columns={columns}
+              getKey={(row) => row.id}
+              actionHeader="Next step"
+              action={(row) => (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  aria-label={`Open case: ${humanise(row.category)}, ${row.practitionerName}`}
+                  onClick={() => setOpen(row)}
+                >
+                  Open
+                </Button>
+              )}
+            />
+          )}
         </>
       )}
 
@@ -146,6 +242,7 @@ function CaseDialog({
   const fileInput = useRef<HTMLInputElement>(null);
   const [note, setNote] = useState('');
   const [problem, setProblem] = useState<string | null>(null);
+  const [withdrawing, setWithdrawing] = useState(false);
 
   const detail = useQuery({
     queryKey: ['facility-dispute', row.id],
@@ -156,6 +253,7 @@ function CaseDialog({
   });
   const evidence = detail.data?.evidence ?? [];
   const live = LIVE.includes(row.status);
+  const caseLabel = `${humanise(row.category)} · ${row.practitionerName}`;
 
   function refresh() {
     void queryClient.invalidateQueries({ queryKey: ['facility-dispute', row.id] });
@@ -193,12 +291,13 @@ function CaseDialog({
     onSuccess: () => {
       toast.success('Withdrawn', { description: 'The case stays on record, marked withdrawn.' });
       refresh();
+      setWithdrawing(false);
       onClose();
     },
     onError: (error) => toast.error('Could not withdraw it', { description: errorMessage(error) }),
   });
 
-  async function open(item: Evidence) {
+  async function openEvidence(item: Evidence) {
     try {
       const { url } = await api.post<{ url: string }>(
         `/api/v1/disputes/${row.id}/evidence/${item.id}/url`,
@@ -213,118 +312,191 @@ function CaseDialog({
   function choose(file: File | undefined) {
     setProblem(null);
     if (!file) return;
-    if (!ACCEPTED.includes(file.type)) return setProblem('Use a PDF, or a JPEG, PNG, WebP or HEIC image.');
+    if (!ACCEPTED.includes(file.type))
+      return setProblem('Use a PDF, or a JPEG, PNG, WebP or HEIC image.');
     if (file.size > MAX_BYTES) return setProblem('That file is larger than 10 MB.');
     attach.mutate(file);
     if (fileInput.current) fileInput.current.value = '';
   }
 
   return (
-    <Dialog open onOpenChange={(next) => (next ? null : onClose())}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
-        <DialogHeader>
-          <DialogTitle>
-            {humanise(row.category)} · {row.practitionerName}
-          </DialogTitle>
-          <DialogDescription>
-            Shift {formatWhen(row.shiftStartsAt)} · raised by{' '}
-            {row.raisedByFacility ? 'you' : 'the practitioner'} · <StatusBadge status={row.status} />
-          </DialogDescription>
-        </DialogHeader>
+    <>
+      <Dialog open onOpenChange={(next) => (next || withdrawing ? null : onClose())}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>{caseLabel}</DialogTitle>
+            <DialogDescription>
+              Shift {formatWhen(row.shiftStartsAt)} · raised by{' '}
+              {row.raisedByFacility ? 'you' : 'the practitioner'} ·{' '}
+              <StatusBadge status={row.status} />
+            </DialogDescription>
+          </DialogHeader>
 
-        <div className="space-y-4 text-sm">
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              What was raised
-            </p>
-            <p className="mt-1 whitespace-pre-wrap">{row.reason}</p>
-          </div>
+          <div className="space-y-5">
+            <section aria-labelledby="case-raised">
+              <h3 id="case-raised" className="text-sm font-semibold text-muted-foreground">
+                What was raised
+              </h3>
+              <p className="mt-1 whitespace-pre-wrap text-base leading-relaxed">{row.reason}</p>
+            </section>
 
-          {row.status === 'RESOLVED' ? (
-            <Alert variant={row.outcome === 'UPHELD' ? 'warning' : 'info'}>
-              <AlertDescription>
-                <strong>Decided: {row.outcome === 'UPHELD' ? 'upheld' : 'dismissed'}.</strong>{' '}
-                {row.resolutionNotes}
-              </AlertDescription>
-            </Alert>
-          ) : null}
+            {row.status === 'RESOLVED' ? (
+              <Alert variant={row.outcome === 'UPHELD' ? 'warning' : 'info'}>
+                <AlertDescription>
+                  <strong>Decided: {row.outcome === 'UPHELD' ? 'upheld' : 'dismissed'}.</strong>{' '}
+                  {row.resolutionNotes}
+                </AlertDescription>
+              </Alert>
+            ) : null}
 
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Evidence
-            </p>
-            {detail.isPending ? (
-              <p className="mt-1 text-muted-foreground">Loading…</p>
-            ) : evidence.length === 0 ? (
-              <p className="mt-1 text-muted-foreground">Nothing has been attached yet.</p>
-            ) : (
-              <ul className="mt-2 divide-y rounded-md border">
-                {evidence.map((item) => (
-                  <li key={item.id} className="flex items-start justify-between gap-3 px-3 py-2">
-                    <div className="min-w-0">
-                      <p>
-                        {item.bySide
-                          ? 'You'
-                          : item.attachedBySide === 'PRACTITIONER'
-                            ? 'The practitioner'
-                            : 'Your colleague'}
-                        <span className="text-muted-foreground"> · {formatAgo(item.createdAt)}</span>
-                      </p>
-                      {item.note ? <p className="text-muted-foreground">{item.note}</p> : null}
-                    </div>
-                    <Button variant="ghost" size="sm" onClick={() => void open(item)}>
-                      Open
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
+            <section aria-labelledby="case-evidence">
+              <h3 id="case-evidence" className="text-sm font-semibold text-muted-foreground">
+                Evidence
+              </h3>
+              {detail.isPending ? (
+                <div className="mt-2">
+                  <ListSkeleton rows={1} label="Loading the evidence" />
+                </div>
+              ) : detail.isError && !detail.data ? (
+                // Not "nothing attached": the list did not load, so nobody knows what is there.
+                <div className="mt-2">
+                  <ErrorState
+                    error={detail.error}
+                    onRetry={() => void detail.refetch()}
+                    retrying={detail.isFetching}
+                    compact
+                  />
+                </div>
+              ) : evidence.length === 0 ? (
+                <p className="mt-1 text-base text-muted-foreground">
+                  Nothing has been attached yet.
+                </p>
+              ) : (
+                <ul className="mt-2 divide-y rounded-md border">
+                  {evidence.map((item) => {
+                    const who = item.bySide
+                      ? 'You'
+                      : item.attachedBySide === 'PRACTITIONER'
+                        ? 'The practitioner'
+                        : 'Your colleague';
+                    return (
+                      <li
+                        key={item.id}
+                        className="flex items-start justify-between gap-3 px-3 py-2"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-base">
+                            {who}
+                            <span className="text-muted-foreground">
+                              {' '}
+                              · {formatAgo(item.createdAt)}
+                            </span>
+                          </p>
+                          {item.note ? (
+                            <p className="text-base text-muted-foreground [overflow-wrap:anywhere]">
+                              {item.note}
+                            </p>
+                          ) : null}
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          aria-label={`Open the file from ${who.toLowerCase()}, ${formatAgo(item.createdAt)}`}
+                          onClick={() => void openEvidence(item)}
+                        >
+                          Open
+                        </Button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </section>
 
-          {live ? (
-            <div className="space-y-2 border-t pt-4">
-              <Label htmlFor="evidence-note">Add evidence</Label>
-              <Input
-                id="evidence-note"
-                placeholder="What it shows (optional)"
-                maxLength={500}
-                value={note}
-                onChange={(event) => setNote(event.target.value)}
-              />
-              <input
-                ref={fileInput}
-                type="file"
-                accept={ACCEPTED.join(',')}
-                className="hidden"
-                onChange={(event) => choose(event.target.files?.[0])}
-              />
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  variant="outline"
-                  loading={attach.isPending}
-                  onClick={() => fileInput.current?.click()}
+            {live ? (
+              <section aria-label="Add evidence" className="space-y-3 border-t pt-4">
+                <Field
+                  label="Add evidence"
+                  optional
+                  hint="What the file shows. PDF or image, up to 10 MB. Once added it stays: neither side can remove evidence."
                 >
-                  <FileUp />
-                  Choose a file
-                </Button>
-                {row.raisedByFacility ? (
+                  <Input
+                    placeholder="What it shows"
+                    maxLength={500}
+                    value={note}
+                    onChange={(event) => setNote(event.target.value)}
+                  />
+                </Field>
+                <input
+                  ref={fileInput}
+                  type="file"
+                  accept={ACCEPTED.join(',')}
+                  className="hidden"
+                  tabIndex={-1}
+                  aria-hidden="true"
+                  onChange={(event) => choose(event.target.files?.[0])}
+                />
+                <div className="flex flex-wrap items-center gap-2">
                   <Button
                     variant="outline"
-                    loading={withdraw.isPending}
-                    onClick={() => withdraw.mutate()}
+                    loading={attach.isPending}
+                    onClick={() => fileInput.current?.click()}
                   >
-                    Withdraw this case
+                    <FileUp />
+                    Choose a file and add it
                   </Button>
+                  {row.raisedByFacility ? (
+                    <Button
+                      variant="outline"
+                      className="text-destructive-text"
+                      onClick={() => {
+                        withdraw.reset();
+                        setWithdrawing(true);
+                      }}
+                    >
+                      Withdraw this case
+                    </Button>
+                  ) : null}
+                </div>
+                {problem ? (
+                  <p role="alert" className="text-sm font-medium text-destructive-text">
+                    {problem}
+                  </p>
                 ) : null}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                PDF or image, up to 10 MB. Once added it stays: neither side can remove evidence.
-              </p>
-              {problem ? <p className="text-xs text-destructive-text">{problem}</p> : null}
-            </div>
-          ) : null}
-        </div>
-      </DialogContent>
-    </Dialog>
+              </section>
+            ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmDialog
+        open={withdrawing}
+        onOpenChange={setWithdrawing}
+        title="Withdraw this case"
+        object={`${caseLabel} · shift ${formatWhen(row.shiftStartsAt)}`}
+        consequence={
+          <>
+            You are taking back a case you raised. It is closed as withdrawn and stays on the
+            record, with the evidence both sides attached. The shift goes back to where it was
+            before the case, and payment held back for it is no longer held because of this case.
+          </>
+        }
+        reversible={false}
+        destructive
+        confirmLabel="Withdraw the case"
+        cancelLabel="Keep the case open"
+        loading={withdraw.isPending}
+        onConfirm={() => withdraw.mutate()}
+      >
+        {withdraw.isError ? (
+          <Alert variant="destructive">
+            <AlertDescription className="space-y-1">
+              <p className="font-medium">The case was not withdrawn.</p>
+              <p>{errorMessage(withdraw.error)}</p>
+            </AlertDescription>
+          </Alert>
+        ) : null}
+      </ConfirmDialog>
+    </>
   );
 }

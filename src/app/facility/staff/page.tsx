@@ -1,8 +1,9 @@
 'use client';
 
 import { useFacility, useFacilityId } from '@/lib/ui/facility';
-import { PageHeader, QueueSkeleton } from '@/components/app/page-shell';
+import { PageHeader } from '@/components/app/page-shell';
 import { StaffManager } from '@/components/app/staff-manager';
+import { ErrorState, ListSkeleton } from '@/components/app/states';
 import { FACILITY_STAFF_ROLES } from '@/lib/ui/staff-roles';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
@@ -32,7 +33,15 @@ export default function FacilityStaffPage() {
             person who can act for it.
           </AlertDescription>
         </Alert>
-      ) : facilityId ? (
+      ) : facility.isError && !facility.data ? (
+        // Whether this facility is verified decides whether the forms can work, so a failed load
+        // is said, not guessed past.
+        <ErrorState
+          error={facility.error}
+          onRetry={() => void facility.refetch()}
+          retrying={facility.isFetching}
+        />
+      ) : facilityId && facility.data ? (
         <StaffManager
           scopeType="FACILITY"
           scopeId={facilityId}
@@ -40,7 +49,7 @@ export default function FacilityStaffPage() {
           signupPath="/register?as=staff"
         />
       ) : (
-        <QueueSkeleton rows={2} />
+        <ListSkeleton rows={2} label="Loading staff" />
       )}
     </>
   );

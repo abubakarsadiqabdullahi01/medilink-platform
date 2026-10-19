@@ -2,13 +2,11 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, Search, Stethoscope } from 'lucide-react';
+import { Stethoscope } from 'lucide-react';
 import { api } from '@/lib/ui/api';
+import { useCursorPager } from '@/lib/ui/cursor-pager';
 import { useFacilityId } from '@/lib/ui/facility';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import {
   Select,
   SelectContent,
@@ -16,10 +14,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Skeleton } from '@/components/ui/skeleton';
-import { SeverityBadge, StatusBadge, humanise } from '@/components/app/status-badge';
+import { DataTable, type Column } from '@/components/app/data-table';
+import { Field } from '@/components/app/field';
+import { FilterBar } from '@/components/app/filter-bar';
 import { EmptyState, PageHeader } from '@/components/app/page-shell';
-import { ErrorState } from '@/components/app/states';
+import { Pager } from '@/components/app/pager';
+import { ErrorState, FilteredEmpty, TableSkeleton } from '@/components/app/states';
+import { SeverityBadge, StatusBadge, humanise } from '@/components/app/status-badge';
 import { formatAgo, formatWhen } from '@/components/app/format';
 import { ReportIncidentDialog } from './report-incident-dialog';
 import { IncidentDetailDialog, type FacilityIncident } from './incident-detail-dialog';
@@ -73,17 +74,10 @@ export default function FacilityIncidentsPage() {
   const [search, setSearch] = useState('');
   const [applied, setApplied] = useState('');
 
-  const [cursors, setCursors] = useState<(string | null)[]>([null]);
-  const [pageIndex, setPageIndex] = useState(0);
-  const cursor = cursors[pageIndex] ?? null;
-
-  function startOver() {
-    setCursors([null]);
-    setPageIndex(0);
-  }
+  const pager = useCursorPager();
 
   const queue = useQuery({
-    queryKey: ['facility-incidents', facilityId, status, severity, category, applied, cursor],
+    queryKey: ['facility-incidents', facilityId, status, severity, category, applied, pager.cursor],
     queryFn: () => {
       const parts = [
         `facilityId=${facilityId}`,
@@ -92,7 +86,7 @@ export default function FacilityIncidentsPage() {
         severity !== 'all' ? `severity=${severity}` : '',
         category !== 'all' ? `category=${category}` : '',
         applied ? `search=${encodeURIComponent(applied)}` : '',
-        cursor ? `cursor=${cursor}` : '',
+        pager.cursor ? `cursor=${pager.cursor}` : '',
       ].filter(Boolean);
       return api.get<{ incidents?: FacilityIncident[]; nextCursor?: string | null }>(
         `/api/v1/incidents?${parts.join('&')}`,
@@ -104,7 +98,11 @@ export default function FacilityIncidentsPage() {
 
   const rows = queue.data?.incidents ?? [];
   const nextCursor = queue.data?.nextCursor ?? null;
-  const filtered = status !== 'all' || severity !== 'all' || category !== 'all' || Boolean(applied);
+  const activeCount =
+    (status !== 'all' ? 1 : 0) +
+    (severity !== 'all' ? 1 : 0) +
+    (category !== 'all' ? 1 : 0) +
+    (applied ? 1 : 0);
 
   function clearFilters() {
     setStatus('all');
@@ -112,8 +110,31 @@ export default function FacilityIncidentsPage() {
     setCategory('all');
     setSearch('');
     setApplied('');
-    startOver();
+    pager.startOver();
   }
+
+  const columns: Column<FacilityIncident>[] = [
+    {
+      id: 'summary',
+      header: 'What was reported',
+      role: 'identity',
+      cell: (row) => <span className="line-clamp-3 font-normal">{row.summary}</span>,
+    },
+    {
+      id: 'severity',
+      header: 'Severity',
+      cell: (row) => <SeverityBadge severity={row.severity} />,
+    },
+    { id: 'category', header: 'Category', cell: (row) => humanise(row.category) },
+    { id: 'occurred', header: 'Happened', cell: (row) => formatWhen(row.occurredAt) },
+    { id: 'reported', header: 'Reported', cell: (row) => formatAgo(row.reportedAt) },
+    {
+      id: 'status',
+      header: 'Status',
+      role: 'status',
+      cell: (row) => <StatusBadge status={row.status} />,
+    },
+  ];
 
   return (
     <>
@@ -123,188 +144,135 @@ export default function FacilityIncidentsPage() {
         action={facilityId ? <ReportIncidentDialog facilityId={facilityId} /> : null}
       />
 
-      <Card className="mb-6">
-        <CardContent className="pt-6">
-          <form
-            className="flex flex-wrap items-end gap-3"
-            onSubmit={(event) => {
-              event.preventDefault();
-              setApplied(search.trim());
-              startOver();
-            }}
-          >
-            <div className="min-w-[200px] flex-1 space-y-1.5">
-              <Label htmlFor="incident-search">Search what was reported</Label>
-              <Input
-                id="incident-search"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="infusion pump, handover notes…"
-              />
-            </div>
-
-            <div className="min-w-[150px] space-y-1.5">
-              <Label htmlFor="incident-status">Status</Label>
-              <Select
-                value={status}
-                onValueChange={(value) => {
-                  setStatus(value);
-                  startOver();
-                }}
-              >
-                <SelectTrigger id="incident-status">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {STATUSES.map(([value, label]) => (
-                    <SelectItem key={value} value={value}>
-                      {label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="min-w-[150px] space-y-1.5">
-              <Label htmlFor="incident-severity">Severity</Label>
-              <Select
-                value={severity}
-                onValueChange={(value) => {
-                  setSeverity(value);
-                  startOver();
-                }}
-              >
-                <SelectTrigger id="incident-severity">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Any severity</SelectItem>
-                  {SEVERITIES.map((value) => (
-                    <SelectItem key={value} value={value}>
-                      {humanise(value)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="min-w-[170px] space-y-1.5">
-              <Label htmlFor="incident-category">Category</Label>
-              <Select
-                value={category}
-                onValueChange={(value) => {
-                  setCategory(value);
-                  startOver();
-                }}
-              >
-                <SelectTrigger id="incident-category">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Any category</SelectItem>
-                  {CATEGORIES.map((value) => (
-                    <SelectItem key={value} value={value}>
-                      {humanise(value)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <Button type="submit" loading={queue.isFetching}>
-              <Search />
-              Search
-            </Button>
-
-            {filtered ? (
-              <Button type="button" variant="ghost" onClick={clearFilters}>
-                Clear
-              </Button>
-            ) : null}
-          </form>
-
-          {!queue.isPending && rows.length > 0 ? (
-            <p className="mt-3 text-xs text-muted-foreground">{rows.length} on this page</p>
-          ) : null}
-        </CardContent>
-      </Card>
+      <FilterBar
+        searchLabel="Search what was reported"
+        searchPlaceholder="infusion pump, handover notes…"
+        searchValue={search}
+        onSearchChange={setSearch}
+        onSubmit={() => {
+          setApplied(search.trim());
+          pager.startOver();
+        }}
+        activeCount={activeCount}
+        onClear={clearFilters}
+        busy={queue.isFetching && !queue.isPending}
+        summary={!queue.isPending && rows.length > 0 ? `${rows.length} on this page` : undefined}
+      >
+        <Field label="Status" className="md:min-w-[10rem]">
+          {(a11y) => (
+            <Select
+              value={status}
+              onValueChange={(value) => {
+                setStatus(value);
+                pager.startOver();
+              }}
+            >
+              <SelectTrigger {...a11y}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {STATUSES.map(([value, label]) => (
+                  <SelectItem key={value} value={value}>
+                    {label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </Field>
+        <Field label="Severity" className="md:min-w-[10rem]">
+          {(a11y) => (
+            <Select
+              value={severity}
+              onValueChange={(value) => {
+                setSeverity(value);
+                pager.startOver();
+              }}
+            >
+              <SelectTrigger {...a11y}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Any severity</SelectItem>
+                {SEVERITIES.map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {humanise(value)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </Field>
+        <Field label="Category" className="md:min-w-[11rem]">
+          {(a11y) => (
+            <Select
+              value={category}
+              onValueChange={(value) => {
+                setCategory(value);
+                pager.startOver();
+              }}
+            >
+              <SelectTrigger {...a11y}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Any category</SelectItem>
+                {CATEGORIES.map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {humanise(value)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </Field>
+      </FilterBar>
 
       {queue.isPending ? (
-        <div className="space-y-3">
-          {Array.from({ length: 3 }).map((_, index) => (
-            <Skeleton key={index} className="h-24 w-full" />
-          ))}
-        </div>
-      ) : queue.isError ? (
+        <TableSkeleton label="Loading incidents" columns={5} />
+      ) : queue.isError && !queue.data ? (
         <ErrorState
           error={queue.error}
           onRetry={() => void queue.refetch()}
           retrying={queue.isFetching}
         />
       ) : rows.length === 0 ? (
-        <EmptyState
-          icon={<Stethoscope />}
-          title={filtered ? 'Nothing matches that' : 'Nothing reported yet'}
-          description={filtered ? 'Try a different status, severity or category.' : undefined}
-        />
+        activeCount > 0 ? (
+          <FilteredEmpty noun="reports" activeCount={activeCount} onClear={clearFilters} />
+        ) : (
+          <EmptyState
+            icon={<Stethoscope />}
+            title="Nothing reported yet"
+            description="A report you file appears here, with compliance's outcome once it is closed."
+          />
+        )
       ) : (
-        <div className="space-y-3">
-          {rows.map((row) => (
-            <button key={row.id} type="button" onClick={() => setSelected(row)} className="w-full text-left">
-              <Card className="transition-all hover:border-primary/50 hover:shadow-md">
-                <CardContent className="space-y-2 pt-5">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <SeverityBadge severity={row.severity} />
-                    <StatusBadge status={row.status} />
-                    <span className="text-xs text-muted-foreground">
-                      {humanise(row.category)} · occurred {formatWhen(row.occurredAt)} · reported{' '}
-                      {formatAgo(row.reportedAt)}
-                    </span>
-                  </div>
-                  <p className="text-sm leading-relaxed">{row.summary}</p>
-                </CardContent>
-              </Card>
-            </button>
-          ))}
-        </div>
+        <DataTable
+          caption="Clinical incidents reported by this facility"
+          rows={rows}
+          columns={columns}
+          getKey={(row) => row.id}
+          actionHeader="Record"
+          action={(row) => (
+            <Button
+              variant="outline"
+              size="sm"
+              aria-label={`Read the report: ${row.summary.slice(0, 70)}${row.summary.length > 70 ? '…' : ''}`}
+              onClick={() => setSelected(row)}
+            >
+              Read
+            </Button>
+          )}
+        />
       )}
 
-      {rows.length > 0 && (pageIndex > 0 || nextCursor) ? (
-        <div className="mt-5 flex items-center justify-between gap-3">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={pageIndex === 0 || queue.isFetching}
-            onClick={() => setPageIndex((index) => Math.max(0, index - 1))}
-          >
-            <ChevronLeft />
-            Previous
-          </Button>
-
-          <p className="tabular text-xs text-muted-foreground">
-            Page {pageIndex + 1}
-            {queue.isFetching ? ' · loading' : ''}
-          </p>
-
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={!nextCursor || queue.isFetching}
-            onClick={() => {
-              if (!nextCursor) return;
-              setCursors((current) => {
-                const next = current.slice(0, pageIndex + 1);
-                next.push(nextCursor);
-                return next;
-              });
-              setPageIndex((index) => index + 1);
-            }}
-          >
-            Next
-            <ChevronRight />
-          </Button>
-        </div>
-      ) : null}
+      <Pager
+        pageIndex={pager.pageIndex}
+        hasNext={Boolean(nextCursor)}
+        busy={queue.isFetching}
+        onPrevious={pager.goPrevious}
+        onNext={() => pager.goNext(nextCursor)}
+      />
 
       <IncidentDetailDialog incident={selected} onClose={() => setSelected(null)} />
     </>

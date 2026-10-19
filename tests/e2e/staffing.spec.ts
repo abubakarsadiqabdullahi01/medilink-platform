@@ -61,7 +61,9 @@ test('the scheduler publishes a shift', async ({ page }) => {
   shiftPath = new URL(page.url()).pathname;
 });
 
-test('the engine ranks the cleared nurse and the scheduler offers her the shift', async ({ page }) => {
+test('the engine ranks the cleared nurse and the scheduler offers her the shift', async ({
+  page,
+}) => {
   const nurse = world().practitioner;
   await signIn(page, world().scheduler);
   await page.goto(shiftPath);
@@ -76,10 +78,17 @@ test('the engine ranks the cleared nurse and the scheduler offers her the shift'
   await candidate.click();
   await expect(candidate.getByText('Selected')).toBeVisible();
 
+  // The offer is read back — who, what, pay — and only the button in that review sends it.
   await page.getByRole('button', { name: 'Offer to 1 selected' }).click();
+  const review = page.getByRole('dialog', { name: /Offer this shift to/ });
+  await expect(review.getByText(initialsOf(nurse.fullName))).toBeVisible();
+  await expect(review.getByText(/an hour/)).toBeVisible();
+  await review.getByRole('button', { name: 'Send the offer' }).click();
   await expectToast(page, 'Offered to 1 practitioner');
   // Offered, not yet accepted: still initials.
-  await expect(section(page, 'Offered').getByText(initialsOf(nurse.fullName))).toBeVisible();
+  await expect(
+    page.getByRole('region', { name: 'Offers sent' }).getByText(initialsOf(nurse.fullName)),
+  ).toBeVisible();
 });
 
 test('the nurse accepts the offer from her own console', async ({ page }) => {
@@ -106,12 +115,20 @@ test('the scheduler confirms her, and she sees the booking', async ({ page }) =>
   // Accepting is not being booked. The facility still decides.
   const ready = section(page, 'Ready to confirm');
   await expect(ready.getByText(nurse.fullName)).toBeVisible();
-  await ready.getByRole('button', { name: 'Confirm' }).click();
+  await ready.getByRole('button', { name: /^Confirm .* onto this shift$/ }).click();
+  // Booking somebody is a decision, so it names who and what before it happens.
+  const decision = page.getByRole('dialog', { name: 'Confirm onto this shift' });
+  await expect(decision.getByText(nurse.fullName).first()).toBeVisible();
+  await decision.getByRole('button', { name: 'Confirm', exact: true }).click();
 
   await expectToast(page, 'Practitioner confirmed onto the shift');
-  await expect(section(page, 'Confirmed').getByText(nurse.fullName)).toBeVisible();
+  await expect(
+    page.getByRole('region', { name: 'Confirmed' }).getByText(nurse.fullName),
+  ).toBeVisible();
 
   await switchTo(page, nurse);
   await page.goto('/practitioner/shifts');
-  await expect(card(page, world().facility.name).filter({ hasText: formatWhen(startsAt) })).toBeVisible();
+  await expect(
+    card(page, world().facility.name).filter({ hasText: formatWhen(startsAt) }),
+  ).toBeVisible();
 });
