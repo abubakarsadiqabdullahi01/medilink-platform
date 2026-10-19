@@ -36,7 +36,8 @@ export default function LoginPage() {
 
   return (
     <main className="relative grid min-h-dvh lg:grid-cols-2">
-      <TextSizeControl className="absolute right-3 top-3 z-10" />
+      {/* Over the form's half, not over the teal panel beside it, where its dark text cannot be read. */}
+      <TextSizeControl className="absolute right-3 top-3 z-10 lg:right-[calc(50%+0.75rem)]" />
       <div className="flex items-center justify-center px-6 py-12">
         <div className="w-full max-w-sm">
           <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
@@ -161,11 +162,11 @@ export default function LoginPage() {
         <p className="mt-6 max-w-md text-2xl font-semibold leading-snug tracking-tight">
           Every decision on this platform has a name and a reason against it.
         </p>
-        <div className="mt-8 space-y-4 text-sm leading-relaxed text-primary-foreground/85">
+        <div className="mt-8 space-y-4 text-sm leading-relaxed text-primary-foreground/90">
           <Card className="border-white/15 bg-white/10 text-primary-foreground shadow-none">
             <CardHeader className="p-4">
               <CardTitle className="text-sm">Nothing closes itself</CardTitle>
-              <CardDescription className="text-primary-foreground/75">
+              <CardDescription className="text-primary-foreground/90">
                 No shift is marked a no-show, no credential is approved and no dispute is resolved
                 without a person deciding it.
               </CardDescription>
@@ -174,7 +175,7 @@ export default function LoginPage() {
           <Card className="border-white/15 bg-white/10 text-primary-foreground shadow-none">
             <CardHeader className="p-4">
               <CardTitle className="text-sm">Nothing is overwritten</CardTitle>
-              <CardDescription className="text-primary-foreground/75">
+              <CardDescription className="text-primary-foreground/90">
                 A correction keeps what it replaced. A refused excusal stays on the record next to
                 the one that was granted.
               </CardDescription>

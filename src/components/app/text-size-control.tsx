@@ -40,7 +40,10 @@ export function TextSizeControl({ className }: { className?: string }) {
         <button
           key={option.size}
           type="button"
-          aria-label={option.name}
+          // The visible text is part of the name (WCAG 2.5.3): somebody using voice control says what they
+          // see, "A plus", and a name that does not contain it cannot be reached. The words come first
+          // because that is what a screen reader reads out.
+          aria-label={`${option.name}, ${option.label}`}
           aria-pressed={size === option.size}
           onClick={() => choose(option.size)}
           className={cn(
