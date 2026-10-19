@@ -13,6 +13,7 @@ import { registrationOption } from '@/lib/ui/registration';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
+import { ConfirmDialog } from '@/components/app/confirm-dialog';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
 import { Detail, DetailGrid, PageHeader } from '@/components/app/page-shell';
 import { ErrorState } from '@/components/app/states';
@@ -40,7 +41,12 @@ export interface Facility {
   name: string;
   registrationKind?: string;
   cacNumber: string;
-  verificationChecks?: { licenceDocumentSeen: boolean; licenceMatchesFacility: boolean; registrationChecked: boolean; checkedWith: string } | null;
+  verificationChecks?: {
+    licenceDocumentSeen: boolean;
+    licenceMatchesFacility: boolean;
+    registrationChecked: boolean;
+    checkedWith: string;
+  } | null;
   facilityTypeId: string;
   stateId: string;
   lgaId: string | null;
@@ -75,6 +81,8 @@ export function FacilityDetail({ facility, onBack }: { facility: Facility; onBac
   const [matches, setMatches] = useState(false);
   const [registrationChecked, setRegistrationChecked] = useState(false);
   const [checkedWith, setCheckedWith] = useState('');
+  /** The decision waiting for a yes: a verification is final, a refusal sends the facility back. */
+  const [deciding, setDeciding] = useState<'approve' | 'reject' | null>(null);
 
   const fresh = useQuery({
     queryKey: ['facility-detail', facility.id],
@@ -120,6 +128,7 @@ export function FacilityDetail({ facility, onBack }: { facility: Facility; onBac
       }),
     onSuccess: (_result, decision) => {
       toast.success(decision === 'approve' ? 'Facility verified' : 'Facility rejected');
+      setDeciding(null);
       setNote('');
       setSeen(false);
       setMatches(false);
@@ -132,6 +141,15 @@ export function FacilityDetail({ facility, onBack }: { facility: Facility; onBac
     },
     onError: (error) => toast.error('Could not record that', { description: errorMessage(error) }),
   });
+
+  // Why Verify is held, in words beside the button: a disabled button that does not say why is a
+  // dead end for the person whose job is to clear it.
+  const verifyBlockers = [
+    !row.licenceObjectKey ? 'a licence document uploaded by the facility' : null,
+    !row.licenceNumber ? 'a licence number' : null,
+    !seen || !matches || !registrationChecked ? 'all three checks ticked' : null,
+    checkedWith.trim().length < 10 ? 'how you checked it (at least 10 characters)' : null,
+  ].filter(Boolean);
 
   const stateName =
     (reference.data?.states ?? []).find((entry) => entry.id === row.stateId)?.name ?? null;
@@ -193,8 +211,12 @@ export function FacilityDetail({ facility, onBack }: { facility: Facility; onBac
               </CardHeader>
               <CardContent className="space-y-4">
                 <DetailGrid>
-                  <Detail label="Registered as">{registrationOption(row.registrationKind).label}</Detail>
-                  <Detail label={registrationOption(row.registrationKind).referenceLabel}>{row.cacNumber}</Detail>
+                  <Detail label="Registered as">
+                    {registrationOption(row.registrationKind).label}
+                  </Detail>
+                  <Detail label={registrationOption(row.registrationKind).referenceLabel}>
+                    {row.cacNumber}
+                  </Detail>
                   <Detail label="Type">{typeName ?? '—'}</Detail>
                   <Detail label="State">{stateName ?? '—'}</Detail>
                   <Detail label="Local government">{lgaName ?? '—'}</Detail>
@@ -275,7 +297,9 @@ export function FacilityDetail({ facility, onBack }: { facility: Facility; onBac
                   <p>· The licence document was opened and read</p>
                   <p>· It matches this facility</p>
                   <p>· The registration was checked with whoever issued it</p>
-                  <p className="pt-2 text-muted-foreground">How: {row.verificationChecks.checkedWith}</p>
+                  <p className="pt-2 text-muted-foreground">
+                    How: {row.verificationChecks.checkedWith}
+                  </p>
                 </CardContent>
               </Card>
             ) : null}
@@ -292,14 +316,20 @@ export function FacilityDetail({ facility, onBack }: { facility: Facility; onBac
                     </legend>
                     {[
                       ['I opened the licence document and it is legible', seen, setSeen],
-                      ['The name and address on it are this facility\'s', matches, setMatches],
-                      ['I checked the registration reference with whoever issued it', registrationChecked, setRegistrationChecked],
+                      ["The name and address on it are this facility's", matches, setMatches],
+                      [
+                        'I checked the registration reference with whoever issued it',
+                        registrationChecked,
+                        setRegistrationChecked,
+                      ],
                     ].map(([label, value, set]) => (
                       <label key={label as string} className="flex items-start gap-3 text-sm">
                         <input
                           type="checkbox"
                           checked={value as boolean}
-                          onChange={(event) => (set as (next: boolean) => void)(event.target.checked)}
+                          onChange={(event) =>
+                            (set as (next: boolean) => void)(event.target.checked)
+                          }
                           className="mt-1 size-5 shrink-0 rounded border-input accent-primary"
                         />
                         <span>{label as string}</span>
@@ -333,6 +363,13 @@ export function FacilityDetail({ facility, onBack }: { facility: Facility; onBac
                     />
                   </div>
 
+                  {verifyBlockers.length > 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      To verify, this still needs {verifyBlockers.join(', ')}. To reject, a reason
+                      is enough.
+                    </p>
+                  ) : null}
+
                   <div className="flex flex-wrap gap-2">
                     <Button
                       variant="success"
@@ -345,15 +382,14 @@ export function FacilityDetail({ facility, onBack }: { facility: Facility; onBac
                         checkedWith.trim().length < 10 ||
                         decide.isPending
                       }
-                      loading={decide.isPending && decide.variables === 'approve'}
-                      onClick={() => decide.mutate('approve')}
+                      onClick={() => setDeciding('approve')}
                     >
                       Verify
                     </Button>
                     <Button
                       variant="destructive"
                       disabled={!note.trim() || decide.isPending}
-                      onClick={() => decide.mutate('reject')}
+                      onClick={() => setDeciding('reject')}
                     >
                       Reject
                     </Button>
@@ -368,8 +404,8 @@ export function FacilityDetail({ facility, onBack }: { facility: Facility; onBac
               they did not open. This is where an owner who is the problem is dealt with. */}
           <TabsContent value="staff" className="space-y-4 pt-5">
             <p className="text-sm text-muted-foreground">
-              Who can act for this facility. Medilink may remove a facility&apos;s last owner, which its
-              own people may not, and every change is recorded with who made it and why.
+              Who can act for this facility. Medilink may remove a facility&apos;s last owner, which
+              its own people may not, and every change is recorded with who made it and why.
             </p>
             <StaffManager
               scopeType="FACILITY"
@@ -405,9 +441,7 @@ export function FacilityDetail({ facility, onBack }: { facility: Facility; onBac
                   <ol className="space-y-3">
                     {history.data.map((entry) => (
                       <li key={entry.id} className="border-l-2 border-border pl-4">
-                        <p className="text-sm font-medium">
-                          {actionLabel(entry.action)}
-                        </p>
+                        <p className="text-sm font-medium">{actionLabel(entry.action)}</p>
                         <p className="mt-0.5 text-xs text-muted-foreground">
                           {formatWhen(entry.createdAt)} · {formatAgo(entry.createdAt)}
                         </p>
@@ -426,6 +460,33 @@ export function FacilityDetail({ facility, onBack }: { facility: Facility; onBac
           </TabsContent>
         </Tabs>
       </div>
+
+      <ConfirmDialog
+        open={deciding !== null}
+        onOpenChange={(next) => !next && setDeciding(null)}
+        title={deciding === 'reject' ? 'Reject this facility' : 'Verify this facility'}
+        object={`${row.name} · ${registrationOption(row.registrationKind).referenceLabel} ${row.cacNumber}`}
+        consequence={
+          deciding === 'reject' ? (
+            <>
+              The facility cannot publish shifts. It is shown your reason — “{note.trim()}” — and
+              can correct its details and send them again.
+            </>
+          ) : (
+            <>
+              The facility can publish shifts, and practitioners can be matched to them. What you
+              confirmed above is kept with the decision.
+            </>
+          )
+        }
+        reversible={
+          deciding === 'reject' ? 'It returns to this queue when the facility resubmits.' : false
+        }
+        destructive={deciding === 'reject'}
+        confirmLabel={deciding === 'reject' ? 'Reject facility' : 'Verify facility'}
+        loading={decide.isPending}
+        onConfirm={() => deciding && decide.mutate(deciding)}
+      />
     </>
   );
 }
