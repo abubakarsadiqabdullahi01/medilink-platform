@@ -34,14 +34,13 @@ export async function choose(scope: Page | Locator, label: string, option: strin
   const page = 'goto' in scope ? scope : scope.page();
   const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const bound = scope.getByRole('combobox', { name: new RegExp(`^${escaped}( \\(required\\))?$`) });
-  if ((await bound.count()) > 0) {
-    await bound.first().click();
-  } else {
-    const field = scope
-      .locator('div.space-y-1\\.5')
-      .filter({ has: page.getByText(label, { exact: true }) });
-    await field.getByRole('combobox').first().click();
-  }
+  const legacy = scope
+    .locator('div.space-y-1\\.5')
+    .filter({ has: page.getByText(label, { exact: true }) })
+    .getByRole('combobox');
+  // Whichever turns up first. The form may not be on screen yet (a dialog that loads when it is
+  // opened, a page still fetching), so this waits rather than deciding from what is there now.
+  await bound.or(legacy).first().click();
   await page.getByRole('option', { name: option }).first().click();
 }
 

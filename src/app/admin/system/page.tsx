@@ -10,15 +10,8 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
 import { ConfirmDialog } from '@/components/app/confirm-dialog';
+import { DataTable, type Column } from '@/components/app/data-table';
 import { PageHeader, QueueSkeleton } from '@/components/app/page-shell';
 import { ErrorState } from '@/components/app/states';
 import { formatWhen } from '@/components/app/format';
@@ -95,6 +88,95 @@ export default function SystemPage() {
     },
     onError: (error) => toast.error('Could not replay it', { description: errorMessage(error) }),
   });
+
+  const eventColumns: Column<TroubledEvent>[] = [
+    {
+      id: 'event',
+      header: 'Event',
+      role: 'identity',
+      cell: (event) => (
+        <>
+          <span className="block font-mono text-base">{event.eventType}</span>
+          <span className="block text-sm font-normal text-muted-foreground">
+            {formatWhen(event.createdAt)}
+          </span>
+        </>
+      ),
+    },
+    {
+      id: 'state',
+      header: 'State',
+      role: 'status',
+      cell: (event) => (
+        <Badge variant={event.status === 'DEAD_LETTER' ? 'destructive' : 'secondary'}>
+          {event.status === 'DEAD_LETTER' ? 'Gave up' : 'Retrying'}
+        </Badge>
+      ),
+    },
+    { id: 'tried', header: 'Tried', numeric: true, cell: (event) => event.attempts },
+    {
+      id: 'why',
+      header: 'Why',
+      cell: (event) => (
+        <span className="text-muted-foreground [overflow-wrap:anywhere]">
+          {event.lastError ?? '—'}
+        </span>
+      ),
+    },
+  ];
+
+  const jobColumns: Column<Job>[] = [
+    {
+      id: 'job',
+      header: 'Job',
+      role: 'identity',
+      cell: (job) => (
+        <>
+          <span className="block font-mono text-base">{job.key}</span>
+          {/* In full beside the table; behind a disclosure on a phone, where fourteen of these
+              paragraphs would otherwise be most of the page. */}
+          <span className="hidden text-sm font-normal text-muted-foreground md:block">
+            {job.description}
+          </span>
+          <details className="mt-1 md:hidden">
+            <summary className="flex min-h-11 cursor-pointer items-center text-base font-normal text-primary">
+              What it does
+            </summary>
+            <span className="block text-base font-normal text-muted-foreground">
+              {job.description}
+            </span>
+          </details>
+        </>
+      ),
+    },
+    {
+      id: 'result',
+      header: 'Result',
+      role: 'status',
+      cell: (job) =>
+        !job.enabled ? (
+          <Badge variant="outline">Switched off</Badge>
+        ) : job.lastStatus === 'FAILED' ? (
+          <Badge variant="destructive">Failed</Badge>
+        ) : job.lastStatus === 'SUCCEEDED' ? (
+          <Badge variant="success">Succeeded</Badge>
+        ) : (
+          <Badge variant="secondary">Not run yet</Badge>
+        ),
+    },
+    { id: 'last', header: 'Last run', cell: (job) => formatWhen(job.lastRunAt) },
+    { id: 'next', header: 'Next', cell: (job) => formatWhen(job.nextRunAt) },
+    {
+      id: 'error',
+      header: 'Last error',
+      cell: (job) =>
+        job.lastStatus === 'FAILED' && job.lastError ? (
+          <span className="text-destructive-text [overflow-wrap:anywhere]">{job.lastError}</span>
+        ) : (
+          '—'
+        ),
+    },
+  ];
 
   return (
     <>
@@ -193,112 +275,66 @@ export default function SystemPage() {
               </CardContent>
             </Card>
 
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm">Events that failed or gave up</CardTitle>
-                <CardDescription className="text-xs">
+            <section aria-labelledby="failed-events-heading" className="space-y-3">
+              <div>
+                <h2 id="failed-events-heading" className="text-base font-semibold">
+                  Events that failed or gave up
+                </h2>
+                <p className="mt-1 text-base text-muted-foreground">
                   An event is retried on its own; one that gave up needs somebody to read why, fix
                   it, and replay it. Replaying runs it again, including any text it sends.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {system.data.events.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">Nothing has failed.</p>
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Event</TableHead>
-                        <TableHead>State</TableHead>
-                        <TableHead>Tried</TableHead>
-                        <TableHead>Why</TableHead>
-                        <TableHead className="w-24" />
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {system.data.events.map((event) => (
-                        <TableRow key={event.id}>
-                          <TableCell className="text-xs">
-                            <p className="font-mono">{event.eventType}</p>
-                            <p className="text-muted-foreground">{formatWhen(event.createdAt)}</p>
-                          </TableCell>
-                          <TableCell>
-                            <Badge
-                              variant={event.status === 'DEAD_LETTER' ? 'destructive' : 'secondary'}
-                            >
-                              {event.status === 'DEAD_LETTER' ? 'Gave up' : 'Retrying'}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="tabular text-xs">{event.attempts}</TableCell>
-                          <TableCell className="max-w-md text-xs text-muted-foreground">
-                            {event.lastError ?? '—'}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {canReplay ? (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                loading={replay.isPending && replay.variables?.id === event.id}
-                                onClick={() => setReplaying(event)}
-                              >
-                                Replay
-                              </Button>
-                            ) : null}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )}
-              </CardContent>
-            </Card>
+                </p>
+              </div>
+              {system.data.events.length === 0 ? (
+                <Card className="px-5 py-4">
+                  <p className="flex items-center gap-2 text-base text-muted-foreground">
+                    <CircleCheck className="size-5 text-success" aria-hidden="true" />
+                    Nothing has failed.
+                  </p>
+                </Card>
+              ) : (
+                <DataTable
+                  caption="Events that failed or gave up"
+                  rows={system.data.events}
+                  columns={eventColumns}
+                  getKey={(event) => event.id}
+                  actionHeader=""
+                  action={
+                    canReplay
+                      ? (event) => (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            aria-label={`Replay ${event.eventType}`}
+                            loading={replay.isPending && replay.variables?.id === event.id}
+                            onClick={() => setReplaying(event)}
+                          >
+                            Replay
+                          </Button>
+                        )
+                      : undefined
+                  }
+                />
+              )}
+            </section>
 
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm">Scheduled jobs</CardTitle>
-                <CardDescription className="text-xs">
+            <section aria-labelledby="scheduled-jobs-heading" className="space-y-3">
+              <div>
+                <h2 id="scheduled-jobs-heading" className="text-base font-semibold">
+                  Scheduled jobs
+                </h2>
+                <p className="mt-1 text-base text-muted-foreground">
                   The checks that run on a timer: expiry, reminders, and the one that notices an
                   absence.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Job</TableHead>
-                      <TableHead>Last run</TableHead>
-                      <TableHead>Result</TableHead>
-                      <TableHead>Next</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {system.data.jobs.map((job) => (
-                      <TableRow key={job.key}>
-                        <TableCell className="text-xs">
-                          <p className="font-mono">{job.key}</p>
-                          <p className="text-muted-foreground">{job.description}</p>
-                        </TableCell>
-                        <TableCell className="text-xs">{formatWhen(job.lastRunAt)}</TableCell>
-                        <TableCell className="text-xs">
-                          {!job.enabled ? (
-                            <Badge variant="outline">Switched off</Badge>
-                          ) : job.lastStatus === 'FAILED' ? (
-                            <span className="text-destructive-text">
-                              Failed{job.lastError ? `: ${job.lastError}` : ''}
-                            </span>
-                          ) : job.lastStatus === 'SUCCEEDED' ? (
-                            'Succeeded'
-                          ) : (
-                            'Not run yet'
-                          )}
-                        </TableCell>
-                        <TableCell className="text-xs">{formatWhen(job.nextRunAt)}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
+                </p>
+              </div>
+              <DataTable
+                caption="Scheduled jobs"
+                rows={system.data.jobs}
+                columns={jobColumns}
+                getKey={(job) => job.key}
+              />
+            </section>
           </>
         )}
       </div>

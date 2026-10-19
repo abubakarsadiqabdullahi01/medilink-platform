@@ -32,7 +32,10 @@ async function pickFromCombobox(page: Page, label: string, search: string, optio
   await page.getByLabel(label).click();
   // The newest popover is the last one in the document; the one before it
   // can still be animating closed.
-  await page.getByPlaceholder(/^Search /).last().fill(search);
+  await page
+    .getByPlaceholder(/^Search /)
+    .last()
+    .fill(search);
   await page.getByRole('option', { name: option }).first().click();
 }
 
@@ -112,7 +115,7 @@ test('submits a NIN with a photograph of the slip, and is stopped on a malformed
     mimeType: 'image/png',
     buffer: SLIP,
   });
-  await expect(page.getByText('nin-slip.png')).toBeVisible();
+  await expect(page.getByText('nin-slip.png', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Submit', exact: true }).click();
 
   await expectToast(page, 'Submitted for review');
@@ -151,7 +154,9 @@ test('submits one checked by eye, uploading the document to storage', async ({ p
   await page.getByRole('button', { name: 'Submit', exact: true }).click();
 
   await expectToast(page, 'Submitted for review');
-  await expect(card(page, 'Professional Indemnity Cover').getByText('Document attached')).toBeVisible();
+  await expect(
+    card(page, 'Professional Indemnity Cover').getByText('Document attached'),
+  ).toBeVisible();
 });
 
 test('a type already submitted cannot be picked again', async ({ page }) => {

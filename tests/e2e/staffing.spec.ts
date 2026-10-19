@@ -36,6 +36,8 @@ test('the scheduler publishes a shift', async ({ page }) => {
   await choose(dialog, 'Profession', 'Nurse / Midwife');
   await dialog.getByLabel('Starts', { exact: true }).fill(lagosLocal(startsAt));
   await dialog.getByLabel('Ends', { exact: true }).fill(lagosLocal(endsAt));
+  // The rate is the facility's to state: the form does not start with one filled in.
+  await dialog.getByLabel('Hourly rate (naira)').fill('5000');
   await dialog.getByLabel('Notes for the practitioner (optional)').fill(marker);
   // The estimate is the page doing the arithmetic in kobo before anybody commits.
   await expect(dialog.getByText(/8h ×/)).toBeVisible();
