@@ -238,6 +238,7 @@ export default function IncidentsPage() {
       ) : rows.length === 0 ? (
         <EmptyState
           icon={<Stethoscope />}
+          illustration={filtered ? undefined : 'all-clear'}
           title={filtered ? 'Nothing matches that' : 'Nothing open'}
           description={
             filtered

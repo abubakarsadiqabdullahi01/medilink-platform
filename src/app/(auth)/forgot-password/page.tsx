@@ -5,11 +5,13 @@ import { z } from 'zod';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMutation } from '@tanstack/react-query';
-import { TriangleAlert } from 'lucide-react';
+import { KeyRound, TriangleAlert } from 'lucide-react';
 import { api, errorMessage } from '@/lib/ui/api';
 import { useZodForm } from '@/lib/ui/form';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { TextSizeControl } from '@/components/app/text-size-control';
+import { Logo } from '@/components/app/logo';
+import { AuthPanel } from '@/components/app/auth-panel';
 import { FieldError } from '@/components/app/field-error';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -95,139 +97,147 @@ export default function ForgotPasswordPage() {
   const failure = request.error ?? confirm.error ?? resend.error;
 
   return (
-    <main className="relative flex min-h-dvh items-center justify-center px-6 py-12">
-      <TextSizeControl className="absolute right-3 top-3 z-10" />
-      <div className="w-full max-w-sm">
-        <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-          Medilink
-        </p>
-        <h1 className="mt-1 text-2xl font-semibold tracking-tight">Reset your password</h1>
-        <p className="mt-1.5 text-sm text-muted-foreground">
-          {step === 'phone'
-            ? 'Enter the number you sign in with. If it has an account, we will text it a code.'
-            : 'Enter the code and choose a new password.'}
-        </p>
+    <main className="relative grid min-h-dvh lg:grid-cols-2">
+      {/* Over the form's half, not over the teal panel beside it, where its dark text cannot be read. */}
+      <TextSizeControl className="absolute right-3 top-3 z-10 lg:right-[calc(50%+0.75rem)]" />
+      <div className="flex items-center justify-center px-6 py-12">
+        <div className="w-full max-w-sm">
+          <Logo className="mb-8" />
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight">Reset your password</h1>
+          <p className="mt-1.5 text-sm text-muted-foreground">
+            {step === 'phone'
+              ? 'Enter the number you sign in with. If it has an account, we will text it a code.'
+              : 'Enter the code and choose a new password.'}
+          </p>
 
-        <Card className="mt-6">
-          <CardContent className="pt-6">
-            {failure ? (
-              <Alert variant="destructive" className="mb-4">
-                <TriangleAlert />
-                <AlertDescription>{errorMessage(failure)}</AlertDescription>
-              </Alert>
-            ) : null}
+          <Card className="mt-6">
+            <CardContent className="pt-6">
+              {failure ? (
+                <Alert variant="destructive" className="mb-4">
+                  <TriangleAlert />
+                  <AlertDescription>{errorMessage(failure)}</AlertDescription>
+                </Alert>
+              ) : null}
 
-            {done ? (
-              <p role="status" className="text-sm">
-                Your password has been changed and you have been signed out everywhere. Taking you
-                to sign in…
-              </p>
-            ) : step === 'phone' ? (
-              <form
-                className="space-y-4"
-                onSubmit={phoneForm.handleSubmit((values) => request.mutate(values))}
-                noValidate
-              >
-                <div className="space-y-1.5">
-                  <Label htmlFor="phone">Phone number</Label>
-                  <Input
-                    id="phone"
-                    {...phoneForm.register('phone')}
-                    placeholder="0803 123 4567"
-                    autoComplete="username"
-                    inputMode="tel"
-                    aria-invalid={Boolean(phoneForm.formState.errors.phone) || undefined}
-                  />
-                  <FieldError message={phoneForm.formState.errors.phone?.message} />
-                </div>
-                <Button type="submit" className="w-full" loading={request.isPending}>
-                  Send me a code
-                </Button>
-              </form>
-            ) : (
-              <form
-                className="space-y-4"
-                onSubmit={resetForm.handleSubmit((values) => confirm.mutate(values))}
-                noValidate
-              >
-                <div className="space-y-1.5">
-                  <Label htmlFor="code">The {CODE_LENGTH}-digit code</Label>
-                  <Input
-                    id="code"
-                    {...resetForm.register('code')}
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    maxLength={CODE_LENGTH}
-                    className="tabular text-lg tracking-[0.3em]"
-                    aria-invalid={Boolean(resetForm.formState.errors.code) || undefined}
-                  />
-                  <FieldError message={resetForm.formState.errors.code?.message} />
-                  <p className="text-xs text-muted-foreground">
-                    If {phone} has an account, a code is on its way. It expires in ten minutes.
-                  </p>
-                </div>
+              {done ? (
+                <p role="status" className="text-sm">
+                  Your password has been changed and you have been signed out everywhere. Taking you
+                  to sign in…
+                </p>
+              ) : step === 'phone' ? (
+                <form
+                  className="space-y-4"
+                  onSubmit={phoneForm.handleSubmit((values) => request.mutate(values))}
+                  noValidate
+                >
+                  <div className="space-y-1.5">
+                    <Label htmlFor="phone">Phone number</Label>
+                    <Input
+                      id="phone"
+                      {...phoneForm.register('phone')}
+                      placeholder="0803 123 4567"
+                      autoComplete="username"
+                      inputMode="tel"
+                      aria-invalid={Boolean(phoneForm.formState.errors.phone) || undefined}
+                    />
+                    <FieldError message={phoneForm.formState.errors.phone?.message} />
+                  </div>
+                  <Button type="submit" className="w-full" loading={request.isPending}>
+                    Send me a code
+                  </Button>
+                </form>
+              ) : (
+                <form
+                  className="space-y-4"
+                  onSubmit={resetForm.handleSubmit((values) => confirm.mutate(values))}
+                  noValidate
+                >
+                  <div className="space-y-1.5">
+                    <Label htmlFor="code">The {CODE_LENGTH}-digit code</Label>
+                    <Input
+                      id="code"
+                      {...resetForm.register('code')}
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      maxLength={CODE_LENGTH}
+                      className="tabular text-lg tracking-[0.3em]"
+                      aria-invalid={Boolean(resetForm.formState.errors.code) || undefined}
+                    />
+                    <FieldError message={resetForm.formState.errors.code?.message} />
+                    <p className="text-xs text-muted-foreground">
+                      If {phone} has an account, a code is on its way. It expires in ten minutes.
+                    </p>
+                  </div>
 
-                <div className="space-y-1.5">
-                  <Label htmlFor="password">New password</Label>
-                  <Input
-                    id="password"
-                    type="password"
-                    {...resetForm.register('password')}
-                    autoComplete="new-password"
-                    aria-invalid={Boolean(resetForm.formState.errors.password) || undefined}
-                  />
-                  <FieldError message={resetForm.formState.errors.password?.message} />
-                  <p className="text-xs text-muted-foreground">At least {MIN_PASSWORD} characters.</p>
-                </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="password">New password</Label>
+                    <Input
+                      id="password"
+                      type="password"
+                      {...resetForm.register('password')}
+                      autoComplete="new-password"
+                      aria-invalid={Boolean(resetForm.formState.errors.password) || undefined}
+                    />
+                    <FieldError message={resetForm.formState.errors.password?.message} />
+                    <p className="text-xs text-muted-foreground">At least {MIN_PASSWORD} characters.</p>
+                  </div>
 
-                <div className="space-y-1.5">
-                  <Label htmlFor="confirm">Confirm new password</Label>
-                  <Input
-                    id="confirm"
-                    type="password"
-                    {...resetForm.register('confirm')}
-                    autoComplete="new-password"
-                    aria-invalid={Boolean(resetForm.formState.errors.confirm) || undefined}
-                  />
-                  <FieldError message={resetForm.formState.errors.confirm?.message} />
-                </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="confirm">Confirm new password</Label>
+                    <Input
+                      id="confirm"
+                      type="password"
+                      {...resetForm.register('confirm')}
+                      autoComplete="new-password"
+                      aria-invalid={Boolean(resetForm.formState.errors.confirm) || undefined}
+                    />
+                    <FieldError message={resetForm.formState.errors.confirm?.message} />
+                  </div>
 
-                <Button type="submit" className="w-full" loading={confirm.isPending}>
-                  Change my password
-                </Button>
+                  <Button type="submit" className="w-full" loading={confirm.isPending}>
+                    Change my password
+                  </Button>
 
-                <div className="flex items-center justify-between text-xs">
-                  <button
-                    type="button"
-                    className="font-medium text-primary underline-offset-4 hover:underline disabled:opacity-50"
-                    onClick={() => resend.mutate()}
-                    disabled={resend.isPending}
-                  >
-                    Send it again
-                  </button>
-                  <button
-                    type="button"
-                    className="text-muted-foreground underline-offset-4 hover:underline"
-                    onClick={() => {
-                      setStep('phone');
-                      resetForm.reset();
-                    }}
-                  >
-                    Change the number
-                  </button>
-                </div>
-              </form>
-            )}
-          </CardContent>
-        </Card>
+                  <div className="flex items-center justify-between text-xs">
+                    <button
+                      type="button"
+                      className="font-medium text-primary underline-offset-4 hover:underline disabled:opacity-50"
+                      onClick={() => resend.mutate()}
+                      disabled={resend.isPending}
+                    >
+                      Send it again
+                    </button>
+                    <button
+                      type="button"
+                      className="text-muted-foreground underline-offset-4 hover:underline"
+                      onClick={() => {
+                        setStep('phone');
+                        resetForm.reset();
+                      }}
+                    >
+                      Change the number
+                    </button>
+                  </div>
+                </form>
+              )}
+            </CardContent>
+          </Card>
 
-        <p className="mt-6 text-sm text-muted-foreground">
-          Remembered it?{' '}
-          <Link href="/login" className="font-medium text-primary underline-offset-4 hover:underline">
-            Sign in
-          </Link>
-        </p>
+          <p className="mt-6 text-sm text-muted-foreground">
+            Remembered it?{' '}
+            <Link href="/login" className="font-medium text-primary underline-offset-4 hover:underline">
+              Sign in
+            </Link>
+          </p>
+        </div>
       </div>
+
+      <AuthPanel>
+        <KeyRound className="size-8 opacity-90" aria-hidden="true" />
+        <p className="mt-5 max-w-md text-2xl font-semibold leading-snug tracking-tight">
+          Choosing a new password signs you out on every other device.
+        </p>
+      </AuthPanel>
     </main>
   );
 }

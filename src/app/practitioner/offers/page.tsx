@@ -141,6 +141,7 @@ export default function OffersPage() {
       ) : open.length === 0 && answered.length === 0 ? (
         <EmptyState
           icon={<Inbox />}
+          illustration="offers"
           title="No offers yet"
           description="A facility offers you a shift and it appears here, with a deadline to answer by."
         />

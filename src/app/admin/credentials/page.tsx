@@ -251,6 +251,7 @@ export default function CredentialsPage() {
       ) : rows.length === 0 ? (
         <EmptyState
           icon={<FileCheck2 />}
+          illustration={filtered ? undefined : 'all-clear'}
           title={
             filtered
               ? 'Nothing matches that'

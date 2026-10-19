@@ -5,6 +5,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Card } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { Illustration, type IllustrationName } from '@/components/app/illustration';
 
 export function PageHeader({
   title,
@@ -39,11 +40,17 @@ export function PageHeader({
  */
 export function EmptyState({
   icon,
+  illustration,
   title,
   description,
   compact = false,
 }: {
   icon?: ReactNode;
+  /**
+   * A spot illustration in place of the icon, for the screens a person meets as a first impression
+   * or a reward: nothing here yet, or everything done. Falls back to `icon` if the picture is not there.
+   */
+  illustration?: IllustrationName;
   title: string;
   description?: string;
   /** For a list that sits under a form on the same page, where a tall empty box pushes the next step off screen. */
@@ -56,7 +63,11 @@ export function EmptyState({
         compact ? 'py-8' : 'py-16',
       )}
     >
-      {icon ? <div className="text-muted-foreground [&_svg]:size-8">{icon}</div> : null}
+      {illustration ? (
+        <Illustration name={illustration} size={compact ? 'sm' : 'md'} fallback={icon} />
+      ) : icon ? (
+        <div className="text-muted-foreground [&_svg]:size-8">{icon}</div>
+      ) : null}
       <div>
         <p className="font-medium">{title}</p>
         {description ? (

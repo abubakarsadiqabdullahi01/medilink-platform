@@ -9,10 +9,12 @@ import { api, ApiError, errorMessage } from '@/lib/ui/api';
 import { consoleFor, type SessionState } from '@/lib/ui/session';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { TextSizeControl } from '@/components/app/text-size-control';
+import { Logo } from '@/components/app/logo';
+import { AuthPanel } from '@/components/app/auth-panel';
 
 /**
  * Sign in. The session is a cookie the API sets, so there is nothing to store
@@ -40,9 +42,7 @@ export default function LoginPage() {
       <TextSizeControl className="absolute right-3 top-3 z-10 lg:right-[calc(50%+0.75rem)]" />
       <div className="flex items-center justify-center px-6 py-12">
         <div className="w-full max-w-sm">
-          <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-            Medilink
-          </p>
+          <Logo className="mb-8" />
           <h1 className="mt-1 text-2xl font-semibold tracking-tight">Sign in</h1>
           <p className="mt-1.5 text-sm text-muted-foreground">
             Verified healthcare workforce management.
@@ -155,34 +155,13 @@ export default function LoginPage() {
         </div>
       </div>
 
-      {/* A panel rather than a hero image: this is a tool, and the useful
-          thing to say beside a login box is what the tool guarantees. */}
-      <div className="hidden bg-primary p-12 text-primary-foreground lg:flex lg:flex-col lg:justify-center">
-        <ShieldCheck className="size-10 opacity-90" />
-        <p className="mt-6 max-w-md text-2xl font-semibold leading-snug tracking-tight">
+      {/* One thing to say beside a login box: what the tool guarantees. */}
+      <AuthPanel>
+        <ShieldCheck className="size-8 opacity-90" aria-hidden="true" />
+        <p className="mt-5 max-w-md text-2xl font-semibold leading-snug tracking-tight">
           Every decision on this platform has a name and a reason against it.
         </p>
-        <div className="mt-8 space-y-4 text-sm leading-relaxed text-primary-foreground/90">
-          <Card className="border-white/15 bg-white/10 text-primary-foreground shadow-none">
-            <CardHeader className="p-4">
-              <CardTitle className="text-sm">Nothing closes itself</CardTitle>
-              <CardDescription className="text-primary-foreground/90">
-                No shift is marked a no-show, no credential is approved and no dispute is resolved
-                without a person deciding it.
-              </CardDescription>
-            </CardHeader>
-          </Card>
-          <Card className="border-white/15 bg-white/10 text-primary-foreground shadow-none">
-            <CardHeader className="p-4">
-              <CardTitle className="text-sm">Nothing is overwritten</CardTitle>
-              <CardDescription className="text-primary-foreground/90">
-                A correction keeps what it replaced. A refused excusal stays on the record next to
-                the one that was granted.
-              </CardDescription>
-            </CardHeader>
-          </Card>
-        </div>
-      </div>
+      </AuthPanel>
     </main>
   );
 }

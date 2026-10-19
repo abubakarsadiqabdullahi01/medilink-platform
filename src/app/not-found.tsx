@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { FileQuestion } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Illustration } from '@/components/app/illustration';
 
 /**
  * The App Router's own 404.
@@ -19,9 +20,15 @@ export default function NotFound() {
   return (
     <main className="flex min-h-dvh items-center justify-center p-6">
       <div className="w-full max-w-md text-center">
-        <span className="mx-auto flex size-12 items-center justify-center rounded-xl bg-accent text-accent-foreground">
-          <FileQuestion className="size-6" aria-hidden="true" />
-        </span>
+        <Illustration
+          name="not-found"
+          className="mx-auto"
+          fallback={
+            <span className="flex size-12 items-center justify-center rounded-xl bg-accent text-accent-foreground">
+              <FileQuestion className="size-6" aria-hidden="true" />
+            </span>
+          }
+        />
 
         <h1 className="mt-5 text-2xl font-semibold tracking-tight">This page does not exist</h1>
         <p className="mt-2 text-sm leading-relaxed text-muted-foreground">

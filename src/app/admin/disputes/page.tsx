@@ -161,6 +161,7 @@ export default function DisputesPage() {
       ) : rows.length === 0 ? (
         <EmptyState
           icon={<Gavel />}
+          illustration={applied ? undefined : 'all-clear'}
           title={applied ? 'Nothing matches that' : `No ${humanise(status).toLowerCase()} cases`}
           description={applied ? 'Try part of a practitioner or facility name.' : undefined}
         />

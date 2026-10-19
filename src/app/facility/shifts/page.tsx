@@ -308,6 +308,7 @@ export default function ShiftsPage() {
       ) : rows.length === 0 ? (
         <EmptyState
           icon={<CalendarPlus />}
+          illustration={filtered ? undefined : 'shifts'}
           title={filtered ? 'Nothing matches that' : `No ${status.toLowerCase()} shifts`}
           description={
             filtered

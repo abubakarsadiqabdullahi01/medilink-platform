@@ -205,6 +205,7 @@ export default function DataRequestsPage() {
       ) : rows.length === 0 ? (
         <EmptyState
           icon={<ShieldCheck />}
+          illustration={filtered ? undefined : 'all-clear'}
           title={filtered ? 'Nothing matches that' : 'Nothing waiting'}
           description={
             filtered

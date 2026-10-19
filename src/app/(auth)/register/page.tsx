@@ -12,6 +12,8 @@ import { useZodForm } from '@/lib/ui/form';
 import { consoleFor, type SessionState } from '@/lib/ui/session';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { TextSizeControl } from '@/components/app/text-size-control';
+import { Logo } from '@/components/app/logo';
+import { AuthPanel } from '@/components/app/auth-panel';
 import { FieldError } from '@/components/app/field-error';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -195,9 +197,7 @@ function RegisterForm() {
       <TextSizeControl className="absolute right-3 top-3 z-10 lg:right-[calc(50%+0.75rem)]" />
       <div className="flex items-center justify-center px-6 py-12">
         <div className="w-full max-w-sm">
-          <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-            Medilink
-          </p>
+          <Logo className="mb-8" />
           <h1 className="mt-1 text-2xl font-semibold tracking-tight">
             {forFacility
               ? "Register your facility's account"
@@ -493,7 +493,7 @@ function RegisterForm() {
       {/* What they are actually signing up to, said before they do it rather
           than discovered afterwards — a practitioner's eligibility card, or a
           facility's verification queue. */}
-      <div className="hidden bg-primary p-12 text-primary-foreground lg:flex lg:flex-col lg:justify-center">
+      <AuthPanel>
         {forStaff ? <Building2 className="size-10 opacity-90" /> : <BadgeCheck className="size-10 opacity-90" />}
         <p className="mt-6 max-w-md text-2xl font-semibold leading-snug tracking-tight">
           {forFacility
@@ -568,7 +568,7 @@ function RegisterForm() {
             </>
           )}
         </div>
-      </div>
+      </AuthPanel>
     </main>
   );
 }
