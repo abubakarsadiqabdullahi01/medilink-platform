@@ -1,25 +1,17 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { Suspense, lazy, useState } from 'react';
 import { Menu, Stethoscope } from 'lucide-react';
 import { buttonVariants } from '@/components/ui/button';
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet';
 import { TextSizeControl } from '@/components/app/text-size-control';
 import { cn } from '@/lib/utils';
+import { LANDING_LINKS } from './landing-links';
 
-export const LANDING_LINKS = [
-  { href: '#how-it-works', label: 'How it works' },
-  { href: '#for-facilities', label: 'For facilities' },
-  { href: '#for-practitioners', label: 'For practitioners' },
-  { href: '#safety', label: 'Safety and privacy' },
-];
+const loadMenu = () => import('./landing-mobile-menu');
+const MobileMenu = lazy(loadMenu);
+
+export { LANDING_LINKS };
 
 /**
  * The public header: the brand, four places on this page, and the two things a visitor does —
@@ -35,6 +27,8 @@ export const LANDING_LINKS = [
  */
 export function LandingNav() {
   const [open, setOpen] = useState(false);
+  // Mounted on the first press and kept, so closing it still gets its exit animation.
+  const [menuWanted, setMenuWanted] = useState(false);
 
   return (
     <header className="sticky top-0 z-50 border-b bg-background/95">
@@ -75,7 +69,13 @@ export function LandingNav() {
           </Link>
           <button
             type="button"
-            onClick={() => setOpen(true)}
+            onClick={() => {
+              setMenuWanted(true);
+              setOpen(true);
+            }}
+            onPointerEnter={() => void loadMenu()}
+            onFocus={() => void loadMenu()}
+            onTouchStart={() => void loadMenu()}
             aria-label="Open menu"
             aria-haspopup="dialog"
             className="inline-flex size-11 items-center justify-center rounded-md hover:bg-accent lg:hidden"
@@ -85,39 +85,11 @@ export function LandingNav() {
         </div>
       </div>
 
-      <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent side="top" className="lg:hidden">
-          <SheetHeader>
-            <SheetTitle>Menu</SheetTitle>
-            <SheetDescription className="sr-only">
-              Places on this page, text size, and registration.
-            </SheetDescription>
-          </SheetHeader>
-          <nav className="mt-3 flex flex-col" aria-label="On this page">
-            {LANDING_LINKS.map((link) => (
-              <a
-                key={link.href}
-                href={link.href}
-                onClick={() => setOpen(false)}
-                className="flex min-h-12 items-center rounded-md px-2 text-lg font-medium hover:bg-accent"
-              >
-                {link.label}
-              </a>
-            ))}
-          </nav>
-          <div className="mt-4 flex items-center justify-between gap-3 border-t pt-4">
-            <span className="text-base font-medium">Text size</span>
-            <TextSizeControl />
-          </div>
-          <Link
-            href="/register"
-            onClick={() => setOpen(false)}
-            className={cn(buttonVariants({ size: 'lg' }), 'mt-4 w-full')}
-          >
-            Register as a practitioner
-          </Link>
-        </SheetContent>
-      </Sheet>
+      {menuWanted ? (
+        <Suspense fallback={null}>
+          <MobileMenu open={open} onOpenChange={setOpen} />
+        </Suspense>
+      ) : null}
     </header>
   );
 }
