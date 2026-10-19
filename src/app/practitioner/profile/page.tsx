@@ -187,7 +187,11 @@ function MyProfile() {
           className="grid items-start gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]"
         >
           <ProfileForm />
-          <OnRecord blockers={setup.blockers} eligible={setup.eligible} />
+          <OnRecord
+            blockers={setup.blockers}
+            eligible={setup.eligible}
+            alsoStopsOffers={setup.alsoStopsOffers}
+          />
         </TabsContent>
 
         <TabsContent value="credentials">

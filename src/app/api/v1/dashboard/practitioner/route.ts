@@ -6,7 +6,7 @@ import { isAuthorized, loadGrants } from '@/lib/authz/guard';
 import type { Permission } from '@/lib/authz/permissions';
 import { requireSession } from '@/modules/auth/application/session-service';
 import { getOwnProfile } from '@/modules/practitioners/application/profile';
-import { getEligibility } from '@/modules/practitioners/application/eligibility';
+import { getNotOfferedView } from '@/modules/practitioners/application/not-offered';
 import { getAvailability } from '@/modules/availability/application/availability';
 import { listSubmissions } from '@/modules/credentials/application/submission';
 import { listAssignments, listInvitationsFor } from '@/modules/matching/application/assignment';
@@ -55,7 +55,7 @@ async function overview(request: Request): Promise<Response> {
             throw error;
           })
         : undefined,
-      profileAllowed ? getEligibility(userId) : undefined,
+      profileAllowed ? getNotOfferedView(userId) : undefined,
       availabilityAllowed ? getAvailability(userId) : undefined,
       documentsAllowed ? listSubmissions({ scopeType: 'SELF', scopeId: userId, limit: 50 }) : undefined,
       workAllowed ? listInvitationsFor(userId) : undefined,

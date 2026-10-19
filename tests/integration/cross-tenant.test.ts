@@ -665,6 +665,19 @@ const SCOPED: ScopedCase[] = [
     request: (c) => ({ query: { scopeType: 'FACILITY', scopeId: c.declare } }),
   },
   {
+    route: 'service-requests/estimate',
+    method: 'GET',
+    role: 'owner',
+    request: (c) => ({
+      query: {
+        facilityId: c.declare,
+        startsAt: '2026-10-14T07:00:00.000Z',
+        endsAt: '2026-10-14T15:00:00.000Z',
+        hourlyRateKobo: '500000',
+      },
+    }),
+  },
+  {
     route: 'practitioners/eligibility',
     method: 'GET',
     role: 'practitioner',

@@ -28,7 +28,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { formatNaira } from '@/components/app/format';
+import { ShiftEstimate } from '@/components/app/shift-estimate';
+import { useShiftEstimate } from '@/lib/ui/estimate';
 import { lagosLocalToInstant } from '@/lib/lagos-date';
 import { deriveShiftType } from '@/modules/service-requests/domain/shift-type';
 
@@ -73,7 +74,16 @@ export function NewShiftDialog({ facilityId }: { facilityId: string }) {
     startsAt && endsAt
       ? (new Date(endsAt).getTime() - new Date(startsAt).getTime()) / 3_600_000
       : 0;
-  const estimate = hours > 0 ? hourlyRateKobo * hours * Number(headcount || '1') : 0;
+  // What it comes to is the server's answer, not a sum done here: night and holiday hours are paid
+  // on the facility's own allowances, which only the server has (M11-04).
+  const estimate = useShiftEstimate({
+    facilityId,
+    startsAt: hours > 0 ? lagosLocalToInstant(startsAt) : null,
+    endsAt: hours > 0 ? lagosLocalToInstant(endsAt) : null,
+    hourlyRateKobo,
+    headcount: Number(headcount || '1'),
+    allowed: open,
+  });
   // Day or night is a fact about the hours and the pay floor follows it, so it is worked out
   // rather than picked (UXF-06). The server works it out again and refuses a label that disagrees.
   const shiftType =
@@ -343,16 +353,7 @@ export function NewShiftDialog({ facilityId }: { facilityId: string }) {
           </div>
         </div>
 
-        {hours > 0 ? (
-          <div className="rounded-md bg-muted px-3 py-2 text-sm">
-            {hours} hours × {formatNaira(hourlyRateKobo)} × {headcount} ={' '}
-            <strong>{formatNaira(estimate)}</strong>
-            <span className="ml-1 text-muted-foreground">
-              at the base rate. Night and public-holiday hours are multiplied by this
-              facility&rsquo;s rate card, so the invoice can come to more.
-            </span>
-          </div>
-        ) : null}
+        {estimate ? <ShiftEstimate estimate={estimate} /> : null}
 
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>

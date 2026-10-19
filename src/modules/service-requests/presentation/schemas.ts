@@ -84,3 +84,15 @@ export const listServiceRequestsSchema = z.object({
   cursor: z.string().uuid().optional(),
 });
 export type ListServiceRequestsInput = z.infer<typeof listServiceRequestsSchema>;
+
+/**
+ * What a shift will come to, before it is published (M11-04). A read: nothing is created, which is
+ * why the times and the rate come in the query rather than a body.
+ */
+export const estimateShiftSchema = z.object({
+  facilityId,
+  startsAt: z.coerce.date(),
+  endsAt: z.coerce.date(),
+  hourlyRateKobo: z.coerce.number().int().min(1).max(100_000_000),
+  headcount: z.coerce.number().int().min(1).max(MAX_HEADCOUNT).default(1),
+});

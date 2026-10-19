@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { CircleCheck, Clock } from 'lucide-react';
 import { api } from '@/lib/ui/api';
@@ -18,6 +19,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
 import { formatDate } from '@/components/app/format';
+import { reasonLines } from '@/modules/practitioners/domain/not-offered';
 
 interface Verification {
   identity: { ninLast4: string; nameMatch: boolean; verifiedAt: string } | null;
@@ -100,7 +102,16 @@ export function ProfileSummary({ profile, state }: { profile: Profile; state: Ap
 }
 
 /** What Medilink has recorded about them — read-only, under the editable details. */
-export function OnRecord({ blockers, eligible }: { blockers: string[]; eligible: boolean }) {
+export function OnRecord({
+  blockers,
+  eligible,
+  alsoStopsOffers = [],
+}: {
+  blockers: string[];
+  eligible: boolean;
+  /** What keeps an approved account from being offered shifts although the rule is met. */
+  alsoStopsOffers?: string[];
+}) {
   const verification = useQuery({
     queryKey: ['my-verification'],
     queryFn: () => api.get<Verification>('/api/v1/practitioners/verification?scopeType=SELF'),
@@ -180,11 +191,32 @@ export function OnRecord({ blockers, eligible }: { blockers: string[]; eligible:
                 they do not cover (a screening check, an inactive account). */}
             {eligible || other.length > 0 ? (
               <div className="border-t pt-3">
-                {eligible ? (
+                {eligible && alsoStopsOffers.length === 0 ? (
                   <p className="flex items-center gap-2">
                     <CircleCheck className="size-4 text-success" aria-hidden="true" />
                     You can be offered shifts.
                   </p>
+                ) : eligible ? (
+                  // Approved, and still not offered work: said, with where to put it right, rather
+                  // than a tick that the matcher disagrees with.
+                  <>
+                    <p>You are approved, but you will not be offered shifts yet.</p>
+                    <ul className="mt-1 space-y-1 text-muted-foreground">
+                      {reasonLines({ eligible, blockers: [], alsoStopsOffers }).map((reason) => (
+                        <li key={reason.code}>
+                          · {reason.text}{' '}
+                          {reason.href && reason.action ? (
+                            <Link
+                              href={reason.href}
+                              className="font-medium text-primary underline-offset-4 hover:underline"
+                            >
+                              {reason.action}
+                            </Link>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  </>
                 ) : (
                   <ul className="space-y-1 text-muted-foreground">
                     {other.map((blocker) => (

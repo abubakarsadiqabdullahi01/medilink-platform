@@ -4,6 +4,7 @@ import { useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ApiError, api } from '@/lib/ui/api';
 import { useReference } from '@/lib/ui/reference';
+import { REASON_GUIDE, type CredentialNeed } from '@/modules/practitioners/domain/not-offered';
 
 export interface Profile {
   id: string;
@@ -31,6 +32,10 @@ export type ApplicationState = 'DRAFT' | 'CHANGES_NEEDED' | 'READY' | 'WAITING' 
 export interface Eligibility {
   eligible: boolean;
   blockers: string[];
+  /** The required documents still outstanding and where each stands (absent from an older answer). */
+  credentials?: CredentialNeed[];
+  /** What keeps an approved practitioner from being offered shifts although the rule is met. */
+  alsoStopsOffers?: string[];
 }
 
 export interface CredentialSubmission {
@@ -210,6 +215,8 @@ export function usePractitionerSetup() {
     documentsDone,
     blockers,
     eligible,
+    credentials: eligibility.data?.credentials,
+    alsoStopsOffers: eligibility.data?.alsoStopsOffers ?? [],
     submissions: submissions.data ?? [],
     steps,
     doneCount: steps.filter((step) => step.done).length,
@@ -228,50 +235,9 @@ export interface BlockerGuide {
 }
 
 /**
- * What each blocker actually means, and who can clear it.
- *
- * Half of these are not the practitioner's to fix: identity and professional
- * registration are recorded by a compliance officer, on purpose — "a
- * practitioner does not verify their own identity, which is the whole point".
- * What is theirs carries a link into the page that can resolve it; what is
- * Medilink's says so plainly, so somebody waiting can tell they have not
- * missed a step.
+ * What each reason means and who can clear it. Written once, beside the rule, in
+ * `modules/practitioners/domain/not-offered.ts`, so that a blocker added to the rule cannot reach
+ * a practitioner as its code with the underscores taken out; this keeps the name the older screens
+ * already import.
  */
-export const BLOCKER_GUIDE: Record<string, BlockerGuide> = {
-  profile_incomplete: {
-    says: 'Your profile is missing something the matcher needs.',
-    href: '/practitioner/profile?tab=profile',
-    action: 'Finish your profile',
-  },
-  credential_missing: {
-    says: 'A credential your profession requires has not been submitted yet.',
-    href: '/practitioner/profile?tab=credentials',
-    action: 'Submit it',
-  },
-  credential_expired: {
-    says: 'One of your credentials has expired, so it no longer counts.',
-    href: '/practitioner/profile?tab=credentials',
-    action: 'Submit the current one',
-  },
-  identity_unverified: {
-    says: 'Your NIN has not been recorded yet. A compliance officer does that once they have seen your identity slip.',
-  },
-  identity_name_mismatch: {
-    says: 'The name on your NIN does not match the name on this account. Medilink has to settle which is right before you can be matched.',
-  },
-  registration_missing: {
-    says: 'Your professional registration is not on record. An officer records it against your licence.',
-  },
-  registration_not_active: {
-    says: 'The registration on record is not currently active. If you have renewed your licence, tell Medilink so it can be re-recorded.',
-  },
-  registration_evidence_stale: {
-    says: 'Your registration was last confirmed too long ago and is due a re-check by Medilink.',
-  },
-  screening_not_clear: {
-    says: 'A screening check is still open. Medilink resolves this one.',
-  },
-  account_not_usable: {
-    says: 'This account is not active, which stops everything else. Medilink has to lift that first.',
-  },
-};
+export const BLOCKER_GUIDE: Record<string, BlockerGuide> = REASON_GUIDE;

@@ -138,3 +138,24 @@ export async function loadStatutoryHolidays(
     }
   }
 }
+
+/**
+ * The public holidays that fall on or around a stretch of time, as WAT calendar dates
+ * (`YYYY-MM-DD`), in one query: what both a worked shift's timesheet and an estimate of a shift
+ * not yet worked need to say which of its minutes are holiday minutes. One place, so the two read
+ * the same calendar.
+ *
+ * A day either side is read as well, because a shift that starts late in the evening runs into the
+ * next date.
+ */
+export async function holidayDatesFor(from: Date, to: Date): Promise<Set<string>> {
+  const dayMs = 24 * 60 * 60 * 1000;
+  const rows = await prisma.publicHoliday.findMany({
+    where: { date: { gte: new Date(from.getTime() - dayMs), lte: new Date(to.getTime() + dayMs) } },
+    select: { date: true },
+  });
+
+  // `date` is a DATE column, so it comes back as midnight UTC; the WAT calendar day it names is
+  // the date as written, not as shifted.
+  return new Set(rows.map((row) => row.date.toISOString().slice(0, 10)));
+}

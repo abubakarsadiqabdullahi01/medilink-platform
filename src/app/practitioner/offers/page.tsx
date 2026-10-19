@@ -22,6 +22,8 @@ import {
   PageHeader,
   QueueSkeleton, ErrorState } from '@/components/app/page-shell';
 import { formatAgo, formatNaira, formatWhen } from '@/components/app/format';
+import { ShiftEstimate } from '@/components/app/shift-estimate';
+import type { DescribedEstimate } from '@/modules/rates-contracts/domain/estimate';
 
 interface Invitation {
   id: string;
@@ -46,6 +48,8 @@ interface Invitation {
   headcount: number;
   levelName: string | null;
   supervisionAvailable: boolean;
+  /** What they would be paid, in words; null when the shift cannot be priced. */
+  estimate: DescribedEstimate | null;
 }
 
 /** Answered offers shown before "show all". */
@@ -184,6 +188,11 @@ export default function OffersPage() {
                     {row.levelName ? <Detail label="Level">{row.levelName}</Detail> : null}
                     {row.supervisionAvailable ? <Detail label="Supervision">Someone will supervise</Detail> : null}
                   </DetailGrid>
+
+                  {/* What it comes to, said before the button: a decision to commit a
+                      shift made against an hourly rate alone leaves the sum to the
+                      person least placed to know the night and holiday terms. */}
+                  {row.estimate ? <ShiftEstimate estimate={row.estimate} /> : null}
 
                   {/* The two things an agreement turns on, read before the
                       button rather than found afterwards. Accepting keeps a

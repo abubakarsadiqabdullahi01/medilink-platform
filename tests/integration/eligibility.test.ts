@@ -233,7 +233,14 @@ describe('GET /api/v1/practitioners/eligibility', () => {
 
     const result = await callEligibility({ scopeType: 'SELF' });
     expect(result.status).toBe(200);
-    expect(result.body).toEqual({ eligible: true, blockers: [] });
+    // Eligible, and told so, with nothing outstanding to submit. This practitioner has never said
+    // when they can work, which is what keeps an eligible person from being offered a shift (M02-07).
+    expect(result.body).toEqual({
+      eligible: true,
+      blockers: [],
+      credentials: [],
+      alsoStopsOffers: ['no_availability'],
+    });
   });
 
   it("lets a compliance officer read a different practitioner's eligibility at PLATFORM scope", async () => {

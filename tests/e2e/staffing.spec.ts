@@ -37,8 +37,11 @@ test('the scheduler publishes a shift', async ({ page }) => {
   await dialog.getByLabel('Starts', { exact: true }).fill(lagosLocal(startsAt));
   await dialog.getByLabel('Ends', { exact: true }).fill(lagosLocal(endsAt));
   await dialog.getByLabel('Notes for the practitioner (optional)').fill(marker);
-  // The estimate is the page doing the arithmetic in kobo before anybody commits.
-  await expect(dialog.getByText(/8 hours ×/)).toBeVisible();
+  // What the shift comes to is worked out by the server, with the facility's own allowances, and
+  // said before anybody commits: the figure, and what it leaves out.
+  const estimate = dialog.getByTestId('shift-estimate');
+  await expect(estimate).toContainText(/This shift would cost about ₦/);
+  await expect(estimate).toContainText(/invoiced from the approved timesheet/);
   await dialog.getByRole('button', { name: 'Publish', exact: true }).click();
 
   await expectToast(page, 'Shift published');
@@ -59,6 +62,9 @@ test('the engine ranks the cleared nurse and the scheduler offers her the shift'
   const nurse = world().practitioner;
   await signIn(page, world().scheduler);
   await page.goto(shiftPath);
+
+  // The facility is shown what the shift comes to before it offers it to anybody.
+  await expect(page.getByTestId('shift-estimate')).toContainText(/This shift would cost about ₦/);
 
   await page.getByRole('button', { name: 'Find candidates' }).click();
   await expectToast(page, /practitioners are eligible/);
@@ -86,6 +92,8 @@ test('the nurse accepts the offer from her own console', async ({ page }) => {
   await expect(offer).toHaveCount(1);
   // The terms are on the offer itself, not behind it.
   await expect(offer.getByText('₦5,000/hour')).toBeVisible();
+  // And what it comes to, in words, before she says yes.
+  await expect(offer.getByTestId('shift-estimate')).toContainText(/You would be paid about ₦/);
   await offer.getByRole('button', { name: 'Accept' }).click();
 
   await expectToast(page, 'Accepted — the facility still has to confirm you');
