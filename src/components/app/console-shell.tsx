@@ -24,6 +24,7 @@ import { TextSizeControl } from '@/components/app/text-size-control';
 import { api } from '@/lib/ui/api';
 import { useSession } from '@/lib/ui/session';
 import { activeHref, breadcrumbsFor } from '@/components/app/nav';
+import { NetworkBanner } from '@/components/app/network-banner';
 import { hasChosenTheme, readTheme, saveTheme } from '@/lib/ui/theme';
 import { Button } from '@/components/ui/button';
 import {
@@ -392,6 +393,7 @@ export function ConsoleShell({
           tabIndex={-1}
           className="min-w-0 flex-1 p-4 outline-none sm:p-6 lg:p-8"
         >
+          <NetworkBanner />
           {trail.length > 0 ? (
             <Breadcrumb className="mb-4">
               <BreadcrumbList>

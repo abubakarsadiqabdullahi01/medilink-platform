@@ -36,7 +36,7 @@ export function Providers({ children }: { children: ReactNode }) {
             gcTime: 10 * 60 * 1000,
             refetchOnWindowFocus: true,
             retry: (failureCount, error) => {
-              if (error instanceof ApiError && error.failure.status < 500) return false;
+              if (error instanceof ApiError && error.failure.status >= 400 && error.failure.status < 500) return false;
               return failureCount < 2;
             },
           },

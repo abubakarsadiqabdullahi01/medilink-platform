@@ -162,10 +162,23 @@ export function AvailabilitySection() {
     }
   }
 
-  const removeSlot = useQueueAction<{ id: string }>({
+  const removeSlot = useQueueAction<Slot>({
     queueKey,
     run: ({ id }) => api.del(`/api/v1/availability/slots/${id}`),
     success: 'Removed',
+    // Taking a slot out is easily put back, so it is not asked about; it is undone from the toast.
+    undo: (slot) =>
+      api.post(
+        '/api/v1/availability/slots',
+        slot.kind === 'ONE_OFF'
+          ? { kind: 'ONE_OFF', startsAt: slot.startsAt, endsAt: slot.endsAt }
+          : {
+              kind: slot.kind,
+              dayOfWeek: slot.dayOfWeek,
+              startMinute: slot.startMinute,
+              endMinute: slot.endMinute,
+            },
+      ),
   });
 
   const addBlock = useQueueAction<void>({
@@ -289,7 +302,7 @@ export function AvailabilitySection() {
                       variant="ghost"
                       size="sm"
                       className="text-destructive-text hover:bg-destructive/10 hover:text-destructive-text"
-                      onClick={() => removeSlot.mutate({ id: slot.id })}
+                      onClick={() => removeSlot.mutate(slot)}
                     >
                       <Trash2 />
                       Remove
@@ -416,7 +429,7 @@ export function AvailabilitySection() {
                       variant="ghost"
                       size="sm"
                       className="text-destructive-text hover:bg-destructive/10 hover:text-destructive-text"
-                      onClick={() => removeSlot.mutate({ id: slot.id })}
+                      onClick={() => removeSlot.mutate(slot)}
                     >
                       <Trash2 />
                       Remove

@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import { CircleCheck, Paperclip, TriangleAlert, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { api, errorMessage } from '@/lib/ui/api';
+import { compressImage } from '@/lib/ui/compress-image';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 
@@ -60,20 +61,24 @@ export function DocumentUpload({
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
 
-  async function upload(file: File) {
+  async function upload(original: File) {
     setError(null);
 
-    if (!ACCEPTED.includes(file.type)) {
+    if (!ACCEPTED.includes(original.type)) {
       setError('That file type is not accepted. Use a PDF or a photograph.');
-      return;
-    }
-    if (file.size > MAX_BYTES) {
-      setError(`That file is ${readableSize(file.size)}. The limit is 10 MB.`);
       return;
     }
 
     setBusy(true);
     try {
+      // Smaller first, then the size check: a 9 MB photograph from a phone camera becomes one the
+      // connection can carry, and a 12 MB one is no longer refused for being too big.
+      const file = await compressImage(original);
+      if (file.size > MAX_BYTES) {
+        setError(`That file is ${readableSize(file.size)}. The limit is 10 MB.`);
+        return;
+      }
+
       const signed = await api.post<UploadUrl>(endpoint, {
         filename: file.name,
         contentType: file.type,

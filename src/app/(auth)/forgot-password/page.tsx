@@ -10,6 +10,7 @@ import { api, errorMessage } from '@/lib/ui/api';
 import { useZodForm } from '@/lib/ui/form';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { TextSizeControl } from '@/components/app/text-size-control';
+import { FieldError } from '@/components/app/field-error';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -53,15 +54,6 @@ const resetSchema = z
     message: 'These two do not match.',
     path: ['confirm'],
   });
-
-function FieldError({ message }: { message?: string }) {
-  if (!message) return null;
-  return (
-    <p role="alert" className="text-xs text-destructive-text">
-      {message}
-    </p>
-  );
-}
 
 export default function ForgotPasswordPage() {
   const router = useRouter();

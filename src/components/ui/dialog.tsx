@@ -59,8 +59,8 @@ const DialogContent = React.forwardRef<
       {...props}
     >
       {children}
-      <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring">
-        <X className="size-4" />
+      <DialogPrimitive.Close className="absolute right-2 top-2 flex size-11 items-center justify-center rounded-md opacity-70 transition-opacity duration-fast hover:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        <X className="size-5" />
         <span className="sr-only">Close</span>
       </DialogPrimitive.Close>
     </DialogPrimitive.Content>
@@ -69,13 +69,20 @@ const DialogContent = React.forwardRef<
 DialogContent.displayName = DialogPrimitive.Content.displayName;
 
 const DialogHeader = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
-  <div className={cn('flex flex-col space-y-1.5 pr-6 text-left', className)} {...props} />
+  <div className={cn('flex flex-col space-y-1.5 pr-10 text-left', className)} {...props} />
 );
 DialogHeader.displayName = 'DialogHeader';
 
 const DialogFooter = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
+  // On a phone a long form scrolls, and the button that finishes it must not scroll away: the footer
+  // sticks to the bottom of the dialog, over a border so the fields passing under it are not read as
+  // part of it. From `sm` up the dialog is tall enough to need none of this.
   <div
-    className={cn('flex flex-col-reverse gap-2 sm:flex-row sm:justify-end', className)}
+    className={cn(
+      'sticky bottom-0 -mx-6 -mb-6 flex flex-col-reverse gap-2 border-t bg-background px-6 py-4',
+      'sm:static sm:mx-0 sm:mb-0 sm:flex-row sm:justify-end sm:border-0 sm:bg-transparent sm:p-0',
+      className,
+    )}
     {...props}
   />
 );

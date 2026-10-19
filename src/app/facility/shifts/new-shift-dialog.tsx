@@ -3,10 +3,9 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { CalendarPlus, TriangleAlert } from 'lucide-react';
+import { CalendarPlus, } from 'lucide-react';
 import { api, errorMessage } from '@/lib/ui/api';
 import { useReference } from '@/lib/ui/reference';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -18,6 +17,7 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { MoneyInput } from '@/components/app/money-input';
+import { FieldError } from '@/components/app/field-error';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -111,12 +111,35 @@ export function NewShiftDialog({ facilityId }: { facilityId: string }) {
     onError: (error) => toast.error('Could not publish', { description: errorMessage(error) }),
   });
 
+  // What is wrong with what has been typed, said next to the field; and, separately, what has not
+  // been typed yet. A disabled button that gives no reason is the form telling you "no" without
+  // saying why, so both are listed beside it.
+  const headcountValue = Number(headcount);
+  const problems = {
+    end: startsAt && endsAt && hours <= 0 ? 'A shift has to end after it starts.' : null,
+    headcount:
+      !Number.isInteger(headcountValue) || headcountValue < 1 ? 'At least one person is needed.' : null,
+    rate: rateNaira !== '' && hourlyRateKobo <= 0 ? 'Enter an hourly rate above ₦0.' : null,
+    terms:
+      terms.length > 0 && terms.trim().length < 10 ? 'Say a little more: at least 10 characters.' : null,
+  };
+  const missing = [
+    !categoryId && 'the profession',
+    categoryId && levels.length > 0 && !levelId && 'the level',
+    !startsAt && 'when it starts',
+    !endsAt && 'when it ends',
+    rateNaira === '' && 'the hourly rate',
+    terms.trim().length === 0 && 'the cancellation terms',
+  ].filter((item): item is string => Boolean(item));
+
   const ready =
     categoryId &&
     (levels.length === 0 || levelId) &&
     startsAt &&
     endsAt &&
     hours > 0 &&
+    headcountValue >= 1 &&
+    Number.isInteger(headcountValue) &&
     hourlyRateKobo > 0 &&
     terms.trim().length >= 10;
 
@@ -208,6 +231,7 @@ export function NewShiftDialog({ facilityId }: { facilityId: string }) {
             <Input
               id="startsAt"
               type="datetime-local"
+              aria-invalid={Boolean(problems.end)}
               value={startsAt}
               onChange={(event) => setStartsAt(event.target.value)}
             />
@@ -218,9 +242,14 @@ export function NewShiftDialog({ facilityId }: { facilityId: string }) {
             <Input
               id="endsAt"
               type="datetime-local"
+              aria-invalid={Boolean(problems.end)}
+              aria-describedby={problems.end ? 'endsAt-error' : undefined}
               value={endsAt}
               onChange={(event) => setEndsAt(event.target.value)}
             />
+            <div id="endsAt-error">
+              <FieldError message={problems.end} />
+            </div>
           </div>
 
           <div className="space-y-1.5">
@@ -254,14 +283,22 @@ export function NewShiftDialog({ facilityId }: { facilityId: string }) {
               id="headcount"
               type="number"
               min={1}
+              aria-invalid={Boolean(problems.headcount)}
               value={headcount}
               onChange={(event) => setHeadcount(event.target.value)}
             />
+            <FieldError message={problems.headcount} />
           </div>
 
           <div className="space-y-1.5">
             <Label htmlFor="rate">Hourly rate (naira)</Label>
-            <MoneyInput id="rate" value={rateNaira} onValueChange={setRateNaira} />
+            <MoneyInput
+              id="rate"
+              aria-invalid={Boolean(problems.rate)}
+              value={rateNaira}
+              onValueChange={setRateNaira}
+            />
+            <FieldError message={problems.rate} />
           </div>
 
           <label className="flex items-center gap-2 text-sm sm:col-span-2">
@@ -287,9 +324,11 @@ export function NewShiftDialog({ facilityId }: { facilityId: string }) {
             <Textarea
               id="terms"
               rows={2}
+              aria-invalid={Boolean(problems.terms)}
               value={terms}
               onChange={(event) => setTerms(event.target.value)}
             />
+            <FieldError message={problems.terms} />
           </div>
 
           <div className="space-y-1.5 sm:col-span-2">
@@ -315,13 +354,6 @@ export function NewShiftDialog({ facilityId }: { facilityId: string }) {
           </div>
         ) : null}
 
-        {startsAt && endsAt && hours <= 0 ? (
-          <Alert variant="warning">
-            <TriangleAlert />
-            <AlertDescription>A shift has to end after it starts.</AlertDescription>
-          </Alert>
-        ) : null}
-
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>
             Cancel
@@ -329,6 +361,17 @@ export function NewShiftDialog({ facilityId }: { facilityId: string }) {
           <Button disabled={!ready} loading={publish.isPending} onClick={() => publish.mutate()}>
             Publish
           </Button>
+          {/* Why the button is not ready, where the eye goes next. Last in the markup because the
+              footer is a reversed column on a phone, which puts it above the buttons; from `sm` up
+              it goes to the left of them. */}
+          {!ready && missing.length > 0 ? (
+            <p
+              className="text-xs text-muted-foreground sm:order-first sm:mr-auto sm:self-center"
+              aria-live="polite"
+            >
+              Still to fill in: {missing.join(', ')}.
+            </p>
+          ) : null}
         </DialogFooter>
       </DialogContent>
     </Dialog>
