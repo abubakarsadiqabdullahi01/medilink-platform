@@ -1,5 +1,6 @@
 import Link from 'next/link';
-import { ArrowLeft, Stethoscope } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
+import { Logo } from '@/components/app/logo';
 import { TextSizeControl } from '@/components/app/text-size-control';
 
 /**
@@ -18,10 +19,7 @@ export function PublicPage({
     <div className="min-h-dvh bg-background">
       <header className="border-b">
         <div className="mx-auto flex h-16 max-w-3xl items-center justify-between gap-4 px-5">
-          <Link href="/" className="flex items-center gap-2 font-semibold text-primary" aria-label="Medilink home">
-            <Stethoscope className="size-5" aria-hidden="true" />
-            Medilink
-          </Link>
+          <Logo />
           <TextSizeControl />
         </div>
       </header>

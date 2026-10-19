@@ -25,6 +25,7 @@ import { api } from '@/lib/ui/api';
 import { useSession } from '@/lib/ui/session';
 import { activeHref, breadcrumbsFor } from '@/components/app/nav';
 import { NetworkBanner } from '@/components/app/network-banner';
+import { LogoMark } from '@/components/app/logo';
 import { hasChosenTheme, readTheme, saveTheme } from '@/lib/ui/theme';
 import { Button } from '@/components/ui/button';
 import {
@@ -266,11 +267,14 @@ export function ConsoleShell({
         Skip to main content
       </a>
       <aside className="sticky top-0 hidden h-dvh w-64 shrink-0 flex-col border-r bg-card lg:flex">
-        <div className="p-5">
-          <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-            Medilink
-          </p>
-          <p className="mt-0.5 font-semibold tracking-tight">{title}</p>
+        <div className="flex items-center gap-3 p-5">
+          <LogoMark className="size-9" />
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+              Medilink
+            </p>
+            <p className="mt-0.5 font-semibold tracking-tight">{title}</p>
+          </div>
         </div>
         <Separator />
         <div className="scrollbar-thin flex-1 overflow-y-auto p-3">{nav}</div>
