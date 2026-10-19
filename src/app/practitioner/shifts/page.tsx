@@ -16,6 +16,7 @@ import {
   PageHeader,
   QueueSkeleton, ErrorState } from '@/components/app/page-shell';
 import { formatAgo, formatNaira, formatWhen } from '@/components/app/format';
+import { ShiftLifecycle } from '@/components/app/shift-lifecycle';
 import { CheckInPanel, type Attendance } from './check-in-panel';
 import { ExcusalPanel } from './excusal-panel';
 
@@ -55,6 +56,22 @@ function ShiftCard({ row }: { row: Assignment }) {
           <Detail label="Type">{humanise(row.shiftType)}</Detail>
           <Detail label="Rate">{formatNaira(row.hourlyRateKobo)}/hour</Detail>
         </DetailGrid>
+
+        {row.status === 'CONFIRMED' || row.status === 'COMPLETED' ? (
+          <ShiftLifecycle
+            viewer="practitioner"
+            compact
+            state={{
+              published: true,
+              offered: true,
+              accepted: false,
+              confirmed: true,
+              started: new Date(row.startsAt) <= new Date(),
+              completed: row.status === 'COMPLETED',
+              attendance: row.attendance?.status ?? null,
+            }}
+          />
+        ) : null}
 
         {row.status === 'CONFIRMED' ? (
           <>

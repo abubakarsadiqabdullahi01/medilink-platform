@@ -8,6 +8,8 @@ import { Sparkles, TriangleAlert, UserCheck, UserPlus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { api, errorMessage } from '@/lib/ui/api';
 import { useFacilityId } from '@/lib/ui/facility';
+import { ShiftLifecycle } from '@/components/app/shift-lifecycle';
+import { leastAdvancedAttendance } from '@/components/app/lifecycle';
 import { useSession } from '@/lib/ui/session';
 import { nameOf, useReference } from '@/lib/ui/reference';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -86,6 +88,8 @@ interface Assignment {
   endsAt: string;
   practitionerName: string;
   practitionerPhone: string;
+  /** Present because the list is asked for with `include=attendance`. */
+  attendance?: { status: string } | null;
 }
 
 /** How many candidates each reason accounts for. One person can have several. */
@@ -134,7 +138,7 @@ export default function ShiftDetailPage() {
     queryKey: ['shift-assignments', facilityId, requestId],
     queryFn: () =>
       api.get<{ assignments: Assignment[] }>(
-        `/api/v1/assignments?scopeType=FACILITY&scopeId=${facilityId}&serviceRequestId=${requestId}&include=contact`,
+        `/api/v1/assignments?scopeType=FACILITY&scopeId=${facilityId}&serviceRequestId=${requestId}&include=attendance,contact`,
       ),
     enabled: Boolean(facilityId),
   });
@@ -231,6 +235,23 @@ export default function ShiftDetailPage() {
             description={`${formatWhen(shift.data.startsAt)} — ${formatWhen(shift.data.endsAt)}`}
             action={<StatusBadge status={shift.data.status} />}
           />
+
+          {/* Where the shift is, and whether it is waiting on this facility. */}
+          <Card className="mb-6">
+            <CardContent className="pt-6">
+              <ShiftLifecycle
+                viewer="facility"
+                state={{
+                  published: shift.data.status === 'PUBLISHED' || shift.data.status === 'FILLED',
+                  offered: invitations.length > 0 || confirmed.length > 0,
+                  accepted: invitations.some((row) => row.status === 'ACCEPTED'),
+                  confirmed: confirmed.length > 0,
+                  started: new Date(shift.data.startsAt) <= new Date(),
+                  attendance: leastAdvancedAttendance(confirmed.map((row) => row.attendance?.status)),
+                }}
+              />
+            </CardContent>
+          </Card>
 
           <Card className="mb-6">
             <CardContent className="pt-6">
