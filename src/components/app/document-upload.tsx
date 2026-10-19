@@ -187,12 +187,12 @@ export function DocumentUpload({
         role="group"
         aria-labelledby={labelledBy}
         aria-describedby={describedBy}
-        className="flex items-center justify-between gap-3 rounded-md border border-success/40 bg-success/5 px-3 py-2"
+        className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-success/40 bg-success/5 px-3 py-2"
       >
         <span role="status" className="flex min-w-0 items-center gap-2 text-base">
           <CircleCheck className="size-5 shrink-0 text-success" aria-hidden="true" />
           <span className="min-w-0">
-            <span className="block truncate font-medium">{value.filename}</span>
+            <span className="block font-medium [overflow-wrap:anywhere]">{value.filename}</span>
             <span className="block text-sm text-muted-foreground">Uploaded and ready to send</span>
           </span>
         </span>
@@ -226,7 +226,9 @@ export function DocumentUpload({
       >
         <div className="flex items-center justify-between gap-3">
           <span className="min-w-0">
-            <span className="block truncate font-medium">{uploading.file.name}</span>
+            <span className="block font-medium [overflow-wrap:anywhere]">
+              {uploading.file.name}
+            </span>
             <span className="block text-sm text-muted-foreground">
               Uploading · {readableSize(uploading.file.size)}
             </span>
