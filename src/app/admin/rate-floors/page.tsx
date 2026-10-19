@@ -17,14 +17,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
+import { ConfirmDialog } from '@/components/app/confirm-dialog';
+import { DataTable, type Column } from '@/components/app/data-table';
 import { PageHeader, QueueSkeleton } from '@/components/app/page-shell';
 import { ErrorState } from '@/components/app/states';
 import { formatDate, formatNaira, parseNairaToKobo } from '@/components/app/format';
@@ -74,7 +68,11 @@ export default function RateFloorsPage() {
   const [levelKey, setLevelKey] = useState(EVERY);
   const [shiftType, setShiftType] = useState<'day' | 'night'>('day');
   const [amount, setAmount] = useState('');
-  const [startsOn, setStartsOn] = useState(() => new Date(Date.now() + 3600_000).toISOString().slice(0, 10));
+  const [startsOn, setStartsOn] = useState(() =>
+    new Date(Date.now() + 3600_000).toISOString().slice(0, 10),
+  );
+
+  const [confirming, setConfirming] = useState(false);
 
   const kobo = parseNairaToKobo(amount);
   const category = overview.data?.categories.find((row) => row.key === categoryKey);
@@ -92,14 +90,53 @@ export default function RateFloorsPage() {
     onSuccess: () => {
       toast.success('Floor set', { description: 'It governs shifts that start from its date.' });
       setAmount('');
+      setConfirming(false);
       void queryClient.invalidateQueries({ queryKey: ['rate-floors'] });
     },
     onError: (error) => toast.error('Could not set it', { description: errorMessage(error) }),
   });
 
-  const nameOf = (key: string) => overview.data?.categories.find((row) => row.key === key)?.name ?? key;
+  const nameOf = (key: string) =>
+    overview.data?.categories.find((row) => row.key === key)?.name ?? key;
   const levelName = (categoryKeyOf: string, key: string) =>
-    overview.data?.categories.find((row) => row.key === categoryKeyOf)?.levels.find((row) => row.key === key)?.name ?? key;
+    overview.data?.categories
+      .find((row) => row.key === categoryKeyOf)
+      ?.levels.find((row) => row.key === key)?.name ?? key;
+
+  const floorColumns: Column<Overview['floors'][number]>[] = [
+    {
+      id: 'profession',
+      header: 'Profession',
+      role: 'identity',
+      cell: (floor) => nameOf(floor.categoryKey),
+    },
+    {
+      id: 'specialty',
+      header: 'Specialty',
+      cell: (floor) => (floor.specialtyKey === EVERY ? 'Every specialty' : floor.specialtyKey),
+    },
+    {
+      id: 'level',
+      header: 'Level',
+      cell: (floor) =>
+        floor.cadreLevelKey === EVERY
+          ? 'Every level'
+          : levelName(floor.categoryKey, floor.cadreLevelKey),
+    },
+    {
+      id: 'shift',
+      header: 'Shift',
+      cell: (floor) => <span className="capitalize">{floor.shiftType}</span>,
+    },
+    {
+      id: 'minimum',
+      header: 'Minimum per hour',
+      align: 'right',
+      numeric: true,
+      cell: (floor) => formatNaira(floor.minHourlyKobo),
+    },
+    { id: 'from', header: 'From', cell: (floor) => formatDate(floor.effectiveFrom) },
+  ];
 
   return (
     <>
@@ -121,7 +158,9 @@ export default function RateFloorsPage() {
           {overview.data.missing.length > 0 ? (
             <Alert variant="warning" className="mb-6">
               <TriangleAlert />
-              <AlertTitle>No floor is in force for these, so shifts for them cannot be published</AlertTitle>
+              <AlertTitle>
+                No floor is in force for these, so shifts for them cannot be published
+              </AlertTitle>
               <AlertDescription>
                 <ul className="mt-1 list-disc pl-5">
                   {overview.data.missing.map((row) => (
@@ -201,7 +240,10 @@ export default function RateFloorsPage() {
               ) : null}
               <div className="space-y-1.5">
                 <Label htmlFor="floor-shift">Shift</Label>
-                <Select value={shiftType} onValueChange={(value) => setShiftType(value as 'day' | 'night')}>
+                <Select
+                  value={shiftType}
+                  onValueChange={(value) => setShiftType(value as 'day' | 'night')}
+                >
                   <SelectTrigger id="floor-shift">
                     <SelectValue />
                   </SelectTrigger>
@@ -231,13 +273,14 @@ export default function RateFloorsPage() {
               </div>
               <Button
                 disabled={!categoryKey || kobo === null || kobo < 1 || !startsOn}
-                loading={set.isPending}
-                onClick={() => set.mutate()}
+                onClick={() => setConfirming(true)}
               >
-                Set floor
+                Review floor
               </Button>
               {amount !== '' && kobo === null ? (
-                <p className="basis-full text-xs text-destructive-text">That is not an amount in naira.</p>
+                <p className="basis-full text-xs text-destructive-text">
+                  That is not an amount in naira.
+                </p>
               ) : null}
             </CardContent>
           </Card>
@@ -245,37 +288,49 @@ export default function RateFloorsPage() {
           {overview.data.floors.length === 0 ? (
             <p className="text-sm text-muted-foreground">No floor has been set for anything yet.</p>
           ) : (
-            <Card>
-              <CardContent className="p-0">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Profession</TableHead>
-                      <TableHead>Specialty</TableHead>
-                      <TableHead>Level</TableHead>
-                      <TableHead>Shift</TableHead>
-                      <TableHead className="text-right">Minimum per hour</TableHead>
-                      <TableHead>From</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {overview.data.floors.map((floor) => (
-                      <TableRow key={floor.id}>
-                        <TableCell>{nameOf(floor.categoryKey)}</TableCell>
-                        <TableCell>{floor.specialtyKey === EVERY ? 'Every specialty' : floor.specialtyKey}</TableCell>
-                        <TableCell>{floor.cadreLevelKey === EVERY ? 'Every level' : levelName(floor.categoryKey, floor.cadreLevelKey)}</TableCell>
-                        <TableCell className="capitalize">{floor.shiftType}</TableCell>
-                        <TableCell className="tabular text-right">{formatNaira(floor.minHourlyKobo)}</TableCell>
-                        <TableCell>{formatDate(floor.effectiveFrom)}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
+            <DataTable
+              caption="Pay floors, newest first"
+              rows={overview.data.floors}
+              columns={floorColumns}
+              getKey={(floor) => floor.id}
+            />
           )}
         </>
       )}
+
+      <ConfirmDialog
+        open={confirming}
+        onOpenChange={setConfirming}
+        title="Set this pay floor"
+        object={[
+          category?.name ?? categoryKey,
+          specialtyKey === EVERY
+            ? 'every specialty'
+            : (category?.specialties.find((row) => row.key === specialtyKey)?.name ?? specialtyKey),
+          levelKey === EVERY
+            ? 'every level'
+            : (category?.levels.find((row) => row.key === levelKey)?.name ?? levelKey),
+          `${shiftType} shifts`,
+        ].join(' · ')}
+        consequence={
+          <>
+            From {startsOn ? formatDate(startsOn) : 'its start date'}, a facility cannot publish a
+            shift for this at less than{' '}
+            <span className="tabular font-semibold">{kobo === null ? '—' : formatNaira(kobo)}</span>{' '}
+            an hour.
+          </>
+        }
+        reversible={false}
+        confirmLabel="Set floor"
+        cancelLabel="Keep editing"
+        loading={set.isPending}
+        onConfirm={() => set.mutate()}
+      >
+        <p className="text-sm text-muted-foreground">
+          A floor is never edited or deleted, because it still explains the shifts priced under it.
+          To change it, set a new floor from a later date.
+        </p>
+      </ConfirmDialog>
     </>
   );
 }

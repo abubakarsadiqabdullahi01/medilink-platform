@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { ConfirmDialog } from '@/components/app/confirm-dialog';
 import { PageHeader, QueueSkeleton } from '@/components/app/page-shell';
 import { ErrorState } from '@/components/app/states';
 
@@ -23,7 +24,13 @@ interface Level {
 
 interface Overview {
   professions: { id: string; key: string; name: string; levels: Level[]; withoutLevel: number }[];
-  registrationCategories: { id: string; key: string; name: string; supervisionRequired: boolean; isActive: boolean }[];
+  registrationCategories: {
+    id: string;
+    key: string;
+    name: string;
+    supervisionRequired: boolean;
+    isActive: boolean;
+  }[];
 }
 
 /**
@@ -46,6 +53,13 @@ export default function LevelsPage() {
 
   const [drafts, setDrafts] = useState<Record<string, { name: string; rank: string }>>({});
   const [category, setCategory] = useState({ name: '', supervisionRequired: false });
+  /** A retirement waiting for a yes. Bringing something back needs none: it only restores. */
+  const [retiring, setRetiring] = useState<{
+    kind: 'level' | 'category';
+    id: string;
+    name: string;
+    where: string;
+  } | null>(null);
 
   // The reference data is cached for the session and carries the same lists to every
   // form, so it is refreshed with them.
@@ -74,7 +88,11 @@ export default function LevelsPage() {
   const toggleLevel = useMutation({
     mutationFn: ({ id, active }: { id: string; active: boolean }) =>
       api.post(`/api/v1/cadre-levels/${id}/active`, { active }),
-    onSuccess: refresh,
+    onSuccess: (_data, { active }) => {
+      toast.success(active ? 'Level brought back' : 'Level retired');
+      setRetiring(null);
+      refresh();
+    },
     onError: (error) => toast.error('Could not change it', { description: errorMessage(error) }),
   });
 
@@ -91,7 +109,13 @@ export default function LevelsPage() {
   const toggleCategory = useMutation({
     mutationFn: ({ id, active }: { id: string; active: boolean }) =>
       api.post(`/api/v1/registration-categories/${id}/active`, { active }),
-    onSuccess: refresh,
+    onSuccess: (_data, { active }) => {
+      toast.success(
+        active ? 'Registration category brought back' : 'Registration category retired',
+      );
+      setRetiring(null);
+      refresh();
+    },
     onError: (error) => toast.error('Could not change it', { description: errorMessage(error) }),
   });
 
@@ -114,11 +138,11 @@ export default function LevelsPage() {
         <div className="space-y-6">
           <Alert variant="info">
             <AlertDescription>
-              While a profession has no level here, a request for it does not ask for one. Once it has
-              one, every new request for that profession must name a level, and only practitioners whose
-              level has been recorded against their registration are offered it. Rank orders the levels
-              within a profession, lowest for the most junior; leave gaps (10, 20, 30) so another can be
-              added between.
+              While a profession has no level here, a request for it does not ask for one. Once it
+              has one, every new request for that profession must name a level, and only
+              practitioners whose level has been recorded against their registration are offered it.
+              Rank orders the levels within a profession, lowest for the most junior; leave gaps
+              (10, 20, 30) so another can be added between.
             </AlertDescription>
           </Alert>
 
@@ -145,7 +169,10 @@ export default function LevelsPage() {
                   {profession.levels.length > 0 ? (
                     <ul className="divide-y rounded-md border">
                       {profession.levels.map((level) => (
-                        <li key={level.id} className="flex flex-wrap items-center justify-between gap-3 p-3">
+                        <li
+                          key={level.id}
+                          className="flex flex-wrap items-center justify-between gap-3 p-3"
+                        >
                           <div className="min-w-0">
                             <p className="font-medium">{level.name}</p>
                             <p className="text-xs text-muted-foreground">Rank {level.rank}</p>
@@ -155,8 +182,20 @@ export default function LevelsPage() {
                             <Button
                               variant="outline"
                               size="sm"
-                              loading={toggleLevel.isPending && toggleLevel.variables?.id === level.id}
-                              onClick={() => toggleLevel.mutate({ id: level.id, active: !level.isActive })}
+                              loading={
+                                toggleLevel.isPending && toggleLevel.variables?.id === level.id
+                              }
+                              aria-label={`${level.isActive ? 'Retire' : 'Bring back'} level ${level.name}, ${profession.name}`}
+                              onClick={() =>
+                                level.isActive
+                                  ? setRetiring({
+                                      kind: 'level',
+                                      id: level.id,
+                                      name: level.name,
+                                      where: profession.name,
+                                    })
+                                  : toggleLevel.mutate({ id: level.id, active: true })
+                              }
                             >
                               {level.isActive ? 'Retire' : 'Bring back'}
                             </Button>
@@ -180,7 +219,10 @@ export default function LevelsPage() {
                         value={draft.name}
                         maxLength={80}
                         onChange={(event) =>
-                          setDrafts((current) => ({ ...current, [profession.id]: { ...draft, name: event.target.value } }))
+                          setDrafts((current) => ({
+                            ...current,
+                            [profession.id]: { ...draft, name: event.target.value },
+                          }))
                         }
                       />
                     </div>
@@ -191,14 +233,19 @@ export default function LevelsPage() {
                         inputMode="numeric"
                         value={draft.rank}
                         onChange={(event) =>
-                          setDrafts((current) => ({ ...current, [profession.id]: { ...draft, rank: event.target.value } }))
+                          setDrafts((current) => ({
+                            ...current,
+                            [profession.id]: { ...draft, rank: event.target.value },
+                          }))
                         }
                       />
                     </div>
                     <Button
                       type="submit"
                       disabled={draft.name.trim().length < 2 || !/^\d+$/.test(draft.rank)}
-                      loading={addLevel.isPending && addLevel.variables?.professionId === profession.id}
+                      loading={
+                        addLevel.isPending && addLevel.variables?.professionId === profession.id
+                      }
                     >
                       Add level
                     </Button>
@@ -212,15 +259,18 @@ export default function LevelsPage() {
             <CardHeader className="pb-3">
               <CardTitle className="text-sm">Registration categories</CardTitle>
               <CardDescription>
-                How somebody stands on the register: full, provisional, intern, post-basic. One that needs
-                supervision can be offered only shifts that say supervision is available.
+                How somebody stands on the register: full, provisional, intern, post-basic. One that
+                needs supervision can be offered only shifts that say supervision is available.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {overview.data.registrationCategories.length > 0 ? (
                 <ul className="divide-y rounded-md border">
                   {overview.data.registrationCategories.map((row) => (
-                    <li key={row.id} className="flex flex-wrap items-center justify-between gap-3 p-3">
+                    <li
+                      key={row.id}
+                      className="flex flex-wrap items-center justify-between gap-3 p-3"
+                    >
                       <div className="min-w-0">
                         <p className="font-medium">{row.name}</p>
                         <p className="text-xs text-muted-foreground">
@@ -232,8 +282,20 @@ export default function LevelsPage() {
                         <Button
                           variant="outline"
                           size="sm"
-                          loading={toggleCategory.isPending && toggleCategory.variables?.id === row.id}
-                          onClick={() => toggleCategory.mutate({ id: row.id, active: !row.isActive })}
+                          loading={
+                            toggleCategory.isPending && toggleCategory.variables?.id === row.id
+                          }
+                          aria-label={`${row.isActive ? 'Retire' : 'Bring back'} registration category ${row.name}`}
+                          onClick={() =>
+                            row.isActive
+                              ? setRetiring({
+                                  kind: 'category',
+                                  id: row.id,
+                                  name: row.name,
+                                  where: 'Registration category',
+                                })
+                              : toggleCategory.mutate({ id: row.id, active: true })
+                          }
                         >
                           {row.isActive ? 'Retire' : 'Bring back'}
                         </Button>
@@ -266,11 +328,17 @@ export default function LevelsPage() {
                     type="checkbox"
                     className="size-4"
                     checked={category.supervisionRequired}
-                    onChange={(event) => setCategory({ ...category, supervisionRequired: event.target.checked })}
+                    onChange={(event) =>
+                      setCategory({ ...category, supervisionRequired: event.target.checked })
+                    }
                   />
                   Needs supervision
                 </label>
-                <Button type="submit" disabled={category.name.trim().length < 2} loading={addCategory.isPending}>
+                <Button
+                  type="submit"
+                  disabled={category.name.trim().length < 2}
+                  loading={addCategory.isPending}
+                >
                   Add category
                 </Button>
               </form>
@@ -278,6 +346,38 @@ export default function LevelsPage() {
           </Card>
         </div>
       )}
+
+      <ConfirmDialog
+        open={retiring !== null}
+        onOpenChange={(next) => !next && setRetiring(null)}
+        title={
+          retiring?.kind === 'level' ? 'Retire this level' : 'Retire this registration category'
+        }
+        object={retiring ? `${retiring.where} · ${retiring.name}` : ''}
+        consequence={
+          retiring?.kind === 'level' ? (
+            <>
+              A new shift can no longer name this level, and it cannot be recorded against a
+              practitioner&rsquo;s registration. Shifts already published and practitioners already
+              recorded at it are not changed.
+            </>
+          ) : (
+            <>
+              It can no longer be recorded against a practitioner&rsquo;s registration.
+              Practitioners already recorded under it are not changed.
+            </>
+          )
+        }
+        reversible="Bring it back from this list at any time."
+        confirmLabel="Retire"
+        loading={toggleLevel.isPending || toggleCategory.isPending}
+        onConfirm={() =>
+          retiring &&
+          (retiring.kind === 'level'
+            ? toggleLevel.mutate({ id: retiring.id, active: false })
+            : toggleCategory.mutate({ id: retiring.id, active: false }))
+        }
+      />
     </>
   );
 }
