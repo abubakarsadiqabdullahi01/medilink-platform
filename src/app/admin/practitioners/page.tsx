@@ -4,18 +4,10 @@ import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import {
-  ArrowLeft,
-  BadgeCheck,
-  ChevronLeft,
-  ChevronRight,
-  CircleAlert,
-  CircleCheck,
-  Search,
-  UserRound,
-} from 'lucide-react';
+import { ArrowLeft, BadgeCheck, CircleAlert, CircleCheck, UserRound } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { api, errorMessage } from '@/lib/ui/api';
+import { useCursorPager } from '@/lib/ui/cursor-pager';
 import { useReference } from '@/lib/ui/reference';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -32,8 +24,14 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
 import { Detail, DetailGrid, EmptyState, PageHeader } from '@/components/app/page-shell';
-import { ErrorState } from '@/components/app/states';
-import { formatAgo, formatWhen } from '@/components/app/format';
+import { ConfirmDialog } from '@/components/app/confirm-dialog';
+import { DataTable, type Column } from '@/components/app/data-table';
+import { FilterBar } from '@/components/app/filter-bar';
+import { Pager } from '@/components/app/pager';
+import { QueueAge } from '@/components/app/queue-age';
+import { ErrorState, FilteredEmpty, ListSkeleton, TableSkeleton } from '@/components/app/states';
+import { formatDate, formatWhen } from '@/components/app/format';
+import { DecisionDialog } from '@/app/admin/credentials/credential-decision';
 import { CredentialsTab } from './credentials-tab';
 import { EvidenceReview } from './evidence-review';
 import { StandingPanel } from './standing-panel';
@@ -212,13 +210,18 @@ function StandingEditor({
           </Select>
         </div>
       ) : (
-        <p className="text-xs text-muted-foreground">No levels are defined for their profession yet.</p>
+        <p className="text-xs text-muted-foreground">
+          No levels are defined for their profession yet.
+        </p>
       )}
       {categories.length > 0 ? (
         <div className="space-y-1.5">
           <Label htmlFor={`standing-category-${registration.id}`}>Registration category</Label>
           <Select value={category} onValueChange={(next) => onChange({ level, category: next })}>
-            <SelectTrigger id={`standing-category-${registration.id}`} aria-label="Registration category">
+            <SelectTrigger
+              id={`standing-category-${registration.id}`}
+              aria-label="Registration category"
+            >
               <SelectValue placeholder="Not recorded" />
             </SelectTrigger>
             <SelectContent>
@@ -286,6 +289,8 @@ function Practitioners() {
 
   const [nin, setNin] = useState('');
   const [nameMatch, setNameMatch] = useState('true');
+  const [confirmIdentity, setConfirmIdentity] = useState(false);
+  const [confirmRegistration, setConfirmRegistration] = useState(false);
 
   const [regulator, setRegulator] = useState('MDCN');
   const [folioNumber, setFolioNumber] = useState('');
@@ -293,23 +298,18 @@ function Practitioners() {
   const [expiresAt, setExpiresAt] = useState('');
 
   /**
-   * Cursor paging, not page numbers.
-   *
-   * The endpoint pages by cursor, which has no notion of "page 7" and no total
-   * to divide — and that is the right trade for a list people are inserted
-   * into constantly, because offset paging quietly shows the same person twice
-   * when somebody registers between one page and the next. Keeping the cursor
-   * that opened each page is what buys a working Previous on top of it.
+   * Cursor paging, not page numbers: the endpoint pages by cursor, which has no notion of
+   * "page 7" and no total to divide — the right trade for a list people are inserted into
+   * constantly, because offset paging quietly shows the same person twice when somebody
+   * registers between one page and the next.
    */
-  const [cursors, setCursors] = useState<(string | null)[]>([null]);
-  const [pageIndex, setPageIndex] = useState(0);
-  const cursor = cursors[pageIndex] ?? null;
+  const pager = useCursorPager();
 
   const directory = useQuery({
-    queryKey: ['practitioner-directory', applied, cursor, queue],
+    queryKey: ['practitioner-directory', applied, pager.cursor, queue],
     queryFn: async () => {
       const search = applied ? `&search=${encodeURIComponent(applied)}` : '';
-      const from = cursor ? `&cursor=${cursor}` : '';
+      const from = pager.cursor ? `&cursor=${pager.cursor}` : '';
       const which = queue === 'all' ? '' : `&application=${queue}`;
       return api.get<{ practitioners?: Entry[]; nextCursor?: string | null }>(
         `/api/v1/practitioners?scopeType=PLATFORM&limit=${PAGE_SIZE}${which}${search}${from}`,
@@ -319,11 +319,6 @@ function Practitioners() {
     // collapsing to skeletons every time somebody steps forward.
     placeholderData: (previous) => previous,
   });
-
-  function startOver() {
-    setCursors([null]);
-    setPageIndex(0);
-  }
 
   const userId = selected?.userId ?? null;
 
@@ -365,9 +360,9 @@ function Practitioners() {
         description: 'The number itself is not stored — only its last four digits.',
       });
       setNin('');
+      setConfirmIdentity(false);
       refresh();
     },
-    onError: (error) => toast.error('Could not record it', { description: errorMessage(error) }),
   });
 
   const recordRegistration = useMutation({
@@ -383,14 +378,18 @@ function Practitioners() {
       toast.success('Registration recorded');
       setFolioNumber('');
       setExpiresAt('');
+      setConfirmRegistration(false);
       refresh();
     },
-    onError: (error) => toast.error('Could not record it', { description: errorMessage(error) }),
   });
 
   // Where they stand on the register: their level within the profession and their
   // registration category, read off it by the officer (PRA-01, PRA-02).
-  const [standing, setStanding] = useState<{ level: string; category: string }>({ level: '', category: '' });
+  const [standing, setStanding] = useState<{ level: string; category: string }>({
+    level: '',
+    category: '',
+  });
+  const [standingFor, setStandingFor] = useState<Registration | null>(null);
   const NONE = '__none__';
 
   const recordStanding = useMutation({
@@ -398,17 +397,27 @@ function Practitioners() {
       api.post('/api/v1/practitioners/verification/standing', {
         userId,
         cadreLevelId: standing.level && standing.level !== NONE ? standing.level : null,
-        registrationCategoryId: standing.category && standing.category !== NONE ? standing.category : null,
+        registrationCategoryId:
+          standing.category && standing.category !== NONE ? standing.category : null,
       }),
     onSuccess: () => {
       toast.success('Level and category recorded');
+      setStandingFor(null);
       refresh();
     },
-    onError: (error) => toast.error('Could not record it', { description: errorMessage(error) }),
   });
 
   const categoryName = (id: string | null) =>
     (reference.data?.professionalCategories ?? []).find((row) => row.id === id)?.name ?? null;
+  const levelName = (id: string) =>
+    id === NONE
+      ? 'Not recorded'
+      : ((reference.data?.cadreLevels ?? []).find((row) => row.id === id)?.name ?? 'Not recorded');
+  const categoryOfStanding = (id: string) =>
+    id === NONE
+      ? 'Not recorded'
+      : ((reference.data?.registrationCategories ?? []).find((row) => row.id === id)?.name ??
+        'Not recorded');
 
   if (selected) {
     return (
@@ -511,7 +520,11 @@ function Practitioners() {
                 }
               />
 
-              <StandingPanel userId={selected.userId} onChanged={refresh} />
+              <StandingPanel
+                userId={selected.userId}
+                practitionerName={selected.fullName}
+                onChanged={refresh}
+              />
 
               <Card>
                 <CardHeader className="pb-3">
@@ -591,7 +604,7 @@ function Practitioners() {
                                   categories={reference.data?.registrationCategories ?? []}
                                   value={standing}
                                   onChange={setStanding}
-                                  onSave={() => recordStanding.mutate()}
+                                  onSave={() => setStandingFor(registration)}
                                   saving={recordStanding.isPending}
                                 />
                               </li>
@@ -624,7 +637,7 @@ function Practitioners() {
                         className="space-y-4"
                         onSubmit={(event) => {
                           event.preventDefault();
-                          recordIdentity.mutate();
+                          setConfirmIdentity(true);
                         }}
                       >
                         <div className="space-y-1.5">
@@ -645,7 +658,9 @@ function Practitioners() {
                         </div>
 
                         <div className="space-y-1.5">
-                          <Label htmlFor="nin-name-match">Does the name on the slip match the account?</Label>
+                          <Label htmlFor="nin-name-match">
+                            Does the name on the slip match the account?
+                          </Label>
                           <Select value={nameMatch} onValueChange={setNameMatch}>
                             <SelectTrigger id="nin-name-match">
                               <SelectValue />
@@ -661,14 +676,15 @@ function Practitioners() {
                           </p>
                         </div>
 
-                        <Button
-                          type="submit"
-                          loading={recordIdentity.isPending}
-                          disabled={nin.trim().length < 11}
-                        >
+                        <Button type="submit" disabled={nin.trim().length < 11}>
                           <BadgeCheck />
                           Record identity
                         </Button>
+                        {nin.trim().length < 11 ? (
+                          <p className="text-sm text-muted-foreground" aria-live="polite">
+                            {nin.trim().length} of 11 digits entered.
+                          </p>
+                        ) : null}
                       </form>
                     </CardContent>
                   </Card>
@@ -682,7 +698,7 @@ function Practitioners() {
                         className="space-y-4"
                         onSubmit={(event) => {
                           event.preventDefault();
-                          recordRegistration.mutate();
+                          setConfirmRegistration(true);
                         }}
                       >
                         <div className="grid gap-4 sm:grid-cols-2">
@@ -744,12 +760,16 @@ function Practitioners() {
 
                         <Button
                           type="submit"
-                          loading={recordRegistration.isPending}
                           disabled={regulator.trim().length < 2 || folioNumber.trim().length < 3}
                         >
                           <BadgeCheck />
                           Record registration
                         </Button>
+                        {regulator.trim().length < 2 || folioNumber.trim().length < 3 ? (
+                          <p className="text-sm text-muted-foreground" aria-live="polite">
+                            Enter the regulator and the licence number to continue.
+                          </p>
+                        ) : null}
                       </form>
                     </CardContent>
                   </Card>
@@ -766,6 +786,98 @@ function Practitioners() {
             </TabsContent>
           </Tabs>
         </div>
+
+        <DecisionDialog
+          open={confirmIdentity}
+          onOpenChange={(next) => {
+            if (next) return;
+            setConfirmIdentity(false);
+            recordIdentity.reset();
+          }}
+          title="Record this identity"
+          object={`${selected.fullName} · NIN ending ${nin.trim().slice(-4)}`}
+          consequence={
+            <p>
+              Their identity is recorded from this number, with the name on the slip{' '}
+              <strong>{nameMatch === 'true' ? 'matching' : 'not matching'}</strong> the account.
+              {nameMatch === 'true'
+                ? ''
+                : ' A mismatch is not a rejection; it stays as a blocker until somebody settles which name is right.'}{' '}
+              The number is turned into a keyed digest and its last four digits. It is never stored,
+              logged or returned.
+            </p>
+          }
+          reversibility={{
+            tone: 'open',
+            label: 'You can correct this.',
+            detail:
+              'Recording it again replaces what is kept. Nobody can read the number back to check it, so check it first.',
+          }}
+          confirmLabel="Record identity"
+          loading={recordIdentity.isPending}
+          error={recordIdentity.isError ? errorMessage(recordIdentity.error) : null}
+          onConfirm={() => recordIdentity.mutate()}
+        />
+
+        <DecisionDialog
+          open={confirmRegistration}
+          onOpenChange={(next) => {
+            if (next) return;
+            setConfirmRegistration(false);
+            recordRegistration.reset();
+          }}
+          title="Record this registration"
+          object={`${selected.fullName} · ${regulator.trim()} ${folioNumber.trim()}`}
+          consequence={
+            <p>
+              The registration is recorded as{' '}
+              <strong>{humanise(registrationStatus).toLowerCase()}</strong>
+              {expiresAt ? `, expiring ${formatDate(expiresAt)}` : ', with no expiry date'}.{' '}
+              {registrationStatus === 'ACTIVE'
+                ? 'An active registration permits practice.'
+                : 'Only an active registration permits practice; this is recorded because it is what the record should say.'}
+            </p>
+          }
+          reversibility={{
+            tone: 'open',
+            label: 'You can correct this.',
+            detail: 'Recording it again for the same regulator replaces what is kept.',
+          }}
+          confirmLabel="Record registration"
+          loading={recordRegistration.isPending}
+          error={recordRegistration.isError ? errorMessage(recordRegistration.error) : null}
+          onConfirm={() => recordRegistration.mutate()}
+        />
+
+        <ConfirmDialog
+          open={standingFor !== null}
+          onOpenChange={(next) => !next && setStandingFor(null)}
+          title="Record their level and category"
+          object={`${selected.fullName}${standingFor ? ` · ${standingFor.regulator} ${standingFor.folioNumber}` : ''}`}
+          consequence={
+            standingFor ? (
+              <>
+                Level:{' '}
+                <strong>
+                  {standingFor.cadreLevel?.name ?? 'Not recorded'} →{' '}
+                  {levelName(standing.level || standingFor.cadreLevel?.id || NONE)}
+                </strong>
+                . Registration category:{' '}
+                <strong>
+                  {standingFor.registrationCategory?.name ?? 'Not recorded'} →{' '}
+                  {categoryOfStanding(
+                    standing.category || standingFor.registrationCategory?.id || NONE,
+                  )}
+                </strong>
+                . Saved on their registration and written to the audit trail.
+              </>
+            ) : null
+          }
+          reversible="Set it again from here; each change is kept in the audit trail."
+          confirmLabel="Record level and category"
+          loading={recordStanding.isPending}
+          onConfirm={() => recordStanding.mutate()}
+        />
       </>
     );
   }
@@ -775,6 +887,100 @@ function Practitioners() {
   const outstanding = rows.filter(
     (row) => !row.identityRecorded || !row.registrationRecorded,
   ).length;
+  const activeCount = applied ? 1 : 0;
+
+  function clearFilters() {
+    setSearch('');
+    setApplied('');
+    pager.startOver();
+  }
+
+  // Arrived on `?user=` from the credentials queue: say so while that person is being fetched, and
+  // say so if they cannot be, rather than showing the directory as though nothing was asked.
+  if (wanted && linked.isPending) {
+    return (
+      <>
+        <PageHeader title="Practitioner" description="Opening their record." />
+        <ListSkeleton rows={2} label="Opening their record" />
+      </>
+    );
+  }
+  if (wanted && (linked.isError || (linked.data && !linked.data.practitioners?.length))) {
+    return (
+      <>
+        <PageHeader title="Practitioner" />
+        {linked.isError ? (
+          <ErrorState
+            error={linked.error}
+            onRetry={() => void linked.refetch()}
+            retrying={linked.isFetching}
+          />
+        ) : (
+          <EmptyState
+            icon={<UserRound />}
+            title="That practitioner could not be found"
+            description="The link may be out of date. Open the directory to look for them."
+          />
+        )}
+        <div className="mt-4">
+          <Button variant="outline" onClick={() => router.replace('/admin/practitioners')}>
+            <ArrowLeft />
+            All practitioners
+          </Button>
+        </div>
+      </>
+    );
+  }
+
+  const waiting = queue === 'waiting';
+  const columns: Column<Entry>[] = [
+    {
+      id: 'practitioner',
+      header: 'Practitioner',
+      role: 'identity',
+      cell: (row) => (
+        <span className="flex items-center gap-3">
+          <Avatar entry={row} />
+          <span className="min-w-0">
+            <span className="block">{row.fullName}</span>
+            <span className="block font-mono text-sm font-normal text-muted-foreground">
+              {row.phone}
+            </span>
+            <span className="block text-sm font-normal text-muted-foreground">
+              {categoryName(row.professionalCategoryId) ?? 'No profile yet'}
+              {row.yearsOfExperience !== null ? ` · ${row.yearsOfExperience} years` : ''}
+            </span>
+          </span>
+        </span>
+      ),
+    },
+    {
+      id: 'application',
+      header: 'Application',
+      cell: (row) =>
+        row.submittedForReviewAt ? (
+          <QueueAge since={row.submittedForReviewAt} label="Submitted" />
+        ) : (
+          'Not submitted'
+        ),
+    },
+    {
+      id: 'identity',
+      header: 'Identity',
+      cell: (row) => <Recorded recorded={row.identityRecorded} />,
+    },
+    {
+      id: 'registration',
+      header: 'Registration',
+      cell: (row) => <Recorded recorded={row.registrationRecorded} />,
+    },
+    {
+      id: 'status',
+      header: 'Account',
+      role: 'status',
+      cell: (row) => <StatusBadge status={row.status} />,
+    },
+  ];
 
   return (
     <>
@@ -787,11 +993,11 @@ function Practitioners() {
         value={queue}
         onValueChange={(next) => {
           setQueue(next as Queue);
-          startOver();
+          pager.startOver();
         }}
         className="mb-4"
       >
-        <TabsList>
+        <TabsList aria-label="Which practitioners">
           {QUEUES.map(([value, label]) => (
             <TabsTrigger key={value} value={value}>
               {label}
@@ -800,190 +1006,123 @@ function Practitioners() {
         </TabsList>
       </Tabs>
 
-      <Card className="mb-6">
-        <CardContent className="pt-6">
-          <form
-            className="flex flex-wrap items-end gap-3"
-            onSubmit={(event) => {
-              event.preventDefault();
-              setApplied(search.trim());
-              startOver();
-            }}
-          >
-            <div className="min-w-[240px] flex-1 space-y-1.5">
-              <Label htmlFor="search">Search by name or number</Label>
-              <Input
-                id="search"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Adaeze, or 0803 123 4567"
-              />
-            </div>
-            <Button type="submit" loading={directory.isFetching}>
-              <Search />
-              Search
-            </Button>
-            {applied ? (
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => {
-                  setSearch('');
-                  setApplied('');
-                  startOver();
-                }}
-              >
-                Clear
-              </Button>
-            ) : null}
-          </form>
-
-          {!directory.isPending && rows.length > 0 ? (
-            <p className="mt-3 text-xs text-muted-foreground">
-              {rows.length} on this page
-              {outstanding > 0 ? ` · ${outstanding} missing identity or registration` : null}
-            </p>
-          ) : null}
-        </CardContent>
-      </Card>
+      <FilterBar
+        searchLabel="Search by name or number"
+        searchPlaceholder="Adaeze, or 0803 123 4567"
+        searchValue={search}
+        onSearchChange={setSearch}
+        onSubmit={() => {
+          setApplied(search.trim());
+          pager.startOver();
+        }}
+        activeCount={activeCount}
+        onClear={clearFilters}
+        busy={directory.isFetching && !directory.isPending}
+        summary={
+          !directory.isPending && rows.length > 0
+            ? `${rows.length} on this page${
+                outstanding > 0 ? ` · ${outstanding} missing identity or registration` : ''
+              }`
+            : undefined
+        }
+      />
 
       {directory.isPending ? (
-        <div className="space-y-3">
-          {Array.from({ length: 5 }).map((_, index) => (
-            <Skeleton key={index} className="h-20 w-full" />
-          ))}
-        </div>
-      ) : directory.isError ? (
+        <TableSkeleton label="Loading practitioners" columns={5} />
+      ) : directory.isError && !directory.data ? (
         <ErrorState
           error={directory.error}
           onRetry={() => void directory.refetch()}
           retrying={directory.isFetching}
         />
       ) : rows.length === 0 ? (
-        <EmptyState
-          icon={<UserRound />}
-          title={
-            applied
-              ? 'Nobody matches that'
-              : queue === 'waiting'
+        applied ? (
+          <FilteredEmpty noun="practitioners" activeCount={activeCount} onClear={clearFilters} />
+        ) : (
+          <EmptyState
+            icon={<UserRound />}
+            title={
+              queue === 'waiting'
                 ? 'Nobody is waiting for approval'
                 : queue === 'draft'
                   ? 'Everybody has submitted'
                   : 'No practitioners yet'
-          }
-          description={
-            applied
-              ? 'Try part of a name, or the number they registered with.'
-              : queue === 'waiting'
+            }
+            description={
+              queue === 'waiting'
                 ? 'Somebody appears here the moment they submit their application.'
                 : queue === 'draft'
                   ? 'Anybody still filling in their profile, availability or documents would be listed here.'
                   : 'They appear here as soon as somebody completes registration.'
-          }
-        />
+            }
+          />
+        )
       ) : (
-        <ul className="space-y-3">
-          {rows.map((row) => (
-            <li key={row.userId}>
-              <button
-                type="button"
-                onClick={() => setSelected(row)}
-                className="w-full rounded-xl border bg-card p-4 text-left transition-all hover:border-primary/50 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        <>
+          {directory.isError ? (
+            <p
+              role="alert"
+              className="mb-3 flex flex-wrap items-center gap-3 text-sm font-medium text-destructive-text"
+            >
+              Could not refresh this list, so it may be out of date.
+              <Button
+                variant="outline"
+                size="sm"
+                loading={directory.isFetching}
+                onClick={() => void directory.refetch()}
               >
-                <div className="flex items-center gap-4">
-                  <Avatar entry={row} />
-
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium">{row.fullName}</p>
-                    <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
-                      {row.phone}
-                    </p>
-                    <p className="mt-1 truncate text-xs text-muted-foreground">
-                      {categoryName(row.professionalCategoryId) ?? 'No profile yet'}
-                      {row.yearsOfExperience !== null ? ` · ${row.yearsOfExperience} years` : ''}
-                    </p>
-                  </div>
-
-                  {/* What an officer is scanning this list for: who still
-                      needs something recorded. */}
-                  <div className="hidden shrink-0 items-center gap-2 sm:flex">
-                    {row.submittedForReviewAt ? (
-                      <span className="rounded-full bg-info/10 px-2 py-0.5 text-xs font-medium text-info">
-                        Submitted {formatAgo(row.submittedForReviewAt)}
-                      </span>
-                    ) : (
-                      <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-                        Not submitted
-                      </span>
-                    )}
-                    <span
-                      className={cn(
-                        'rounded-full px-2 py-0.5 text-xs font-medium',
-                        row.identityRecorded
-                          ? 'bg-success/10 text-success'
-                          : 'bg-warning/10 text-warning',
-                      )}
-                    >
-                      {row.identityRecorded ? 'Identity' : 'No identity'}
-                    </span>
-                    <span
-                      className={cn(
-                        'rounded-full px-2 py-0.5 text-xs font-medium',
-                        row.registrationRecorded
-                          ? 'bg-success/10 text-success'
-                          : 'bg-warning/10 text-warning',
-                      )}
-                    >
-                      {row.registrationRecorded ? 'Registration' : 'No registration'}
-                    </span>
-                  </div>
-
-                  <StatusBadge status={row.status} />
-                </div>
-              </button>
-            </li>
-          ))}
-        </ul>
+                Try again
+              </Button>
+            </p>
+          ) : null}
+          <DataTable
+            caption={
+              queue === 'all'
+                ? 'All practitioners'
+                : `Practitioners: ${queueLabel(queue).toLowerCase()}`
+            }
+            rows={rows}
+            columns={columns}
+            getKey={(row) => row.userId}
+            actionHeader="Next step"
+            action={(row) => (
+              <Button
+                size="sm"
+                variant={waiting && row.submittedForReviewAt ? 'default' : 'outline'}
+                aria-label={`${waiting && row.submittedForReviewAt ? 'Review' : 'Open'} ${row.fullName}`}
+                onClick={() => setSelected(row)}
+              >
+                {waiting && row.submittedForReviewAt ? 'Review' : 'Open'}
+              </Button>
+            )}
+          />
+        </>
       )}
 
-      {rows.length > 0 && (pageIndex > 0 || nextCursor) ? (
-        <div className="mt-5 flex items-center justify-between gap-3">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={pageIndex === 0 || directory.isFetching}
-            onClick={() => setPageIndex((index) => Math.max(0, index - 1))}
-          >
-            <ChevronLeft />
-            Previous
-          </Button>
-
-          <p className="tabular text-xs text-muted-foreground">
-            Page {pageIndex + 1}
-            {directory.isFetching ? ' · loading' : ''}
-          </p>
-
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={!nextCursor || directory.isFetching}
-            onClick={() => {
-              if (!nextCursor) return;
-              // Recorded against the page it opens, so Previous can walk back
-              // through exactly the cursors that were used on the way out.
-              setCursors((current) => {
-                const next = current.slice(0, pageIndex + 1);
-                next.push(nextCursor);
-                return next;
-              });
-              setPageIndex((index) => index + 1);
-            }}
-          >
-            Next
-            <ChevronRight />
-          </Button>
-        </div>
-      ) : null}
+      <Pager
+        pageIndex={pager.pageIndex}
+        hasNext={Boolean(nextCursor)}
+        busy={directory.isFetching}
+        onPrevious={pager.goPrevious}
+        onNext={() => pager.goNext(nextCursor)}
+      />
     </>
+  );
+}
+
+const queueLabel = (queue: Queue) => QUEUES.find(([value]) => value === queue)?.[1] ?? queue;
+
+/** Whether an identity or a registration is on record: icon and word, never colour alone. */
+function Recorded({ recorded }: { recorded: boolean }) {
+  return recorded ? (
+    <span className="inline-flex items-center gap-1.5 text-success">
+      <CircleCheck className="size-4 shrink-0" aria-hidden="true" />
+      Recorded
+    </span>
+  ) : (
+    <span className="inline-flex items-center gap-1.5 font-medium text-warning">
+      <CircleAlert className="size-4 shrink-0" aria-hidden="true" />
+      Missing
+    </span>
   );
 }

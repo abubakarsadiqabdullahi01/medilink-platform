@@ -29,8 +29,12 @@ test('an administrator verifies a facility waiting in the queue', async ({ page 
   await page.getByLabel('I opened the licence document and it is legible').check();
   await page.getByLabel(/The name and address on it are this facility/).check();
   await page.getByLabel('I checked the registration reference with whoever issued it').check();
-  await page.getByLabel('How did you check it?').fill('Phoned the issuing council and read the licence number back.');
+  await page
+    .getByLabel('How did you check it?')
+    .fill('Phoned the issuing council and read the licence number back.');
   await page.getByRole('button', { name: 'Verify', exact: true }).click();
+  // Verifying lets the facility publish shifts, so it asks first.
+  await page.getByRole('dialog').getByRole('button', { name: 'Verify facility' }).click();
   await expectToast(page, 'Facility verified');
 
   // Its owner can now act for it.
@@ -45,7 +49,9 @@ test('the ward reports an incident, and cannot take it back', async ({ page }) =
 
   await page.getByRole('button', { name: 'Report an incident' }).click();
   const dialog = page.getByRole('dialog', { name: 'Report an incident' });
-  await dialog.getByLabel('When it happened').fill(lagosLocal(new Date(Date.now() - 2 * 60 * 60 * 1000)));
+  await dialog
+    .getByLabel('When it happened')
+    .fill(lagosLocal(new Date(Date.now() - 2 * 60 * 60 * 1000)));
   await choose(dialog, 'Category', 'Equipment');
   await dialog
     .getByLabel('What happened')

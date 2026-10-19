@@ -2,6 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/ui/api';
+import type { CredentialStatus } from '@/app/admin/credentials/credential-status';
 
 /**
  * One practitioner's credential submissions, as an officer sees them.
@@ -13,7 +14,7 @@ import { api } from '@/lib/ui/api';
  */
 export interface Submission {
   id: string;
-  status: string;
+  status: CredentialStatus;
   referenceNumber: string | null;
   expiresAt: string | null;
   /** The date printed on the document, as read by the reviewer. */

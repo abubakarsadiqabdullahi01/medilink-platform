@@ -3,17 +3,19 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { CircleCheck, ShieldAlert, TriangleAlert } from 'lucide-react';
+import { CircleCheck, ShieldAlert } from 'lucide-react';
 import { api, errorMessage } from '@/lib/ui/api';
 import { useCan } from '@/lib/ui/session';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
 import { Detail, DetailGrid } from '@/components/app/page-shell';
+import { ConfirmDialog } from '@/components/app/confirm-dialog';
+import { Field } from '@/components/app/field';
+import { ErrorState } from '@/components/app/states';
 import { formatDate, formatWhen } from '@/components/app/format';
 
 interface ScreeningReview {
@@ -60,21 +62,42 @@ const MIN_REINSTATE_REASON = 20;
  * database edit to lift. Each answer needs a written reason, because each one
  * returns somebody to clinical work.
  */
-export function StandingPanel({ userId, onChanged }: { userId: string; onChanged: () => void }) {
+export function StandingPanel({
+  userId,
+  practitionerName,
+  onChanged,
+}: {
+  userId: string;
+  practitionerName: string;
+  onChanged: () => void;
+}) {
   const canReview = useCan('credential.review');
   const canManageIncidents = useCan('incident.manage');
 
   return (
     <>
-      {canReview ? <ScreeningCard userId={userId} onChanged={onChanged} /> : null}
-      {canManageIncidents ? <SuspensionCard userId={userId} onChanged={onChanged} /> : null}
+      {canReview ? (
+        <ScreeningCard userId={userId} practitionerName={practitionerName} onChanged={onChanged} />
+      ) : null}
+      {canManageIncidents ? (
+        <SuspensionCard userId={userId} practitionerName={practitionerName} onChanged={onChanged} />
+      ) : null}
     </>
   );
 }
 
-function ScreeningCard({ userId, onChanged }: { userId: string; onChanged: () => void }) {
+function ScreeningCard({
+  userId,
+  practitionerName,
+  onChanged,
+}: {
+  userId: string;
+  practitionerName: string;
+  onChanged: () => void;
+}) {
   const queryClient = useQueryClient();
   const [notes, setNotes] = useState('');
+  const [confirming, setConfirming] = useState(false);
 
   const review = useQuery({
     queryKey: ['screening', userId],
@@ -85,8 +108,11 @@ function ScreeningCard({ userId, onChanged }: { userId: string; onChanged: () =>
   const clear = useMutation({
     mutationFn: () => api.post('/api/v1/practitioners/screening', { userId, notes: notes.trim() }),
     onSuccess: () => {
-      toast.success('Flag cleared', { description: 'Recorded as a different person, with your note.' });
+      toast.success('Flag cleared', {
+        description: 'Recorded as a different person, with your note.',
+      });
       setNotes('');
+      setConfirming(false);
       void queryClient.invalidateQueries({ queryKey: ['screening', userId] });
       onChanged();
     },
@@ -102,10 +128,12 @@ function ScreeningCard({ userId, onChanged }: { userId: string; onChanged: () =>
         {review.isPending ? (
           <Skeleton className="h-16 w-full" />
         ) : review.isError ? (
-          <Alert variant="destructive">
-            <TriangleAlert />
-            <AlertDescription>The screening result could not be loaded.</AlertDescription>
-          </Alert>
+          <ErrorState
+            error={review.error}
+            onRetry={() => void review.refetch()}
+            retrying={review.isFetching}
+            compact
+          />
         ) : !review.data.screening ? (
           <p className="text-sm text-muted-foreground">
             Not screened yet. Screening runs when somebody signs up and every night after.
@@ -132,9 +160,12 @@ function ScreeningCard({ userId, onChanged }: { userId: string; onChanged: () =>
                 <DetailGrid>
                   <Detail label="Listed as">{review.data.matchedEntry.fullName}</Detail>
                   <Detail label="List">
-                    {LIST_NAMES[review.data.matchedEntry.sourceList] ?? humanise(review.data.matchedEntry.sourceList)}
+                    {LIST_NAMES[review.data.matchedEntry.sourceList] ??
+                      humanise(review.data.matchedEntry.sourceList)}
                   </Detail>
-                  <Detail label="Folio number">{review.data.matchedEntry.folioNumber ?? '—'}</Detail>
+                  <Detail label="Folio number">
+                    {review.data.matchedEntry.folioNumber ?? '—'}
+                  </Detail>
                   <Detail label="Listed">{formatDate(review.data.matchedEntry.listedAt)}</Detail>
                 </DetailGrid>
                 {review.data.matchedEntry.reason ? (
@@ -143,30 +174,53 @@ function ScreeningCard({ userId, onChanged }: { userId: string; onChanged: () =>
                   </p>
                 ) : null}
 
-                <div className="space-y-2 border-t pt-4">
-                  <Label htmlFor="screening-notes">
-                    Why this is a different person{' '}
-                    <span className="font-normal text-muted-foreground">— required</span>
-                  </Label>
-                  <Textarea
-                    id="screening-notes"
-                    rows={3}
-                    placeholder="What you compared: folio number, date of birth, the regulator's record."
-                    value={notes}
-                    onChange={(event) => setNotes(event.target.value)}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    If it is the same person, leave the flag in place. They stay unable to be
-                    offered work.
-                  </p>
+                <div className="space-y-3 border-t pt-4">
+                  <Field
+                    label="Why this is a different person"
+                    required
+                    hint={`Required, at least ${MIN_CLEAR_NOTES} characters: what you compared — folio number, date of birth, the regulator's record. If it is the same person, leave the flag in place; they stay unable to be offered work.`}
+                  >
+                    <Textarea
+                      rows={3}
+                      value={notes}
+                      onChange={(event) => setNotes(event.target.value)}
+                    />
+                  </Field>
                   <Button
                     disabled={notes.trim().length < MIN_CLEAR_NOTES}
-                    loading={clear.isPending}
-                    onClick={() => clear.mutate()}
+                    onClick={() => setConfirming(true)}
                   >
                     Clear the flag
                   </Button>
+                  {notes.trim().length < MIN_CLEAR_NOTES ? (
+                    <p className="text-sm text-muted-foreground" aria-live="polite">
+                      {MIN_CLEAR_NOTES - notes.trim().length} more characters needed before the flag
+                      can be cleared.
+                    </p>
+                  ) : null}
                 </div>
+
+                <ConfirmDialog
+                  open={confirming}
+                  onOpenChange={setConfirming}
+                  title="Clear this flag"
+                  object={`${practitionerName} · flagged against ${review.data.matchedEntry.fullName} on the ${
+                    LIST_NAMES[review.data.matchedEntry.sourceList] ??
+                    humanise(review.data.matchedEntry.sourceList)
+                  }`}
+                  consequence={
+                    <>
+                      Their screening changes from flagged to clear, recorded as a different person,
+                      with your note kept beside it:{' '}
+                      <span className="[overflow-wrap:anywhere]">“{notes.trim()}”</span>
+                    </>
+                  }
+                  reversible={false}
+                  destructive
+                  confirmLabel="Clear the flag"
+                  loading={clear.isPending}
+                  onConfirm={() => clear.mutate()}
+                />
               </>
             ) : review.data.screening.status === 'CLEAR' && review.data.screening.notes ? (
               <p className="flex items-start gap-2 text-sm text-muted-foreground">
@@ -181,9 +235,18 @@ function ScreeningCard({ userId, onChanged }: { userId: string; onChanged: () =>
   );
 }
 
-function SuspensionCard({ userId, onChanged }: { userId: string; onChanged: () => void }) {
+function SuspensionCard({
+  userId,
+  practitionerName,
+  onChanged,
+}: {
+  userId: string;
+  practitionerName: string;
+  onChanged: () => void;
+}) {
   const queryClient = useQueryClient();
   const [reason, setReason] = useState('');
+  const [confirming, setConfirming] = useState(false);
 
   const suspensions = useQuery({
     queryKey: ['suspensions', userId],
@@ -199,19 +262,23 @@ function SuspensionCard({ userId, onChanged }: { userId: string; onChanged: () =
     onSuccess: () => {
       toast.success('Reinstated', { description: 'They can sign in again.' });
       setReason('');
+      setConfirming(false);
       void queryClient.invalidateQueries({ queryKey: ['suspensions', userId] });
       onChanged();
     },
-    onError: (error) => toast.error('Could not reinstate them', { description: errorMessage(error) }),
+    onError: (error) =>
+      toast.error('Could not reinstate them', { description: errorMessage(error) }),
   });
 
   if (suspensions.isPending) return <Skeleton className="h-16 w-full" />;
   if (suspensions.isError) {
     return (
-      <Alert variant="destructive">
-        <TriangleAlert />
-        <AlertDescription>Their suspension record could not be loaded.</AlertDescription>
-      </Alert>
+      <ErrorState
+        error={suspensions.error}
+        onRetry={() => void suspensions.refetch()}
+        retrying={suspensions.isFetching}
+        compact
+      />
     );
   }
 
@@ -233,27 +300,50 @@ function SuspensionCard({ userId, onChanged }: { userId: string; onChanged: () =
                 {current.reason}
               </AlertDescription>
             </Alert>
-            <div className="space-y-2">
-              <Label htmlFor="reinstate-reason">
-                Why they may return{' '}
-                <span className="font-normal text-muted-foreground">— required</span>
-              </Label>
-              <Textarea
-                id="reinstate-reason"
-                rows={3}
-                placeholder="The review that cleared them, and any conditions."
-                value={reason}
-                onChange={(event) => setReason(event.target.value)}
-              />
+            <div className="space-y-3">
+              <Field
+                label="Why they may return"
+                required
+                hint={`Required, at least ${MIN_REINSTATE_REASON} characters: the review that cleared them, and any conditions.`}
+              >
+                <Textarea
+                  rows={3}
+                  value={reason}
+                  onChange={(event) => setReason(event.target.value)}
+                />
+              </Field>
               <Button
                 variant="outline"
                 disabled={reason.trim().length < MIN_REINSTATE_REASON}
-                loading={reinstate.isPending}
-                onClick={() => reinstate.mutate()}
+                onClick={() => setConfirming(true)}
               >
                 Reinstate
               </Button>
+              {reason.trim().length < MIN_REINSTATE_REASON ? (
+                <p className="text-sm text-muted-foreground" aria-live="polite">
+                  {MIN_REINSTATE_REASON - reason.trim().length} more characters needed before they
+                  can be reinstated.
+                </p>
+              ) : null}
             </div>
+
+            <ConfirmDialog
+              open={confirming}
+              onOpenChange={setConfirming}
+              title="Reinstate this account"
+              object={`${practitionerName} · suspended ${formatWhen(current.suspendedAt)}`}
+              consequence={
+                <>
+                  Their account goes back to active and they can sign in again. The suspension is
+                  closed, not deleted: it stays in their history with your reason —{' '}
+                  <span className="[overflow-wrap:anywhere]">“{reason.trim()}”</span>
+                </>
+              }
+              reversible="They can be suspended again from an incident, which needs its own reason."
+              confirmLabel="Reinstate account"
+              loading={reinstate.isPending}
+              onConfirm={() => reinstate.mutate()}
+            />
           </>
         ) : (
           <p className="text-sm text-muted-foreground">
