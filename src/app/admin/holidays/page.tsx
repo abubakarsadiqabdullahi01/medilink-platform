@@ -18,6 +18,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { ConfirmDialog } from '@/components/app/confirm-dialog';
 import { PageHeader, QueueSkeleton } from '@/components/app/page-shell';
 import { ErrorState } from '@/components/app/states';
 import { formatDate } from '@/components/app/format';
@@ -57,6 +58,7 @@ export default function HolidaysPage() {
 
   const [date, setDate] = useState('');
   const [name, setName] = useState('');
+  const [removing, setRemoving] = useState<{ id: string; name: string; date: string } | null>(null);
 
   const add = useMutation({
     mutationFn: () => api.post('/api/v1/holidays', { date, name: name.trim() }),
@@ -75,6 +77,7 @@ export default function HolidaysPage() {
     mutationFn: (id: string) => api.del(`/api/v1/holidays/${id}`),
     onSuccess: () => {
       toast.success('Holiday removed');
+      setRemoving(null);
       void queryClient.invalidateQueries({ queryKey: ['holidays'] });
     },
     onError: (error) => toast.error('Could not remove it', { description: errorMessage(error) }),
@@ -151,9 +154,10 @@ export default function HolidaysPage() {
                                 <Button
                                   variant="ghost"
                                   size="sm"
-                                  disabled={remove.isPending}
                                   aria-label={`Remove ${row.name}, ${formatDate(row.date)}`}
-                                  onClick={() => remove.mutate(row.id)}
+                                  onClick={() =>
+                                    setRemoving({ id: row.id, name: row.name, date: row.date })
+                                  }
                                 >
                                   Remove
                                 </Button>
@@ -174,8 +178,8 @@ export default function HolidaysPage() {
           <CardHeader className="pb-3">
             <CardTitle className="text-sm">Add a holiday</CardTitle>
             <CardDescription className="text-xs">
-              For a holiday the Government has declared (Eid, or a Monday given in place of one
-              that fell on a weekend). Every change is recorded with your name.
+              For a holiday the Government has declared (Eid, or a Monday given in place of one that
+              fell on a weekend). Every change is recorded with your name.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -208,10 +212,28 @@ export default function HolidaysPage() {
               <Button type="submit" disabled={!ready} loading={add.isPending}>
                 Add holiday
               </Button>
+              {!ready ? (
+                <p className="text-sm text-muted-foreground sm:col-span-3">
+                  Add needs a date and a name of at least two letters.
+                </p>
+              ) : null}
             </form>
           </CardContent>
         </Card>
       </div>
+
+      <ConfirmDialog
+        open={removing !== null}
+        onOpenChange={(next) => !next && setRemoving(null)}
+        title="Remove this holiday"
+        object={removing ? `${removing.name} · ${formatDate(removing.date)}` : ''}
+        consequence="From now on, hours worked on that date are an ordinary day and are not paid the holiday premium on a facility's rate card."
+        reversible="Add it again from the form below."
+        destructive
+        confirmLabel="Remove holiday"
+        loading={remove.isPending}
+        onConfirm={() => removing && remove.mutate(removing.id)}
+      />
     </>
   );
 }
