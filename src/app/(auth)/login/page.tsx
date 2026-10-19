@@ -1,12 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import { z } from 'zod';
 import { useRouter } from 'next/navigation';
 import { useMutation } from '@tanstack/react-query';
+import { useForm } from 'react-hook-form';
 import { ShieldCheck, TriangleAlert } from 'lucide-react';
 import { api, ApiError, errorMessage } from '@/lib/ui/api';
-import { useZodForm } from '@/lib/ui/form';
 import { consoleFor, type SessionState } from '@/lib/ui/session';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -24,18 +23,26 @@ import { PasswordInput } from '@/components/app/password-input';
  * is told which one is missing when they press it, beside the field, rather than
  * left to work out why a faded button will not respond.
  */
-const schema = z.object({
-  phone: z.string().trim().min(1, 'Enter the phone number you sign in with.'),
-  password: z.string().min(1, 'Enter your password.'),
-});
+interface Values {
+  phone: string;
+  password: string;
+}
+
+/*
+ * Two required fields, so the rules are written here rather than as a Zod schema: the validator
+ * is a quarter of what the sign-in page would otherwise download, on the page that every
+ * visitor, on every connection, has to load first.
+ */
+const MISSING_PHONE = 'Enter the phone number you sign in with.';
+const MISSING_PASSWORD = 'Enter your password.';
 
 export default function LoginPage() {
   const router = useRouter();
-  const form = useZodForm(schema, { defaultValues: { phone: '', password: '' } });
+  const form = useForm<Values>({ defaultValues: { phone: '', password: '' }, mode: 'onTouched' });
   const [failedOnce, setFailedOnce] = useState(false);
 
   const signIn = useMutation({
-    mutationFn: async (values: z.infer<typeof schema>) => {
+    mutationFn: async (values: Values) => {
       await api.post('/api/v1/auth/login', { phone: values.phone, password: values.password });
       return api.get<SessionState>('/api/v1/auth/session');
     },
@@ -97,7 +104,9 @@ export default function LoginPage() {
           <form
             className="space-y-4"
             noValidate
-            onSubmit={form.handleSubmit((values) => signIn.mutate(values))}
+            onSubmit={form.handleSubmit((values) =>
+              signIn.mutate({ phone: values.phone.trim(), password: values.password }),
+            )}
           >
             {signIn.isError ? (
               <Alert variant="destructive">
@@ -121,7 +130,9 @@ export default function LoginPage() {
               error={errors.phone?.message}
             >
               <Input
-                {...form.register('phone')}
+                {...form.register('phone', {
+                  validate: (value) => value.trim().length > 0 || MISSING_PHONE,
+                })}
                 autoComplete="username"
                 inputMode="tel"
                 placeholder="0803 123 4567"
@@ -129,7 +140,10 @@ export default function LoginPage() {
             </Field>
 
             <Field label="Password" error={errors.password?.message}>
-              <PasswordInput {...form.register('password')} autoComplete="current-password" />
+              <PasswordInput
+                {...form.register('password', { required: MISSING_PASSWORD })}
+                autoComplete="current-password"
+              />
             </Field>
 
             <Button type="submit" size="lg" className="w-full" loading={signIn.isPending}>
