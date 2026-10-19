@@ -451,6 +451,53 @@ export default function LandingPage() {
           </div>
         </section>
 
+        <section id="product" className="scroll-mt-16 border-b py-16 sm:py-20">
+          <div className="mx-auto max-w-7xl px-4 sm:px-8">
+            <SectionHeading eyebrow="The product" title="What you see when you sign in">
+              Two screens from the pilot build. The hospital, the people, the shifts and the amounts
+              are demonstration data, not a real facility or a real person&rsquo;s pay.
+            </SectionHeading>
+            <div className="mt-10 grid items-end gap-10 lg:grid-cols-[minmax(0,1fr)_17rem] lg:gap-12">
+              <figure className="mx-auto w-full max-w-[17rem] md:max-w-none">
+                <Image
+                  src="/landing/preview-facility-phone.webp"
+                  alt="A facility's dashboard on a phone. A list headed 'Needs your attention' shows a shift with places open in the next 24 hours, practitioners waiting to be confirmed, timesheets to approve and an invoice outstanding."
+                  width={780}
+                  height={1628}
+                  sizes="272px"
+                  className="w-full rounded-xl border shadow-float md:hidden"
+                />
+                <Image
+                  src="/landing/preview-facility.webp"
+                  alt="A facility's dashboard on a computer. A list headed 'Needs your attention' shows a shift with places open in the next 24 hours, four practitioners waiting to be confirmed, four timesheets to approve and an invoice outstanding. Below it are tiles for today's cover, open shifts, timesheets to approve and outstanding invoices."
+                  width={1600}
+                  height={955}
+                  sizes="(min-width: 1024px) 60vw, 100vw"
+                  className="hidden w-full rounded-xl border shadow-float md:block"
+                />
+                <figcaption className="mt-3 text-base text-muted-foreground">
+                  <strong className="font-semibold text-foreground">A facility.</strong> What needs
+                  a decision, with the next step beside each one.
+                </figcaption>
+              </figure>
+              <figure className="mx-auto w-full max-w-[17rem]">
+                <Image
+                  src="/landing/preview-practitioner.webp"
+                  alt="A practitioner's home screen on a phone. A button reads 'Answer 3 offers'. Below it, two items need attention: three offers waiting for an answer, and the hours for one shift to send. Underneath are tiles for offers waiting, hours to send and expected earnings."
+                  width={780}
+                  height={1688}
+                  sizes="272px"
+                  className="w-full rounded-xl border shadow-float"
+                />
+                <figcaption className="mt-3 text-base text-muted-foreground">
+                  <strong className="font-semibold text-foreground">A practitioner.</strong> One
+                  thing to do first, then what is waiting. Made for a phone.
+                </figcaption>
+              </figure>
+            </div>
+          </div>
+        </section>
+
         <section id="pilot" className="scroll-mt-16 border-b py-16 sm:py-20">
           <div className="mx-auto grid max-w-7xl gap-10 px-4 sm:px-8 lg:grid-cols-2 lg:gap-16">
             <SectionHeading eyebrow="Pilot and pricing" title="Early, and honest about it">
