@@ -4,12 +4,15 @@ import {
   Children,
   cloneElement,
   isValidElement,
+  useEffect,
   useId,
+  useState,
   type ReactElement,
   type ReactNode,
 } from 'react';
 import { CircleAlert } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { usePointerPressing } from '@/lib/ui/pointer-pressing';
 import { Label } from '@/components/ui/label';
 
 /**
@@ -37,7 +40,9 @@ export interface FieldControlProps {
  * - The **hint** is short and sits between the label and the input, where it is read first.
  * - The **error** appears below the input after the field has been touched (react-hook-form's
  *   `onTouched` mode already decides when), with an icon and the words, and is announced:
- *   `role="alert"` makes a screen reader read it the moment it appears.
+ *   `role="alert"` makes a screen reader read it the moment it appears. A *new* error waits
+ *   until the pointer is released, so that pressing Submit while a field is still being
+ *   validated cannot move the button from under the pointer and lose the click.
  *
  * Give it **one form control** as a child and it sets `id`, `aria-describedby`, `aria-invalid`
  * and `aria-required` on it. For a control that is not a single element — a Radix Select inside a
@@ -51,7 +56,8 @@ export interface FieldControlProps {
 export function Field({
   label,
   hint,
-  error,
+  error: errorNow,
+
   required = false,
   optional = false,
   children,
@@ -68,6 +74,11 @@ export function Field({
   className?: string;
 }) {
   const id = useId();
+  const pressing = usePointerPressing();
+  const [error, setError] = useState(errorNow);
+  useEffect(() => {
+    if (!pressing) setError(errorNow);
+  }, [errorNow, pressing]);
   const hintId = `${id}-hint`;
   const errorId = `${id}-error`;
   const own = [hint ? hintId : null, error ? errorId : null].filter(Boolean).join(' ');
@@ -86,7 +97,8 @@ export function Field({
     const only = Children.only(children) as ReactElement<Record<string, unknown>>;
     labelFor = (only.props.id as string | undefined) ?? id;
     const describedBy =
-      [own, only.props['aria-describedby'] as string | undefined].filter(Boolean).join(' ') || undefined;
+      [own, only.props['aria-describedby'] as string | undefined].filter(Boolean).join(' ') ||
+      undefined;
     control = isValidElement(only)
       ? cloneElement(only, {
           id: labelFor,

@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import { Field } from './field';
 import { Input } from '@/components/ui/input';
 
@@ -67,5 +67,31 @@ describe('Field', () => {
       </Field>,
     );
     expect(screen.getByLabelText('Amount').getAttribute('aria-describedby')).toContain('elsewhere');
+  });
+
+  it('holds a new error back while the pointer is down, so the button does not slide away', () => {
+    vi.useFakeTimers();
+    try {
+      const { rerender } = render(
+        <Field label="Name">
+          <Input />
+        </Field>,
+      );
+      act(() => void document.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+      rerender(
+        <Field label="Name" error="Enter your full name">
+          <Input />
+        </Field>,
+      );
+      expect(screen.queryByRole('alert')).toBeNull();
+      expect(screen.getByLabelText('Name')).not.toHaveAttribute('aria-invalid');
+
+      act(() => void document.dispatchEvent(new Event('pointerup', { bubbles: true })));
+      act(() => void vi.advanceTimersByTime(150));
+      expect(screen.getByRole('alert')).toHaveTextContent('Enter your full name');
+      expect(screen.getByLabelText('Name')).toHaveAttribute('aria-invalid', 'true');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
