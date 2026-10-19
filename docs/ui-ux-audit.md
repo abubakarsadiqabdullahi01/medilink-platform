@@ -1,7 +1,8 @@
 # Medilink UI/UX audit
 
-**Status:** Phase 1 of the redesign. Written *before* any screen was changed; the shared design-system
-work that came with it is listed in section 9 and marked as done or not.
+**Status:** Sections 0–12 were written *before* any screen was changed and are kept as they were, so the
+findings can be checked against what was done. **Section 13 says what was done, how it was checked and what
+was left alone.** Section 9's table is updated to say what is built.
 **Baseline:** commit `7ad839c` (`main`), 2026-10-18. **Detailed evidence:** [practitioner](ui-audit/practitioner.md) ·
 [facility](ui-audit/facility.md) · [operations](ui-audit/admin.md) — every file read in full, every finding
 with a file and line.
@@ -420,6 +421,97 @@ Real devices on 3G; a screen reader; Windows high-contrast mode; the effect of t
 | Sheet opened in 500 ms over `bg-black/80`; dialog close was 16 px | Confirmed (fixed) |
 | The ~1,000 px roster table | Confirmed in the 390 px screenshot: Practitioner, Starts and part of Ends are visible; Attendance and Cancel are inside the horizontal scroll area |
 
+## 13. What was done, and how it was checked
+
+Written at the end of the redesign (branch `claude/eager-brahmagupta-9oz8rt`, 36 commits on the baseline). No pull
+request has been opened.
+
+### 13.1 Screens changed
+
+| Area | Screens |
+|---|---|
+| Public | Landing (the 14-part structure of the brief, real product previews, FAQ, pilot and pricing stated honestly); sign in; register (three steps); forgot password; the frame of terms, privacy and contact |
+| Console shell | Header (display settings under a menu on a phone, text size and theme inline from `sm`), navigation (`aria-current`, 44px items), page titles on every page |
+| Practitioner | Overview; offers; my shifts (check-in, excusals); timesheets (review before sending); earnings and payout account; profile and the setup wizard; credentials; availability (an "Away" block can now be removed); privacy and erasure |
+| Facility | Overview; shifts list; **publish a shift** (details, review, done); shift page (ready to confirm, candidates, offer review, confirmation); roster and attendance; timesheets (approve, reject, correct); invoices; disputes; incidents and the report form; staff (invite, change role, remove); facility profile; facility registration |
+| Operations | Overview; **credentials queue**; practitioners (directory, identity and registration review, standing); facilities (verify); incidents; disputes; unhonoured shifts; data requests; sanctions; finance, invoices, payouts; audit trail; system health; performance; terms and notices; pay floors; levels; public holidays |
+
+### 13.2 Shared patterns introduced
+
+Everything in section 9 is built, unit-tested and used. Added since it was written: `useCursorPager` + `Pager`
+(`Newer`/`Older` for time-ordered lists); `ConfirmDialog` takes a structured `Reversibility`
+(`final` / `open`, with the way on), an inline `error`, `cancelLabel` and `confirmDisabled`, and starts focus on
+Cancel for any irreversible action; `usePointerPressing` (below); `NewShiftLauncher` and the landing menu, which load
+their dialogs when wanted; `StaleNote`, `shift-figures`, `attendance-state`, `timesheet-steps`, `credential-timing`,
+`shift-progress` and `phone-problem` as tested pure helpers behind the screens that use them.
+
+**A defect found by measuring, not reading.** With validation on blur, pressing Submit takes focus from the field
+being typed in, its error appears, the form grows, and the button slides out from under the pointer before it is
+released: no click is fired and nothing happens. On `/register` with a held mouse the button moved 30 px during the
+press and the submit was lost (one error shown instead of three). `Field` now holds a *new* error back until the pointer
+is released; the click is delivered and every error then appears.
+
+### 13.3 Checks run
+
+| Check | Result |
+|---|---|
+| `pnpm lint`, `pnpm typecheck` | clean |
+| Unit tests (`pnpm vitest run`) | 1,456 passed in 113 files (baseline: 1,281 in 87) |
+| Integration tests (`pnpm test:integration`, real Postgres) | 1,447 passed in 79 files, against a real Postgres. No migration or schema change; the only server code touched is the additive dashboard summaries in 13.5 |
+| Browser journeys (`playwright test`, production build, 62 journeys incl. the Pixel 5 profile) | 62 passed. Nine spec files were updated because the UI deliberately changed (publish is now details → review → done; approve, reject, dismiss, close and verify have a confirmation; rows are found by shift window; the rate is stated, not prefilled). Every failure on the way was a stale selector, not a product defect |
+| Automated WCAG 2.2 AA scan (axe-core 4.10, 42 pages, signed in as each role) | 0 violations on all 42 pages at 390 px (light, dark, and the largest text size), 768 px and 1440 px, and at 1440 px in the largest text size with dark mode. It found seven things on the way, all fixed and re-scanned: unbound tab-panel references (12 pages), a link told apart by colour alone, three tables that scrolled sideways with no keyboard access, and a warning badge at 4.38:1 |
+| Layout measurements on the production build (`scripts/ui-screenshots.mjs`, the same eleven pages at three widths, and a further 60 page-widths over every console) | 0 pages scroll sideways; 0 text under 14 px; 0 controls under 24 px (baseline: 50 on the audit trail alone, 263 between 24 and 43 px across the audited pages); no failed request except two by design (below) |
+| Screenshots | `docs/ui-screenshots/before/` and `after/` — the same eleven pages at 390, 768 and 1440 px, with `metrics.json` for each |
+
+**Not run, and why.** `scripts/page-budget.mjs` (needs a `_perf` database and the performance seed); real Android
+devices or a real 3G link; a screen reader; Windows high-contrast mode. The dashboards' request counts were measured
+instead (below).
+
+### 13.4 Performance
+
+First Load JS from the production build (kB, gzip). Shared by all pages: 103 before and after.
+
+| Route | Before | After | Note |
+|---|---|---|---|
+| `/` | 119 | 123 | the product previews are WebP (49–60 KB) and below the fold; the phone menu loads when opened |
+| `/login` | 131 | 146 | the form library for two required fields; the schema validator (25 kB) was removed from this page |
+| `/register` | 159 | 163 | |
+| `/practitioner` | 150 | 159 | |
+| `/facility` | 162 | 171 | the publish form (about 60 kB) loads when its button is first approached; it was 225 before that change |
+| `/admin` | 136 | 143 | the growth chart was removed from the dashboard |
+
+Requests on first load, measured: practitioner overview 5, facility overview 5, operations overview 2; every other page 2–5, except the practitioner's profile and setup pages, which read the profile, eligibility, availability, credentials and reference data for their tabs (6–7). A newcomer's profile request answers 404 by design.
+The practitioner overview was **8** on the first production measurement (its bundle and the setup hooks asked for the same
+data at the same moment); it is 5 again. No page makes a request per row. Recharts is off the dashboards; charts left on
+Finance do not animate.
+
+### 13.5 Left unchanged on purpose
+
+Business rules, permissions, the state machines, and every API contract — with one exception: three dashboard
+endpoints (`/api/v1/dashboard/facility`, `/practitioner`, and the platform summary behind operations) gained
+**additive, permission-gated fields** so a dashboard needs one request instead of several (an absent section means "not
+permitted", a zero means "none"); no existing field changed, no permission was widened, and `tests/integration/dashboard-today.test.ts`
+covers them. No migration, no schema change. Also unchanged, and worth knowing:
+
+- **Queue order.** Credentials and facilities are newest first, so the oldest waiting item is on the last page; the
+  incident queue is newest first with the most serious first *within each page of 20*. The page copy now says so (it used
+  to say "most serious first"); the ordering is the owner's call.
+- Phone numbers are shown to a facility only when asked for, and each showing is recorded (`include=contact`).
+- Invoice periods start at 01:00 WAT; licence expiry is UTC midnight; the return-URL after sign-in; `PLATFORM_FEE_BP` (zero).
+- A performance finding left as it was: the facility staff page reads its lists only after a password is entered, so it
+  shows two 401s on a first visit by design.
+
+### 13.6 Image assets
+
+None are blocking. `docs/ui-image-brief.md` lists what is in use and exactly what is still wanted (a 1200 × 630 share
+image; an optional second hero; refreshed previews if the pilot consents) with dimensions, weight, crop-safe areas, alt
+text and the release each needs.
+
+### 13.7 Wording that needs the owner or legal to approve
+
+Appendix A (the landing page) and Appendix B (the screens). Every sentence in both is true of the code today; they are
+public or user-facing statements about review, privacy, money and what happens next, and should be read by whoever owns them.
+
 ## Appendix A. Content on the landing page that needs the owner's approval
 
 The landing page claims only what the product does today. These statements are nevertheless *public statements* about the
@@ -439,3 +531,20 @@ pilot, verification, privacy and price, and should be approved by whoever owns t
 7. The FAQ answers (who can register, how checks work, offline check-in, contact).
 8. No statistics, testimonials, partner logos, payment claims or regulator approvals appear anywhere on the page, because none exist to cite. The NDPC registration
    and data-protection-officer status are "not started" in the Gap Reconciliation; nothing on the page implies otherwise.
+
+## Appendix B. Screen wording that needs the owner's approval
+
+Each is a statement about what the platform does or promises, written from the code as it is.
+
+- **Facility.** The invoice line "it shows as paid once Medilink has recorded your transfer"; the roster's 15-minute "late" threshold;
+  "Each person has 24 hours to answer" in the offer review (read from `DEFAULT_INVITATION_HOURS`); the withdrawn-dispute wording about
+  payment no longer being held back; the incident success screen's permanence and next steps, including that severe reports alert compliance
+  straight away; the staff removal "way back" lines ("invite them again and they accept"); the registration notice "cannot publish until verified".
+- **Practitioner.** The erasure dialog (what is replaced, what is retained under a legal obligation, what blocks it); the payout review's
+  "a short wait after you give a new account before a payment can go to it"; the decline copy saying the reason goes to the platform without
+  the practitioner's name; "An officer checks … by hand"; "It counts until it expires."
+- **Operations.** "A verified credential stands until its expiry date passes." and the reject copy ("their application is sent back to them");
+  that no message goes to a practitioner when a no-show is recorded or an excusal is decided, and that closing a data request sends nothing (they read
+  it in the app); that referring to the regulator only records the decision; "a sanctions match blocks a practitioner until compliance answers";
+  the replay warning that a person may receive a text twice; the effect of removing a public holiday on pay; the effect of retiring a level;
+  that a published agreement version is final and a mistake is corrected by publishing another.
