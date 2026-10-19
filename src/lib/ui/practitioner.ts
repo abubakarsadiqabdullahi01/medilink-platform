@@ -55,8 +55,13 @@ export interface CredentialSubmission {
  * it did, unmounted that form again a moment later, indefinitely. As `null` it
  * is cached data like any other: fresh for `staleTime`, not retried on mount.
  */
-export function useProfile() {
+/**
+ * `enabled` is for a page that already has the answer on its way — the overview asks once for
+ * everything and seeds these keys, so each hook waits for that rather than racing it.
+ */
+export function useProfile(enabled = true) {
   return useQuery({
+    enabled,
     queryKey: ['profile'],
     queryFn: async () => {
       try {
@@ -92,8 +97,9 @@ export function usePhoto() {
   return { hasPhoto, url: hasPhoto ? (photo.data?.url ?? null) : null };
 }
 
-export function useEligibility() {
+export function useEligibility(enabled = true) {
   return useQuery({
+    enabled,
     queryKey: ['eligibility'],
     queryFn: () => api.get<Eligibility>('/api/v1/practitioners/eligibility?scopeType=SELF'),
     retry: false,
@@ -116,15 +122,17 @@ export const THEIR_BLOCKERS = ['profile_incomplete', 'credential_missing', 'cred
  * weekly pattern the matcher has nothing to check a shift against, so the
  * outcome for the practitioner is identical — no offers.
  */
-export function usePractitionerSetup() {
-  const profile = useProfile();
-  const eligibility = useEligibility();
+export function usePractitionerSetup(enabled = true) {
+  const profile = useProfile(enabled);
+  const eligibility = useEligibility(enabled);
   const availability = useQuery({
+    enabled,
     queryKey: ['availability'],
     queryFn: () =>
       api.get<{ slots: unknown[]; blocks: unknown[] }>('/api/v1/availability?scopeType=SELF'),
   });
   const submissions = useQuery({
+    enabled,
     queryKey: ['my-credentials'],
     queryFn: async () =>
       (
@@ -181,11 +189,17 @@ export function usePractitionerSetup() {
   );
   const requiredIds = new Set(
     (reference.data?.credentialTypes ?? [])
-      .filter((type) => profile.data && type.requiredForCategoryIds.includes(profile.data.professionalCategoryId))
+      .filter(
+        (type) =>
+          profile.data && type.requiredForCategoryIds.includes(profile.data.professionalCategoryId),
+      )
       .map((type) => type.id),
   );
   const rejected = (submissions.data ?? []).filter(
-    (row) => row.status === 'REJECTED' && requiredIds.has(row.credentialTypeId) && !live.has(row.credentialTypeId),
+    (row) =>
+      row.status === 'REJECTED' &&
+      requiredIds.has(row.credentialTypeId) &&
+      !live.has(row.credentialTypeId),
   );
   const state: ApplicationState = eligible
     ? 'APPROVED'

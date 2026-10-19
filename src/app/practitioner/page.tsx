@@ -166,8 +166,11 @@ function Home({
 }) {
   const queryClient = useQueryClient();
   const reference = useReference();
-  const eligibility = useEligibility();
-  const setup = usePractitionerSetup();
+  // Once the overview has answered (it seeds the keys these read) or failed — never beside it.
+  // Asked at the same time, they were four more requests for what the one already carries.
+  const overviewDone = !bundle.isPending;
+  const eligibility = useEligibility(overviewDone);
+  const setup = usePractitionerSetup(overviewDone);
 
   // Only if the one request failed: the same two reads this page made before it existed.
   const invitationsFallback = useQuery({
