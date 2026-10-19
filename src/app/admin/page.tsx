@@ -1,10 +1,8 @@
 'use client';
 
 import { useMemo } from 'react';
-import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import {
-  ArrowRight,
   Building2,
   FileCheck2,
   FileClock,
@@ -22,6 +20,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import dynamic from 'next/dynamic';
 import { Skeleton } from '@/components/ui/skeleton';
 import { humanise } from '@/components/app/status-badge';
+import { NeedsBanner, StatTile } from '@/components/app/dashboard';
+import { ICON } from '@/components/app/icons';
 import { PageHeader } from '@/components/app/page-shell';
 import { actionLabel, formatAgo } from '@/components/app/format';
 
@@ -109,12 +109,25 @@ const TILES: Tile[] = [
   },
 ];
 
+/**
+ * Practitioners who have said "review me". It is the pilot's main work item and the one tile the
+ * summary request cannot carry (UXO-07), so it asks the directory for the first fifty and takes
+ * the count and the oldest from them. Fifty is more than a queue of this kind should ever hold;
+ * past it the tile says so rather than quietly stopping at fifty.
+ */
+const WAITING_LIMIT = 50;
+
 /** Past a working week, something has gone wrong with the queue, not the row. */
 const STALE_AFTER_DAYS = 5;
 
 const SEVERITY_ORDER = ['DEATH', 'SEVERE', 'MODERATE', 'MINOR', 'NEAR_MISS'];
 
 
+
+/** Whole days since an ISO time, 0 when there is none. */
+function daysSince(iso: string | null): number {
+  return iso ? (Date.now() - new Date(iso).getTime()) / 86_400_000 : 0;
+}
 
 /** "2026-10" as Oct 26. Parsed by hand: `new Date('2026-10')` is UTC and can land in the previous month. */
 function monthLabel(key: string): string {
@@ -147,6 +160,24 @@ export default function DashboardPage() {
   });
   const data = summary.data;
 
+  const canReviewPractitioners = session.permissions.includes('credential.review');
+  const waiting = useQuery({
+    queryKey: ['tile', 'practitioners-waiting'],
+    queryFn: () =>
+      api.get<{
+        practitioners?: { submittedForReviewAt: string | null }[];
+        nextCursor?: string | null;
+      }>(`/api/v1/practitioners?scopeType=PLATFORM&limit=${WAITING_LIMIT}&application=waiting`),
+    enabled: canReviewPractitioners,
+    retry: false,
+  });
+  const waitingRows = waiting.data?.practitioners ?? [];
+  const waitingOldest =
+    waitingRows
+      .map((row) => row.submittedForReviewAt)
+      .filter((value): value is string => Boolean(value))
+      .sort()[0] ?? null;
+
   const canSeeIncidents = session.permissions.includes('incident.manage');
   const canSeeAudit = session.permissions.includes('audit.read');
   const canSeeFacilityGrowth = session.permissions.includes('facility.read');
@@ -156,15 +187,19 @@ export default function DashboardPage() {
 
   const firstName = session.user.fullName.split(' ')[0];
   const queues = data?.queues ?? {};
-  const total = mine.reduce((sum, tile) => sum + (queues[tile.queue]?.count ?? 0), 0);
-  const settled = !summary.isPending;
+  const total =
+    mine.reduce((sum, tile) => sum + (queues[tile.queue]?.count ?? 0), 0) +
+    (canReviewPractitioners ? waitingRows.length : 0);
+  const settled = !summary.isPending && (!canReviewPractitioners || !waiting.isPending);
   // A queue that failed to load is not a queue that is empty, and "every queue
   // you can work is clear" is exactly the sentence somebody acts on by closing
   // the tab.
-  const failed = summary.isError;
+  const failed = summary.isError || (canReviewPractitioners && waiting.isError);
 
-  const oldestOverall = mine
-    .map((tile) => queues[tile.queue]?.oldest)
+  const oldestOverall = [
+    ...mine.map((tile) => queues[tile.queue]?.oldest),
+    canReviewPractitioners ? waitingOldest : null,
+  ]
     .filter((value): value is string => Boolean(value))
     .map((value) => new Date(value).getTime())
     .sort((a, b) => a - b)[0];
@@ -204,82 +239,50 @@ export default function DashboardPage() {
         <div className="space-y-6">
           {/* The summary answers "is today bad?" before any individual queue
               does, and the oldest item is the honest measure of that. */}
-          {settled && !failed && total > 0 ? (
-            <Card className="border-primary/25 bg-accent/40">
-              <CardContent className="flex flex-wrap items-baseline gap-x-2 gap-y-1 pt-6 text-sm">
-                <span className="tabular text-2xl font-semibold leading-none">{total}</span>
-                <span className="font-medium">
-                  {total === 1 ? 'thing is' : 'things are'} waiting on you
-                </span>
-                {oldestOverall ? (
-                  <span className="text-muted-foreground">
-                    · the oldest arrived {formatAgo(new Date(oldestOverall).toISOString())}
-                  </span>
-                ) : null}
-              </CardContent>
-            </Card>
-          ) : null}
+          <NeedsBanner
+            ready={settled && !failed}
+            count={total}
+            oldest={oldestOverall ? new Date(oldestOverall).toISOString() : null}
+          />
 
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+            {/* First, because it is first in the pilot's work: nothing else can happen to a
+                practitioner until somebody approves them. */}
+            {canReviewPractitioners ? (
+              <StatTile
+                href="/admin/practitioners"
+                icon={ICON.practitioner}
+                label="Practitioners to approve"
+                value={waitingRows.length}
+                note={
+                  waitingOldest
+                    ? `oldest arrived ${formatAgo(waitingOldest)}${waiting.data?.nextCursor ? ` · first ${WAITING_LIMIT} counted` : ''}`
+                    : undefined
+                }
+                stale={daysSince(waitingOldest) >= STALE_AFTER_DAYS}
+                hint="Submitted for review. They cannot be offered a shift until an officer approves them."
+                isPending={waiting.isPending}
+                isError={waiting.isError}
+              />
+            ) : null}
+
             {mine.map((tile) => {
-              const result = summary;
-              const count = queues[tile.queue]?.count ?? 0;
-              const oldest = queues[tile.queue]?.oldest ? new Date(queues[tile.queue]!.oldest!).getTime() : null;
-              const days = oldest ? (Date.now() - oldest) / 86_400_000 : 0;
-              const stale = days >= STALE_AFTER_DAYS;
-              const Icon = tile.icon;
+              const entry = queues[tile.queue];
+              const days = daysSince(entry?.oldest ?? null);
 
               return (
-                <Link key={tile.href} href={tile.href} className="group">
-                  <Card
-                    className={cn(
-                      'h-full transition-all hover:border-primary/50 hover:shadow-md',
-                      stale && 'border-warning/40',
-                    )}
-                  >
-                    <CardContent className="p-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <span className="flex size-7 items-center justify-center rounded-md bg-accent text-accent-foreground">
-                          <Icon className="size-3.5" />
-                        </span>
-                        <ArrowRight className="size-3.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
-                      </div>
-
-                      <p className="mt-3 text-sm font-medium">{tile.label}</p>
-
-                      {result.isPending ? (
-                        <Skeleton className="mt-2 h-7 w-10" />
-                      ) : result.isError ? (
-                        <p className="mt-2 text-sm text-destructive-text">Could not load</p>
-                      ) : (
-                        <>
-                          <p
-                            className={cn(
-                              'tabular mt-1 text-2xl font-semibold',
-                              count === 0 && 'text-muted-foreground',
-                            )}
-                          >
-                            {count}
-                          </p>
-                          {oldest ? (
-                            <p
-                              className={cn(
-                                'mt-1 text-xs',
-                                stale ? 'font-medium text-warning' : 'text-muted-foreground',
-                              )}
-                            >
-                              oldest arrived {formatAgo(new Date(oldest).toISOString())}
-                            </p>
-                          ) : null}
-                        </>
-                      )}
-
-                      <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
-                        {tile.hint}
-                      </p>
-                    </CardContent>
-                  </Card>
-                </Link>
+                <StatTile
+                  key={tile.href}
+                  href={tile.href}
+                  icon={tile.icon}
+                  label={tile.label}
+                  value={entry?.count ?? 0}
+                  note={entry?.oldest ? `oldest arrived ${formatAgo(entry.oldest)}` : undefined}
+                  stale={days >= STALE_AFTER_DAYS}
+                  hint={tile.hint}
+                  isPending={summary.isPending}
+                  isError={summary.isError}
+                />
               );
             })}
           </div>

@@ -8,7 +8,6 @@ import {
   CircleAlert,
   CircleCheck,
   Clock,
-  Inbox,
   TriangleAlert,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -22,13 +21,15 @@ import {
 import { useSession } from '@/lib/ui/session';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { buttonVariants } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { StatusBadge, humanise } from '@/components/app/status-badge';
+import { humanise } from '@/components/app/status-badge';
 import { ReturnedNotice } from '@/app/practitioner/profile/returned-notice';
 import { PageHeader } from '@/components/app/page-shell';
 import { MyInvitations } from '@/components/app/my-invitations';
-import { formatWhen } from '@/components/app/format';
+import { formatNaira, formatWhen, formatWhenShort } from '@/components/app/format';
+import { StatTile } from '@/components/app/dashboard';
+import { ICON } from '@/components/app/icons';
 
 interface Assignment {
   id: string;
@@ -148,6 +149,14 @@ function Overview() {
       );
       return body.assignments ?? [];
     },
+    retry: false,
+  });
+
+  // The same key and URL as the earnings page, so opening it afterwards is already cached.
+  const earnings = useQuery({
+    queryKey: ['my-earnings'],
+    queryFn: () =>
+      api.get<{ owedKobo: number }>('/api/v1/payouts?scopeType=SELF'),
     retry: false,
   });
 
@@ -282,57 +291,39 @@ function Overview() {
           )}
         </div>
 
-        <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-1">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm">Offers waiting</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {invitations.isPending ? (
-                <Skeleton className="h-9 w-12" />
-              ) : invitations.isError ? (
-                <p className="text-sm text-destructive-text">Could not load</p>
-              ) : (
-                <>
-                  <p className="tabular text-3xl font-semibold">{open.length}</p>
-                  {open.length > 0 ? (
-                    <Link
-                      href="/practitioner/offers"
-                      className={cn(buttonVariants({ size: 'sm' }), 'mt-3')}
-                    >
-                      <Inbox />
-                      Answer them
-                    </Link>
-                  ) : (
-                    <p className="mt-2 text-xs text-muted-foreground">Nothing to answer.</p>
-                  )}
-                </>
-              )}
-            </CardContent>
-          </Card>
+        <div className="grid gap-4 sm:grid-cols-3 xl:grid-cols-1">
+          <StatTile
+            href="/practitioner/offers"
+            icon={ICON.offer}
+            label="Offers waiting"
+            value={open.length}
+            hint={open.length > 0 ? 'Answer them while they are open.' : 'Nothing to answer.'}
+            stale={open.length > 0}
+            isPending={invitations.isPending}
+            isError={invitations.isError}
+          />
 
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm">Next shift</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {assignments.isPending ? (
-                <Skeleton className="h-9 w-40" />
-              ) : assignments.isError ? (
-                <p className="text-sm text-destructive-text">Could not load</p>
-              ) : next ? (
-                <>
-                  <p className="font-medium">{formatWhen(next.startsAt)}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    until {formatWhen(next.endsAt)}
-                  </p>
-                  <StatusBadge status={next.status} className="mt-3" />
-                </>
-              ) : (
-                <p className="text-sm text-muted-foreground">Nothing confirmed.</p>
-              )}
-            </CardContent>
-          </Card>
+          <StatTile
+            href="/practitioner/shifts"
+            icon={ICON.shift}
+            label="Next shift"
+            value={next ? formatWhenShort(next.startsAt) : 'Nothing confirmed'}
+            note={next ? `until ${formatWhenShort(next.endsAt)}` : undefined}
+            isPending={assignments.isPending}
+            isError={assignments.isError}
+          />
+
+          {/* The question after "when am I working?" is "when am I paid?" (UXP-10). */}
+          <StatTile
+            href="/practitioner/earnings"
+            icon={ICON.earnings}
+            label="Owed to you"
+            value={formatNaira(earnings.data?.owedKobo ?? 0)}
+            display="figure"
+            hint="Approved and invoiced, not yet paid out."
+            isPending={earnings.isPending}
+            isError={earnings.isError}
+          />
         </div>
       </div>
     </>

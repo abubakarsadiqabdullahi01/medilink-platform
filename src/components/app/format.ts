@@ -18,6 +18,18 @@ export function formatWhen(value: string | Date | null | undefined): string {
   });
 }
 
+/** "18 Oct, 10:00": a moment without its year, for a tile that has to be read at a glance. */
+export function formatWhenShort(value: string | Date | null | undefined): string {
+  if (!value) return '—';
+  return new Date(value).toLocaleString('en-NG', {
+    timeZone: 'Africa/Lagos',
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 export function formatDate(value: string | Date | null | undefined): string {
   if (!value) return '—';
   return new Date(value).toLocaleDateString('en-NG', {
