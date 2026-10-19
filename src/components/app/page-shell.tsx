@@ -45,7 +45,8 @@ export function PageHeader({
   /** A status or a reference shown beside the title: a badge, a record number. */
   meta?: ReactNode;
 }) {
-  const parent = breadcrumbs && breadcrumbs.length > 1 ? breadcrumbs[breadcrumbs.length - 2] : undefined;
+  const parent =
+    breadcrumbs && breadcrumbs.length > 1 ? breadcrumbs[breadcrumbs.length - 2] : undefined;
 
   return (
     <header className="mb-6">
@@ -84,7 +85,9 @@ export function PageHeader({
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <h1 className="text-balance text-2xl font-semibold leading-tight tracking-tight">{title}</h1>
+            <h1 className="text-balance text-2xl font-semibold leading-tight tracking-tight">
+              {title}
+            </h1>
             {meta}
           </div>
           {description ? (
@@ -132,7 +135,9 @@ export function EmptyState({
       <div>
         <p className="font-medium">{title}</p>
         {description ? (
-          <p className="mx-auto mt-1 max-w-sm text-sm leading-relaxed text-muted-foreground">{description}</p>
+          <p className="mx-auto mt-1 max-w-sm text-sm leading-relaxed text-muted-foreground">
+            {description}
+          </p>
         ) : null}
       </div>
       {action}
@@ -140,10 +145,16 @@ export function EmptyState({
   );
 }
 
-/** Cards the shape of the cards that are coming, not a spinner. */
-export function QueueSkeleton({ rows = 3 }: { rows?: number }) {
+/**
+ * Cards the shape of the cards that are coming, not a spinner. The shapes are for the eye; the
+ * status line is for a screen reader, which otherwise meets a page of hidden boxes.
+ */
+export function QueueSkeleton({ rows = 3, label = 'Loading' }: { rows?: number; label?: string }) {
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" aria-busy="true">
+      <p role="status" className="sr-only">
+        {label}…
+      </p>
       {Array.from({ length: rows }).map((_, index) => (
         <Card key={index} className="p-5">
           <div className="flex items-start justify-between gap-4">
@@ -173,7 +184,9 @@ export function Detail({
   return (
     <div className={cn('min-w-0', className)}>
       <dt className="text-xs uppercase tracking-wide text-muted-foreground">{label}</dt>
-      <dd className="mt-0.5 truncate text-sm">{children}</dd>
+      {/* Wraps rather than truncates: an email, a facility name or a reference cut off at an
+          ellipsis is a value nobody can read, and a hover title is no use on a phone. */}
+      <dd className="mt-0.5 text-sm [overflow-wrap:anywhere]">{children}</dd>
     </div>
   );
 }
