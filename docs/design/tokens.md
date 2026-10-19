@@ -20,3 +20,14 @@ Where each decision lives, so a screen never invents its own.
 
 Sizes in the controls: 44 px high (`h-11`) for anything tapped. Focus ring 2 px with offset. Text size scales with the
 reader's choice (A / A+ / A++) because everything is in `rem`; do not size text in `px`.
+
+## Brand and imagery (Phase 3)
+
+| What | Where | Use |
+| --- | --- | --- |
+| Logo | `src/components/app/logo.tsx` (`Logo`, `LogoMark`); files in `public/brand/` | `<Logo />` for a link home; `tone="reverse"` on a dark surface. The name is live text; the outlined wordmark in `public/brand` is for places that cannot run this. |
+| Icons and favicon | `src/app/icon.svg`, `src/app/favicon.ico`, `public/icons/*.png` | Rendered from the mark. Change the mark, then redraw all of them. |
+| Share card | `public/og.jpg`, `scripts/make-share-card.mjs` | Redraw when the hero photograph, words or colours change. |
+| Optional pictures | `docs/design/images.md`, `src/lib/ui/images.ts`, `SiteImage`, `Illustration` | A missing file is never a hole: a placeholder or the old icon is shown, and a file dropped in appears after a rebuild. |
+| Reveal on scroll | `src/components/app/reveal.tsx`, `.reveal` in `globals.css` | Landing page only. Visible by default, 8 px, once, never with reduced motion. |
+
