@@ -530,19 +530,22 @@ export default function FacilityProfilePage() {
         title="Send this facility back for verification?"
         object={`${record.name} · changing the ${changedLabels.join(', ')}`}
         consequence="The facility goes back to Pending. It cannot publish shifts until compliance has verified it again."
-        reversible={false}
+        reversible={{
+          tone: 'final',
+          label: 'You cannot take this back.',
+          detail: 'Only compliance can verify the facility again.',
+        }}
         confirmLabel="Save and send back"
         cancelLabel="Keep it verified"
         destructive
         loading={save.isPending}
+        error={
+          save.isError
+            ? `That did not save. ${errorMessage(save.error)} What you changed is still here.`
+            : null
+        }
         onConfirm={() => save.mutate(false)}
-      >
-        {save.isError ? (
-          <p role="alert" className="text-sm font-medium text-destructive-text">
-            That did not save. {errorMessage(save.error)} What you changed is still here.
-          </p>
-        ) : null}
-      </ConfirmDialog>
+      />
 
       <ConfirmDialog
         open={confirming === 'resubmit'}
@@ -550,18 +553,22 @@ export default function FacilityProfilePage() {
         title="Send this to compliance again?"
         object={`${record.name} · refused, corrected, sent for review`}
         consequence="It goes back to compliance as it is now, and the note they gave is cleared. They review what is on file when they get to it."
-        reversible={false}
+        reversible={{
+          tone: 'open',
+          label: 'You cannot withdraw it once it is sent.',
+          detail:
+            'You can keep editing while it waits; compliance reviews what is on file when they get to it.',
+        }}
         confirmLabel="Send for review"
         cancelLabel="Keep editing"
         loading={save.isPending}
+        error={
+          save.isError
+            ? `That did not send. ${errorMessage(save.error)} What you changed is still here.`
+            : null
+        }
         onConfirm={() => save.mutate(true)}
-      >
-        {save.isError ? (
-          <p role="alert" className="text-sm font-medium text-destructive-text">
-            That did not send. {errorMessage(save.error)} What you changed is still here.
-          </p>
-        ) : null}
-      </ConfirmDialog>
+      />
     </>
   );
 }
