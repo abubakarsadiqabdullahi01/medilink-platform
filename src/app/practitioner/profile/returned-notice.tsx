@@ -1,5 +1,6 @@
 'use client';
 
+import { useId } from 'react';
 import Link from 'next/link';
 import { ArrowRight, OctagonAlert } from 'lucide-react';
 import { type CredentialSubmission } from '@/lib/ui/practitioner';
@@ -26,19 +27,29 @@ export function ReturnedNotice({
   className?: string;
 }) {
   const reference = useReference();
+  const headingId = useId();
   if (rejected.length === 0) return null;
 
   return (
-    <Card className={cn('border-destructive/40 bg-destructive/5', className)}>
+    <Card
+      role="region"
+      aria-labelledby={headingId}
+      className={cn('border-destructive/40 bg-destructive/5', className)}
+    >
       <CardContent className="space-y-3 pt-6">
         <div className="flex items-start gap-3">
-          <OctagonAlert className="mt-0.5 size-5 shrink-0 text-destructive-text" aria-hidden="true" />
+          <OctagonAlert
+            className="mt-0.5 size-5 shrink-0 text-destructive-text"
+            aria-hidden="true"
+          />
           <div className="min-w-0">
-            <p className="font-medium">
-              {rejected.length === 1 ? 'A document was refused' : `${rejected.length} documents were refused`}
+            <h2 id={headingId} className="text-base font-semibold leading-snug">
+              {rejected.length === 1
+                ? 'A document was refused'
+                : `${rejected.length} documents were refused`}
               : your application was sent back
-            </p>
-            <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+            </h2>
+            <p className="mt-1 text-base leading-relaxed text-muted-foreground">
               An officer cannot approve you on a document they refused. Submit a corrected one, then
               send your application for approval again.
             </p>
@@ -47,12 +58,18 @@ export function ReturnedNotice({
 
         <ul className="space-y-2">
           {rejected.map((row) => (
-            <li key={row.id} className="rounded-md border border-destructive/30 bg-background p-3 text-sm">
-              <p className="font-medium">{nameOf(reference.data?.credentialTypes, row.credentialTypeId)}</p>
+            <li
+              key={row.id}
+              className="rounded-md border border-destructive/30 bg-background p-3 text-base"
+            >
+              <p className="font-medium">
+                {nameOf(reference.data?.credentialTypes, row.credentialTypeId)}
+              </p>
               <p className="mt-0.5 text-muted-foreground">
                 {row.reviewNotes ? (
                   <>
-                    <strong className="font-medium text-foreground">The reviewer said:</strong> {row.reviewNotes}
+                    <strong className="font-medium text-foreground">The reviewer said:</strong>{' '}
+                    {row.reviewNotes}
                   </>
                 ) : (
                   'The reviewer gave no note. Check the document is clear, complete and in date.'
@@ -62,7 +79,10 @@ export function ReturnedNotice({
           ))}
         </ul>
 
-        <Link href="/practitioner/profile?tab=credentials" className={buttonVariants()}>
+        <Link
+          href="/practitioner/profile?tab=credentials"
+          className={cn(buttonVariants(), 'w-full sm:w-auto')}
+        >
           Fix and resubmit
           <ArrowRight />
         </Link>

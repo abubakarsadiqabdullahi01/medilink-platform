@@ -158,7 +158,7 @@ test('a type already submitted cannot be picked again', async ({ page }) => {
   await signIn(page, world().newcomer);
   await page.goto('/practitioner/profile?tab=credentials');
 
-  await page.getByText('Type', { exact: true }).locator('xpath=following::button[@role="combobox"][1]').click();
+  await page.getByRole('combobox', { name: /^Type/ }).click();
   // Greyed out and saying why, rather than selectable and refused on submit.
   const option = page.getByRole('option', { name: /National Identification Number/ });
   await expect(option).toHaveAttribute('aria-disabled', 'true');
@@ -199,14 +199,13 @@ test('the officer finds them under waiting for approval, and not under not submi
   );
   await page.getByLabel('Search by name or number').fill(world().newcomer.fullName);
   await page.getByRole('button', { name: 'Search' }).click();
-  await expect(
-    page.getByRole('button').filter({ hasText: world().newcomer.fullName }),
-  ).toContainText(/Submitted/);
+  // One row per practitioner, saying when they asked to be reviewed.
+  await expect(page.getByRole('row').filter({ hasText: world().newcomer.fullName })).toContainText(
+    /Submitted/,
+  );
 
   await page.getByRole('tab', { name: 'Not submitted yet' }).click();
-  await expect(
-    page.getByRole('button').filter({ hasText: world().newcomer.fullName }),
-  ).toHaveCount(0);
+  await expect(page.getByRole('row').filter({ hasText: world().newcomer.fullName })).toHaveCount(0);
 });
 
 test('an administrator confirms the NIN and licence from what was sent, and asks for more on the indemnity', async ({
@@ -217,11 +216,15 @@ test('an administrator confirms the NIN and licence from what was sent, and asks
   await page.getByLabel('Search by practitioner').fill(world().newcomer.fullName);
   await page.getByRole('button', { name: 'Search' }).click();
 
-  const indemnity = card(page, world().newcomer.fullName).filter({
-    hasText: 'Professional Indemnity Cover',
-  });
+  // Each row has one next step, "Review", which opens the submission beside the queue.
+  const name = world().newcomer.fullName;
+  await page
+    .getByRole('button', { name: `Review Professional Indemnity Cover for ${name}` })
+    .click();
+  const panel = page.getByRole('dialog', { name: 'Review this submission' });
+
   // The reviewer looks at the document itself, fetched on a short-lived URL.
-  await indemnity.getByRole('button', { name: 'View document' }).click();
+  await panel.getByRole('button', { name: 'View document' }).click();
   const viewer = page.getByRole('dialog', { name: 'Professional Indemnity Cover' });
   await expect(viewer).toBeVisible();
   // The document itself, not just a dialog with a title: this used to open empty
@@ -234,18 +237,26 @@ test('an administrator confirms the NIN and licence from what was sent, and asks
 
   // Asking for more needs a reason, because the reason is the only thing
   // that tells the practitioner what to fix.
-  await expect(indemnity.getByRole('button', { name: 'Ask for more' })).toBeDisabled();
-  await indemnity
+  await expect(panel.getByRole('button', { name: /^Ask for more/ })).toBeDisabled();
+  await panel
     .getByLabel(/^Reason/)
     .fill('The insurer and the policy period are not legible. Please upload the schedule page.');
-  await indemnity.getByRole('button', { name: 'Ask for more' }).click();
+  await panel.getByRole('button', { name: /^Ask for more/ }).click();
+
+  // And it asks before it acts, saying what will happen and that it is not final.
+  const ask = page.getByRole('dialog', { name: 'Ask for more information' });
+  await expect(ask.getByText('Not final.')).toBeVisible();
+  await ask.getByRole('button', { name: 'Ask for more information' }).click();
   await expectToast(page, 'More information requested');
 
   // A NIN is not approved in place: approving it has to record the identity,
   // so it is confirmed on the practitioner's page, beside the photograph.
-  const nin = card(page, world().newcomer.fullName).filter({ hasText: 'National Identification Number' });
-  await expect(nin.getByRole('button', { name: 'Verify' })).toHaveCount(0);
-  await nin.getByRole('link', { name: 'Review and confirm' }).click();
+  await page
+    .getByRole('button', { name: `Review National Identification Number for ${name}` })
+    .click();
+  const ninPanel = page.getByRole('dialog', { name: 'Review this submission' });
+  await expect(ninPanel.getByRole('button', { name: /^Verify/ })).toHaveCount(0);
+  await ninPanel.getByRole('link', { name: /^Review and confirm/ }).click();
   await expect(page).toHaveURL(/\/admin\/practitioners\?user=/);
 
   const identity = card(page, 'Identity —');
@@ -260,6 +271,11 @@ test('an administrator confirms the NIN and licence from what was sent, and asks
   await expect(identity.getByRole('button', { name: 'Confirm identity' })).toBeDisabled();
   await identity.getByRole('button', { name: 'Matches the account' }).click();
   await identity.getByRole('button', { name: 'Confirm identity' }).click();
+  // Recording an identity keeps only the last four digits, so it asks first.
+  await page
+    .getByRole('dialog', { name: 'Record this identity' })
+    .getByRole('button', { name: 'Confirm identity' })
+    .click();
   await expectToast(page, 'Identity confirmed');
 
   const registration = card(page, 'Registration —');
@@ -269,6 +285,10 @@ test('an administrator confirms the NIN and licence from what was sent, and asks
   await choose(registration, 'What the licence shows', 'Active');
   await registration.getByLabel(/^Expiry date on the licence/).fill('2027-06-30');
   await registration.getByRole('button', { name: 'Confirm registration' }).click();
+  await page
+    .getByRole('dialog', { name: 'Record this registration' })
+    .getByRole('button', { name: 'Confirm registration' })
+    .click();
   await expectToast(page, 'Registration confirmed');
 });
 
@@ -276,7 +296,10 @@ test('the practitioner sees the verification and reads the reviewer’s note', a
   await signIn(page, world().newcomer);
   await page.goto('/practitioner/profile?tab=credentials');
 
-  await expect(card(page, 'National Identification Number').getByText(/verified/i)).toBeVisible();
+  // The badge: the card says the word again in its next-step line and in its history.
+  await expect(
+    card(page, 'National Identification Number').getByText('Verified', { exact: true }).first(),
+  ).toBeVisible();
   // The number has done its job: only the tail is kept, even from its owner.
   await expect(card(page, 'National Identification Number').getByText('*******0022')).toBeVisible();
   await expect(

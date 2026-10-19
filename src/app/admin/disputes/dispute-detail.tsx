@@ -9,14 +9,15 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Label } from '@/components/ui/label';
-import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
+import { ConfirmDialog } from '@/components/app/confirm-dialog';
+import { Field } from '@/components/app/field';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
-import { Detail, DetailGrid, PageHeader } from '@/components/app/page-shell';
+import { PageHeader } from '@/components/app/page-shell';
 import { DocumentDialog } from '@/components/app/document-dialog';
-import { ErrorState } from '@/components/app/states';
+import { ErrorState, ListSkeleton } from '@/components/app/states';
+import { Timeline } from '@/components/app/timeline';
 import { actionLabel, formatAgo, formatWhen } from '@/components/app/format';
 
 /**
@@ -76,7 +77,8 @@ const OUTCOMES = [
     value: 'UPHELD' as const,
     label: 'Uphold',
     variant: 'success' as const,
-    consequence: 'Agrees with whoever raised it. The timesheet reopens so the figures can be put right.',
+    consequence:
+      'Agrees with whoever raised it. The timesheet goes back to the facility to be decided again, so the figures can be put right.',
   },
   {
     value: 'DISMISSED' as const,
@@ -86,9 +88,20 @@ const OUTCOMES = [
   },
 ];
 
+/** A fact with its label, wrapping rather than cutting a name short. */
+function Fact({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-sm text-muted-foreground">{label}</dt>
+      <dd className="text-base [overflow-wrap:anywhere]">{children}</dd>
+    </div>
+  );
+}
+
 export function DisputeDetail({ dispute, onBack }: { dispute: Dispute; onBack: () => void }) {
   const queryClient = useQueryClient();
   const [note, setNote] = useState('');
+  const [deciding, setDeciding] = useState<'UPHELD' | 'DISMISSED' | null>(null);
   /**
    * The status as this screen last changed it.
    *
@@ -148,6 +161,7 @@ export function DisputeDetail({ dispute, onBack }: { dispute: Dispute; onBack: (
       }),
     onSuccess: (_result, outcome) => {
       toast.success(outcome === 'UPHELD' ? 'Upheld' : 'Dismissed');
+      setDeciding(null);
       settled();
       onBack();
     },
@@ -200,17 +214,15 @@ export function DisputeDetail({ dispute, onBack }: { dispute: Dispute; onBack: (
                 <CardTitle className="text-sm">What is being disputed</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <DetailGrid>
-                  <Detail label="Practitioner">{dispute.practitionerName}</Detail>
-                  <Detail label="Facility">{dispute.facilityName}</Detail>
-                  <Detail label="Shift">{formatWhen(dispute.shiftStartsAt)}</Detail>
-                  <Detail label="Opened">{formatWhen(dispute.createdAt)}</Detail>
-                </DetailGrid>
+                <dl className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <Fact label="Practitioner">{dispute.practitionerName}</Fact>
+                  <Fact label="Facility">{dispute.facilityName}</Fact>
+                  <Fact label="Shift">{formatWhen(dispute.shiftStartsAt)}</Fact>
+                  <Fact label="Opened">{formatWhen(dispute.createdAt)}</Fact>
+                </dl>
 
-                <div className="rounded-md bg-muted px-3 py-2 text-sm">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    In their words
-                  </p>
+                <div className="rounded-md bg-muted px-3 py-2">
+                  <p className="text-sm font-medium text-muted-foreground">In their words</p>
                   <p className="mt-1 leading-relaxed">{dispute.reason}</p>
                 </div>
               </CardContent>
@@ -222,19 +234,15 @@ export function DisputeDetail({ dispute, onBack }: { dispute: Dispute; onBack: (
                   <CardTitle className="text-sm">How it was decided</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  <DetailGrid>
-                    <Detail label="Outcome">
-                      {dispute.outcome ? humanise(dispute.outcome) : '—'}
-                    </Detail>
-                    <Detail label="Decided">
+                  <dl className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
+                    <Fact label="Outcome">{dispute.outcome ? humanise(dispute.outcome) : '—'}</Fact>
+                    <Fact label="Decided">
                       {dispute.resolvedAt ? formatWhen(dispute.resolvedAt) : '—'}
-                    </Detail>
-                  </DetailGrid>
+                    </Fact>
+                  </dl>
                   {dispute.resolutionNotes ? (
-                    <div className="rounded-md bg-muted px-3 py-2 text-sm">
-                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                        What was found
-                      </p>
+                    <div className="rounded-md bg-muted px-3 py-2">
+                      <p className="text-sm font-medium text-muted-foreground">What was found</p>
                       <p className="mt-1">{dispute.resolutionNotes}</p>
                     </div>
                   ) : null}
@@ -260,12 +268,11 @@ export function DisputeDetail({ dispute, onBack }: { dispute: Dispute; onBack: (
                   {status === 'OPEN' ? (
                     <div className="flex flex-wrap items-center gap-3 rounded-lg border p-3">
                       <p className="min-w-0 flex-1 text-sm text-muted-foreground">
-                        Nobody has picked this up yet. Marking it under review tells the other side
-                        somebody is looking.
+                        Nobody has picked this up yet. Marking it under review tells both sides
+                        somebody is looking; they are sent the shift, not what was argued.
                       </p>
                       <Button
                         variant="outline"
-                        size="sm"
                         loading={review.isPending}
                         onClick={() => review.mutate()}
                       >
@@ -274,44 +281,39 @@ export function DisputeDetail({ dispute, onBack }: { dispute: Dispute; onBack: (
                     </div>
                   ) : null}
 
-                  <div className="space-y-1.5">
-                    <Label htmlFor="dispute-note">
-                      Your finding{' '}
-                      <span className="font-normal text-muted-foreground">
-                        — required, and both sides read it
-                      </span>
-                    </Label>
+                  <Field
+                    label="Your finding"
+                    required
+                    hint={`Both sides read it. At least ${MIN_NOTE} characters.`}
+                    error={
+                      note.trim().length > 0 && note.trim().length < MIN_NOTE
+                        ? `A little more — ${MIN_NOTE - note.trim().length} characters to go.`
+                        : undefined
+                    }
+                  >
                     <Textarea
-                      id="dispute-note"
                       rows={4}
                       placeholder="What the evidence showed, and why it decides the case."
                       value={note}
                       onChange={(event) => setNote(event.target.value)}
                     />
-                    {note.trim().length > 0 && note.trim().length < MIN_NOTE ? (
-                      <p className="text-xs text-muted-foreground">
-                        A little more — {MIN_NOTE - note.trim().length} characters to go.
-                      </p>
-                    ) : null}
-                  </div>
+                  </Field>
 
                   <div className="space-y-2">
                     {OUTCOMES.map((option) => (
                       <div
                         key={option.value}
-                        className="flex flex-wrap items-center gap-3 rounded-lg border p-3"
+                        className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center"
                       >
-                        <span className="min-w-0 flex-1 text-sm text-muted-foreground">
+                        <span className="min-w-0 flex-1 text-base text-muted-foreground">
                           {option.consequence}
                         </span>
                         <Button
                           variant={option.variant}
-                          size="sm"
-                          disabled={note.trim().length < MIN_NOTE || resolve.isPending}
-                          loading={resolve.isPending && resolve.variables === option.value}
-                          onClick={() => resolve.mutate(option.value)}
+                          disabled={note.trim().length < MIN_NOTE}
+                          onClick={() => setDeciding(option.value)}
                         >
-                          {option.label}
+                          {option.label}…
                         </Button>
                       </div>
                     ))}
@@ -331,7 +333,7 @@ export function DisputeDetail({ dispute, onBack }: { dispute: Dispute; onBack: (
               </CardHeader>
               <CardContent>
                 {evidence.isPending ? (
-                  <Skeleton className="h-32 w-full" />
+                  <ListSkeleton rows={2} label="Loading the evidence" />
                 ) : evidence.isError ? (
                   <ErrorState
                     error={evidence.error}
@@ -340,7 +342,7 @@ export function DisputeDetail({ dispute, onBack }: { dispute: Dispute; onBack: (
                     compact
                   />
                 ) : evidence.data.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
+                  <p className="text-base text-muted-foreground">
                     Neither side has attached anything. The case has to be decided on the written
                     reason alone — say so in your finding.
                   </p>
@@ -415,7 +417,7 @@ export function DisputeDetail({ dispute, onBack }: { dispute: Dispute; onBack: (
               </CardHeader>
               <CardContent>
                 {history.isPending ? (
-                  <Skeleton className="h-32 w-full" />
+                  <ListSkeleton rows={2} label="Loading the history" />
                 ) : history.isError ? (
                   <ErrorState
                     error={history.error}
@@ -424,27 +426,69 @@ export function DisputeDetail({ dispute, onBack }: { dispute: Dispute; onBack: (
                     compact
                   />
                 ) : history.data.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">Nothing recorded yet.</p>
+                  <p className="text-base text-muted-foreground">Nothing recorded yet.</p>
                 ) : (
-                  <ol className="space-y-3">
-                    {history.data.map((entry) => (
-                      <li key={entry.id} className="border-l-2 border-border pl-4">
-                        <p className="text-sm font-medium">
-                          {actionLabel(entry.action)}
-                        </p>
-                        <p className="mt-0.5 text-xs text-muted-foreground">
-                          {formatWhen(entry.createdAt)} · {formatAgo(entry.createdAt)}
-                        </p>
-                        {entry.reason ? <p className="mt-1 text-sm">{entry.reason}</p> : null}
-                      </li>
-                    ))}
-                  </ol>
+                  <Timeline
+                    label="History of this dispute"
+                    steps={history.data.map((entry) => ({
+                      id: entry.id,
+                      state: 'done' as const,
+                      title: actionLabel(entry.action),
+                      when: `${formatWhen(entry.createdAt)} · ${formatAgo(entry.createdAt)}`,
+                      detail: entry.reason ?? undefined,
+                    }))}
+                  />
                 )}
               </CardContent>
             </Card>
           </TabsContent>
         </Tabs>
       </div>
+
+      <ConfirmDialog
+        open={deciding !== null}
+        onOpenChange={(next) => !next && setDeciding(null)}
+        title={deciding === 'UPHELD' ? 'Uphold this dispute' : 'Dismiss this dispute'}
+        object={
+          <>
+            {dispute.practitionerName} · {dispute.facilityName}
+            <span className="block font-normal text-muted-foreground">
+              Shift {formatWhen(dispute.shiftStartsAt)} · raised by the{' '}
+              {dispute.raisedParty.toLowerCase()}
+            </span>
+          </>
+        }
+        consequence={
+          deciding === 'UPHELD' ? (
+            <>
+              You agree with the {dispute.raisedParty.toLowerCase()}. The timesheet goes back to the
+              facility to be decided again, and the facility corrects it through the ordinary route,
+              with its own revision and reason. Nothing is rewritten for them. Both sides are told
+              the outcome and can read your finding.
+            </>
+          ) : (
+            <>
+              The shift stands as recorded: the timesheet returns to the state it was in before the
+              dispute was opened, and nothing about the payment changes. Both sides are told the
+              outcome and can read your finding.
+            </>
+          )
+        }
+        reversible={false}
+        confirmLabel={deciding === 'UPHELD' ? 'Uphold dispute' : 'Dismiss dispute'}
+        cancelLabel="Not yet"
+        loading={resolve.isPending}
+        onConfirm={() => deciding && resolve.mutate(deciding)}
+      >
+        <figure className="rounded-md border bg-muted/40 px-3 py-2">
+          <figcaption className="text-sm font-medium text-muted-foreground">
+            Your finding, as both sides will read it
+          </figcaption>
+          <blockquote className="mt-1 whitespace-pre-wrap text-base [overflow-wrap:anywhere]">
+            {note.trim()}
+          </blockquote>
+        </figure>
+      </ConfirmDialog>
     </>
   );
 }

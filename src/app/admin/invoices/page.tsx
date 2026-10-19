@@ -1,16 +1,15 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { FileText, ReceiptText, Send, TriangleAlert, Wallet } from 'lucide-react';
+import { CircleCheck, FileText, ReceiptText, TriangleAlert } from 'lucide-react';
 import { api, errorMessage } from '@/lib/ui/api';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Separator } from '@/components/ui/separator';
 import {
   Table,
   TableBody,
@@ -19,18 +18,14 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Combobox } from '@/components/app/combobox';
+import { ConfirmDialog } from '@/components/app/confirm-dialog';
+import { Field } from '@/components/app/field';
+import { Money } from '@/components/app/money';
+import { EmptyState, PageHeader } from '@/components/app/page-shell';
+import { ErrorState, ListSkeleton } from '@/components/app/states';
 import { StatusBadge } from '@/components/app/status-badge';
-import { EmptyState, PageHeader, QueueSkeleton } from '@/components/app/page-shell';
 import { useStepUp } from '@/components/app/step-up';
 import { formatDate, formatMinutes, formatNaira, parseNairaToKobo } from '@/components/app/format';
 
@@ -78,6 +73,8 @@ function monthBounds(offset = 0) {
   return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) };
 }
 
+const shifts = (count: number) => `${count} shift${count === 1 ? '' : 's'}`;
+
 /**
  * Raising, issuing and settling invoices.
  *
@@ -85,6 +82,11 @@ function monthBounds(offset = 0) {
  * anybody is asked for money; issuing is the asking; recording a payment is
  * somebody confirming it arrived. Collapsing them into one button would mean
  * an invoice nobody looked at.
+ *
+ * Each of the three that cannot be taken back goes through a confirmation that names the invoice,
+ * the amount and the facility, says what happens next and who is told, and says that it cannot be
+ * undone — because in the code, it cannot. Raising a draft is not one of them: a draft is the
+ * working copy, and voiding it is the way back.
  */
 export default function InvoicesPage() {
   const queryClient = useQueryClient();
@@ -98,6 +100,12 @@ export default function InvoicesPage() {
         '/api/v1/facilities?scopeType=PLATFORM&status=VERIFIED',
       ),
   });
+  const facilityName = useMemo(
+    () =>
+      (facilities.data?.facilities ?? []).find((row) => row.id === facilityId)?.name ??
+      'This facility',
+    [facilities.data, facilityId],
+  );
 
   const invoices = useInfiniteQuery({
     queryKey: ['invoices', facilityId],
@@ -118,6 +126,7 @@ export default function InvoicesPage() {
 
   const stepUp = useStepUp('Issuing, and recording payment of, an invoice moves money.');
 
+  const [issuing, setIssuing] = useState<Invoice | null>(null);
   const [voiding, setVoiding] = useState<Invoice | null>(null);
   const [voidReason, setVoidReason] = useState('');
 
@@ -140,7 +149,7 @@ export default function InvoicesPage() {
       amount: '',
       // Today in Lagos, which is when somebody is recording a transfer they can see.
       paidOn: new Date(Date.now() + 3600_000).toISOString().slice(0, 10),
-      payer: (facilities.data?.facilities ?? []).find((row) => row.id === invoice.facilityId)?.name ?? '',
+      payer: facilityName === 'This facility' ? '' : facilityName,
     });
   }
 
@@ -166,6 +175,7 @@ export default function InvoicesPage() {
       api.post(`/api/v1/invoices/${invoice.id}/issue`, { facilityId: invoice.facilityId }),
     onSuccess: () => {
       toast.success('Issued');
+      setIssuing(null);
       refresh();
     },
     onError: (error, invoice) => {
@@ -216,10 +226,41 @@ export default function InvoicesPage() {
     },
   });
 
+  const describe = (invoice: Invoice) =>
+    `${invoice.number} · ${facilityName} · ${formatDate(invoice.periodStart)} – ${formatDate(invoice.periodEnd)}`;
+
   return (
     <>
       {stepUp.dialog}
-      <Dialog
+
+      <ConfirmDialog
+        open={issuing !== null}
+        onOpenChange={(open) => !open && setIssuing(null)}
+        title="Issue this invoice"
+        object={
+          issuing ? (
+            <>
+              {describe(issuing)} · <Money kobo={issuing.grossKobo} strong /> ·{' '}
+              {shifts(issuing.lines.length)}
+            </>
+          ) : (
+            ''
+          )
+        }
+        consequence={
+          <>
+            It becomes a bill the facility is asked to pay. People at {facilityName} who can read
+            invoices are sent a message with the invoice number and the amount. Check the lines
+            first: once it is issued it can no longer be voided here.
+          </>
+        }
+        reversible={false}
+        confirmLabel="Issue invoice"
+        loading={issue.isPending}
+        onConfirm={() => issuing && issue.mutate(issuing)}
+      />
+
+      <ConfirmDialog
         open={voiding !== null}
         onOpenChange={(open) => {
           if (!open) {
@@ -227,121 +268,134 @@ export default function InvoicesPage() {
             setVoidReason('');
           }
         }}
+        title="Void this draft"
+        object={
+          voiding ? (
+            <>
+              {describe(voiding)} · <Money kobo={voiding.grossKobo} strong />
+            </>
+          ) : (
+            ''
+          )
+        }
+        consequence={
+          <>
+            The draft is cancelled and what the ledger credited for it is reversed. Its{' '}
+            {voiding ? shifts(voiding.lines.length) : 'shifts'} can be invoiced again by raising a
+            new draft. If a payout has already been prepared or made for anybody on it, the system
+            refuses. An issued invoice cannot be voided here.
+          </>
+        }
+        reversible={false}
+        destructive
+        confirmLabel="Void invoice"
+        cancelLabel="Keep the draft"
+        loading={voidIt.isPending}
+        confirmDisabled={voidReason.trim().length < 10}
+        onConfirm={() => voiding && voidIt.mutate(voiding)}
       >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Void {voiding?.number}</DialogTitle>
-            <DialogDescription>
-              Cancels this draft and reverses what the ledger credited for it. Its shifts can then
-              be invoiced again. It cannot be undone, and an invoice that has been issued cannot
-              be voided here.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-1.5">
-            <Label htmlFor="void-reason">Why is it being voided?</Label>
-            <Textarea
-              id="void-reason"
-              value={voidReason}
-              maxLength={500}
-              onChange={(event) => setVoidReason(event.target.value)}
+        <Field
+          label="Why is it being voided?"
+          hint="At least 10 characters. It is kept with your name."
+          required
+        >
+          <Textarea
+            value={voidReason}
+            maxLength={500}
+            rows={3}
+            onChange={(event) => setVoidReason(event.target.value)}
+          />
+        </Field>
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={paying !== null}
+        onOpenChange={(open) => !open && setPaying(null)}
+        title="Record a payment received"
+        object={
+          paying ? (
+            <>
+              {describe(paying)} · invoice <Money kobo={paying.grossKobo} strong />
+            </>
+          ) : (
+            ''
+          )
+        }
+        consequence={
+          paying ? (
+            <>
+              This records that {payment.payer.trim() || facilityName} paid{' '}
+              <Money kobo={paying.grossKobo} strong /> in full
+              {payment.paidOn ? <> on {formatDate(payment.paidOn)}</> : null}, and the ledger will
+              show it paid. It does not take a payment — there is no gateway — so confirm the
+              transfer has arrived at the bank first. Nobody is sent a message.
+            </>
+          ) : null
+        }
+        reversible={false}
+        confirmLabel="Record payment"
+        loading={pay.isPending}
+        confirmDisabled={!paymentReady}
+        onConfirm={() => paying && pay.mutate(paying)}
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Enter what the bank statement shows. The amount is typed rather than filled in because
+            typing it is the check against the statement: the invoice is{' '}
+            {paying ? formatNaira(paying.grossKobo) : ''}, and a part payment, or one transfer for
+            several invoices, cannot be recorded yet.
+          </p>
+          <Field label="Bank reference for the transfer" required>
+            <Input
+              value={payment.reference}
+              maxLength={100}
+              onChange={(event) => setPayment({ ...payment, reference: event.target.value })}
             />
-            <p className="text-xs text-muted-foreground">
-              At least 10 characters. It is kept with your name.
-            </p>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setVoiding(null)}>
-              Keep it
-            </Button>
-            <Button
-              variant="destructive"
-              disabled={voidReason.trim().length < 10}
-              loading={voidIt.isPending}
-              onClick={() => voiding && voidIt.mutate(voiding)}
+          </Field>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field
+              label="Amount received (₦)"
+              required
+              error={
+                payment.amount !== '' && amountKobo === null
+                  ? 'That is not an amount in naira.'
+                  : undefined
+              }
             >
-              Void invoice
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      <Dialog open={paying !== null} onOpenChange={(open) => (open ? null : setPaying(null))}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Record payment of {paying?.number}</DialogTitle>
-            <DialogDescription>
-              There is no gateway to capture a payment, so this records a transfer you can see in
-              the bank. Enter what the statement shows; the invoice is {paying ? formatNaira(paying.grossKobo) : ''}.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="pay-reference">Bank reference for the transfer</Label>
               <Input
-                id="pay-reference"
-                value={payment.reference}
-                maxLength={100}
-                onChange={(event) => setPayment({ ...payment, reference: event.target.value })}
+                inputMode="decimal"
+                placeholder="1,250,000.00"
+                value={payment.amount}
+                onChange={(event) => setPayment({ ...payment, amount: event.target.value })}
               />
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label htmlFor="pay-amount">Amount received (₦)</Label>
-                <Input
-                  id="pay-amount"
-                  inputMode="decimal"
-                  value={payment.amount}
-                  onChange={(event) => setPayment({ ...payment, amount: event.target.value })}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="pay-date">Date it arrived</Label>
-                <Input
-                  id="pay-date"
-                  type="date"
-                  value={payment.paidOn}
-                  onChange={(event) => setPayment({ ...payment, paidOn: event.target.value })}
-                />
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="pay-payer">Paid by, as the statement names them</Label>
+            </Field>
+            <Field label="Date it arrived" required>
               <Input
-                id="pay-payer"
-                value={payment.payer}
-                maxLength={120}
-                onChange={(event) => setPayment({ ...payment, payer: event.target.value })}
+                type="date"
+                value={payment.paidOn}
+                onChange={(event) => setPayment({ ...payment, paidOn: event.target.value })}
               />
-            </div>
-            {payment.amount !== '' && amountKobo === null ? (
-              <p className="text-xs text-destructive-text">That is not an amount in naira.</p>
-            ) : null}
-            {paying && amountKobo !== null && amountKobo !== paying.grossKobo ? (
-              <Alert variant="warning">
-                <TriangleAlert />
-                <AlertDescription>
-                  That is not the invoice amount, {formatNaira(paying.grossKobo)}. Part payments and
-                  one transfer for several invoices cannot be recorded yet, and the system will
-                  refuse it.
-                </AlertDescription>
-              </Alert>
-            ) : null}
+            </Field>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setPaying(null)}>
-              Cancel
-            </Button>
-            <Button
-              variant="success"
-              disabled={!paymentReady}
-              loading={pay.isPending}
-              onClick={() => paying && pay.mutate(paying)}
-            >
-              <Wallet />
-              Record payment
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          <Field label="Paid by, as the statement names them" required>
+            <Input
+              value={payment.payer}
+              maxLength={120}
+              onChange={(event) => setPayment({ ...payment, payer: event.target.value })}
+            />
+          </Field>
+          {paying && amountKobo !== null && amountKobo !== paying.grossKobo ? (
+            <Alert variant="warning">
+              <TriangleAlert />
+              <AlertDescription>
+                That is not the invoice amount, {formatNaira(paying.grossKobo)}. The system will
+                refuse it.
+              </AlertDescription>
+            </Alert>
+          ) : null}
+        </div>
+      </ConfirmDialog>
+
       <PageHeader
         title="Invoices"
         description="Raised from shifts a facility has already approved, so nothing here can bill for hours they did not accept."
@@ -349,14 +403,17 @@ export default function InvoicesPage() {
 
       <Card className="mb-6">
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm">Raise a draft</CardTitle>
+          <CardTitle className="text-base">Raise a draft</CardTitle>
           <CardDescription>
-            Every approved shift in the period that is not already on an invoice.
+            Every approved shift in the period that is not already on an invoice. A draft bills
+            nobody until it is issued.
           </CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-wrap items-end gap-3">
-          <div className="w-full space-y-1.5 sm:w-auto sm:min-w-[18rem]">
-            <Label htmlFor="facility">Facility</Label>
+        <CardContent className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+          <div className="min-w-0 space-y-1.5 sm:min-w-[18rem]">
+            <Label htmlFor="facility" className="text-base font-medium leading-snug">
+              Facility
+            </Label>
             {/* Searchable: a plain dropdown is fine over four hospitals and
                 not over four hundred, and this list grows with the pilot. */}
             <Combobox
@@ -369,27 +426,40 @@ export default function InvoicesPage() {
               onChange={setFacilityId}
               searchPlaceholder="Search facilities…"
             />
+            {facilities.isError ? (
+              <p
+                role="alert"
+                className="flex flex-wrap items-center gap-2 text-sm text-destructive-text"
+              >
+                The list of facilities could not be loaded.
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  loading={facilities.isFetching}
+                  onClick={() => void facilities.refetch()}
+                >
+                  Try again
+                </Button>
+              </p>
+            ) : null}
           </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="from">From</Label>
+          <Field label="From">
             <Input
-              id="from"
               type="date"
               value={period.start}
               onChange={(event) => setPeriod({ ...period, start: event.target.value })}
             />
-          </div>
+          </Field>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="to">Until</Label>
+          <Field label="Until">
             <Input
-              id="to"
               type="date"
               value={period.end}
               onChange={(event) => setPeriod({ ...period, end: event.target.value })}
             />
-          </div>
+          </Field>
 
           <Button
             disabled={!facilityId || generate.isPending}
@@ -397,7 +467,7 @@ export default function InvoicesPage() {
             onClick={() => generate.mutate()}
           >
             <FileText />
-            Raise
+            Raise a draft
           </Button>
         </CardContent>
       </Card>
@@ -409,99 +479,70 @@ export default function InvoicesPage() {
           description="Invoices are per facility, so pick one to see what it has been billed."
         />
       ) : invoices.isPending ? (
-        <QueueSkeleton rows={2} />
-      ) : invoices.isError ? (
-        <Alert variant="destructive">
-          <TriangleAlert />
-          <AlertDescription>Invoices could not be loaded.</AlertDescription>
-        </Alert>
+        <ListSkeleton rows={2} label="Loading invoices" />
+      ) : invoices.isError && !invoices.data ? (
+        <ErrorState
+          error={invoices.error}
+          onRetry={() => void invoices.refetch()}
+          retrying={invoices.isFetching}
+        />
       ) : invoiceRows.length === 0 ? (
-        <EmptyState icon={<ReceiptText />} title="Nothing billed yet" />
+        <EmptyState
+          icon={<ReceiptText />}
+          title="Nothing billed yet"
+          description="Raise a draft above and it appears here to be checked."
+        />
       ) : (
         <div className="space-y-4">
           {invoiceRows.map((invoice) => (
             <Card key={invoice.id}>
               <CardHeader className="flex-row items-start justify-between gap-4 space-y-0 pb-4">
                 <div className="min-w-0">
-                  <p className="font-mono text-sm font-medium">{invoice.number}</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
+                  <h2 className="font-mono text-base font-medium">{invoice.number}</h2>
+                  <p className="mt-0.5 text-sm text-muted-foreground">
                     {formatDate(invoice.periodStart)} – {formatDate(invoice.periodEnd)} ·{' '}
-                    {invoice.lines.length} shift{invoice.lines.length === 1 ? '' : 's'}
+                    {shifts(invoice.lines.length)}
                   </p>
                 </div>
-                <div className="flex shrink-0 items-center gap-3">
-                  <p className="tabular text-lg font-semibold">{formatNaira(invoice.grossKobo)}</p>
+                <div className="flex shrink-0 flex-col items-end gap-1.5 sm:flex-row sm:items-center sm:gap-3">
+                  <Money kobo={invoice.grossKobo} strong className="text-xl" />
                   <StatusBadge status={invoice.status} />
                 </div>
               </CardHeader>
 
               <CardContent className="space-y-4">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Practitioner</TableHead>
-                      <TableHead>Ordinary</TableHead>
-                      <TableHead>Night</TableHead>
-                      <TableHead>Holiday</TableHead>
-                      <TableHead className="text-right">Base</TableHead>
-                      <TableHead className="text-right">Premium</TableHead>
-                      <TableHead className="text-right">Total</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {invoice.lines.map((line) => (
-                      <TableRow key={line.assignmentId}>
-                        <TableCell className="text-xs">{line.practitionerName}</TableCell>
-                        <TableCell className="text-xs">
-                          {formatMinutes(line.ordinaryMinutes)}
-                        </TableCell>
-                        <TableCell className="text-xs">{formatMinutes(line.nightMinutes)}</TableCell>
-                        <TableCell className="text-xs">
-                          {formatMinutes(line.holidayMinutes)}
-                        </TableCell>
-                        <TableCell className="tabular text-right text-xs">
-                          {formatNaira(line.baseKobo)}
-                        </TableCell>
-                        <TableCell className="tabular text-right text-xs">
-                          {line.premiumKobo > 0 ? formatNaira(line.premiumKobo) : '—'}
-                        </TableCell>
-                        <TableCell className="tabular text-right text-xs font-medium">
-                          {formatNaira(line.amountKobo)}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                <InvoiceLines lines={invoice.lines} />
 
-                <Separator />
-
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <p className="text-xs text-muted-foreground">
-                    Platform fee {formatNaira(invoice.platformFeeKobo)}
+                <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-sm text-muted-foreground">
+                    Platform fee <Money kobo={invoice.platformFeeKobo} />
                     {invoice.platformFeeKobo === 0 ? ' — the rate is not set' : ''}
                   </p>
 
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-col gap-2 sm:flex-row">
                     {invoice.status === 'DRAFT' ? (
-                      <Button variant="outline" onClick={() => setVoiding(invoice)}>
-                        Void it
-                      </Button>
-                    ) : null}
-                    {invoice.status === 'DRAFT' ? (
-                      <Button
-                        loading={issue.isPending && issue.variables?.id === invoice.id}
-                        onClick={() => issue.mutate(invoice)}
-                      >
-                        <Send />
-                        Issue it
-                      </Button>
+                      <>
+                        <Button
+                          variant="outline"
+                          aria-label={`Void draft ${invoice.number}`}
+                          onClick={() => setVoiding(invoice)}
+                        >
+                          Void it
+                        </Button>
+                        <Button
+                          aria-label={`Issue invoice ${invoice.number}`}
+                          onClick={() => setIssuing(invoice)}
+                        >
+                          Review and issue
+                        </Button>
+                      </>
                     ) : null}
                     {invoice.status === 'ISSUED' ? (
                       <Button
                         variant="success"
+                        aria-label={`Record payment of invoice ${invoice.number}`}
                         onClick={() => startPayment(invoice)}
                       >
-                        <Wallet />
                         Record payment
                       </Button>
                     ) : null}
@@ -509,24 +550,25 @@ export default function InvoicesPage() {
                 </div>
 
                 {invoice.status === 'PAID' && invoice.paymentReference ? (
-                  <p className="text-xs text-muted-foreground">
-                    Paid on {formatDate(invoice.paidOn)} by {invoice.payerName}, bank reference{' '}
-                    <span className="font-mono">{invoice.paymentReference}</span>.
+                  <p className="flex items-start gap-2 text-sm text-muted-foreground">
+                    <CircleCheck
+                      className="mt-0.5 size-4 shrink-0 text-success"
+                      aria-hidden="true"
+                    />
+                    <span>
+                      Paid on {formatDate(invoice.paidOn)} by {invoice.payerName}, bank reference{' '}
+                      <span className="font-mono">{invoice.paymentReference}</span>.
+                    </span>
                   </p>
-                ) : null}
-
-                {invoice.status === 'ISSUED' ? (
-                  <Alert variant="info">
-                    <AlertDescription>
-                      Recording a payment does not take one. Confirm the transfer has arrived
-                      first — there is no gateway to capture it, and the ledger will say it was
-                      paid either way.
-                    </AlertDescription>
-                  </Alert>
                 ) : null}
               </CardContent>
             </Card>
           ))}
+          {invoices.isError ? (
+            <p role="alert" className="text-sm text-destructive-text">
+              The next page could not be loaded. The invoices above are still current.
+            </p>
+          ) : null}
           {invoices.hasNextPage ? (
             <div className="flex justify-center pt-2">
               <Button
@@ -540,6 +582,99 @@ export default function InvoicesPage() {
           ) : null}
         </div>
       )}
+    </>
+  );
+}
+
+/**
+ * What an invoice is made of, one line per practitioner: a table where there is room and a short
+ * list where there is not, so the minutes and amounts that a draft is checked against are never
+ * off the edge of a phone.
+ */
+function InvoiceLines({ lines }: { lines: InvoiceLine[] }) {
+  return (
+    <>
+      <div className="hidden md:block">
+        <Table>
+          <caption className="sr-only">What this invoice bills, by practitioner</caption>
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Practitioner</TableHead>
+              <TableHead scope="col">Ordinary</TableHead>
+              <TableHead scope="col">Night</TableHead>
+              <TableHead scope="col">Holiday</TableHead>
+              <TableHead scope="col" className="text-right">
+                Base
+              </TableHead>
+              <TableHead scope="col" className="text-right">
+                Premium
+              </TableHead>
+              <TableHead scope="col" className="text-right">
+                Total
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {lines.map((line) => (
+              <TableRow key={line.assignmentId}>
+                <TableCell>{line.practitionerName}</TableCell>
+                <TableCell>{formatMinutes(line.ordinaryMinutes)}</TableCell>
+                <TableCell>{formatMinutes(line.nightMinutes)}</TableCell>
+                <TableCell>{formatMinutes(line.holidayMinutes)}</TableCell>
+                <TableCell className="tabular text-right">{formatNaira(line.baseKobo)}</TableCell>
+                <TableCell className="tabular text-right">
+                  {line.premiumKobo > 0 ? formatNaira(line.premiumKobo) : '—'}
+                </TableCell>
+                <TableCell className="tabular text-right font-medium">
+                  {formatNaira(line.amountKobo)}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+
+      <ul
+        className="divide-y rounded-md border md:hidden"
+        aria-label="What this invoice bills, by practitioner"
+      >
+        {lines.map((line) => (
+          <li key={line.assignmentId} className="space-y-2 p-3">
+            <div className="flex items-start justify-between gap-3">
+              <p className="min-w-0 font-medium [overflow-wrap:anywhere]">
+                {line.practitionerName}
+              </p>
+              <Money kobo={line.amountKobo} strong />
+            </div>
+            <dl className="grid grid-cols-3 gap-x-3 gap-y-1 text-sm">
+              <div>
+                <dt className="text-muted-foreground">Ordinary</dt>
+                <dd>{formatMinutes(line.ordinaryMinutes)}</dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">Night</dt>
+                <dd>{formatMinutes(line.nightMinutes)}</dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">Holiday</dt>
+                <dd>{formatMinutes(line.holidayMinutes)}</dd>
+              </div>
+              <div className="col-span-3 flex flex-wrap gap-x-4 gap-y-1">
+                <span>
+                  <span className="text-muted-foreground">Base </span>
+                  <Money kobo={line.baseKobo} />
+                </span>
+                {line.premiumKobo > 0 ? (
+                  <span>
+                    <span className="text-muted-foreground">Premium </span>
+                    <Money kobo={line.premiumKobo} />
+                  </span>
+                ) : null}
+              </div>
+            </dl>
+          </li>
+        ))}
+      </ul>
     </>
   );
 }

@@ -1,14 +1,17 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { TriangleAlert, Wallet } from 'lucide-react';
+import { Wallet } from 'lucide-react';
 import { api } from '@/lib/ui/api';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Card, CardContent } from '@/components/ui/card';
 import { AmountFigure } from '@/components/app/amount-figure';
+import { Money } from '@/components/app/money';
 import { MyPayoutAccount } from '@/components/app/my-payout-account';
 import { StatusBadge } from '@/components/app/status-badge';
-import { EmptyState, PageHeader, QueueSkeleton } from '@/components/app/page-shell';
+import { EmptyState, PageHeader } from '@/components/app/page-shell';
+import { StaleNote } from '@/components/app/stale-note';
+import { ErrorState, ListSkeleton } from '@/components/app/states';
 import { formatDate, formatNaira } from '@/components/app/format';
 
 interface Payout {
@@ -43,7 +46,9 @@ function owedHint(position: { heldKobo: number; awaitingKobo: number } | undefin
   // Said plainly, because a figure owed that cannot yet be paid looks like a mistake
   // unless somebody says why: payment waits for the facility's own payment to arrive.
   if (position.awaitingKobo > 0) {
-    parts.push(`${formatNaira(position.awaitingKobo)} is waiting for the hospital to pay its invoice.`);
+    parts.push(
+      `${formatNaira(position.awaitingKobo)} is waiting for the hospital to pay its invoice.`,
+    );
   }
   if (position.heldKobo > 0) {
     parts.push(`${formatNaira(position.heldKobo)} is held while a dispute is decided.`);
@@ -113,15 +118,23 @@ export default function EarningsPage() {
 
       <MyPayoutAccount />
 
-      <h2 className="mb-3 text-sm font-medium">Payments</h2>
+      <h2 className="mb-3 text-base font-semibold">Payments</h2>
+
+      <StaleNote
+        show={earnings.isError && Boolean(earnings.data)}
+        onRetry={() => void earnings.refetch()}
+        retrying={earnings.isFetching}
+        what="your earnings"
+      />
 
       {earnings.isPending ? (
-        <QueueSkeleton rows={2} />
-      ) : earnings.isError ? (
-        <Alert variant="destructive">
-          <TriangleAlert />
-          <AlertDescription>Your earnings could not be loaded.</AlertDescription>
-        </Alert>
+        <ListSkeleton rows={2} label="Loading your payments" />
+      ) : earnings.isError && !earnings.data ? (
+        <ErrorState
+          error={earnings.error}
+          onRetry={() => void earnings.refetch()}
+          retrying={earnings.isFetching}
+        />
       ) : payouts.length === 0 ? (
         <EmptyState
           icon={<Wallet />}
@@ -132,10 +145,12 @@ export default function EarningsPage() {
         <div className="space-y-3">
           {payouts.map((row) => (
             <Card key={row.id}>
-              <CardContent className="flex flex-wrap items-center justify-between gap-3 pt-5">
+              <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4 sm:p-5">
                 <div className="min-w-0">
-                  <p className="tabular font-medium">{formatNaira(row.amountKobo)}</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
+                  <p className="font-medium">
+                    <Money kobo={row.amountKobo} strong />
+                  </p>
+                  <p className="mt-0.5 text-sm text-muted-foreground [overflow-wrap:anywhere]">
                     {row.settledAt
                       ? `${row.paidOn ? 'Paid' : 'Received'} ${formatDate(row.paidOn ?? row.settledAt)}`
                       : row.releasedAt
@@ -144,7 +159,9 @@ export default function EarningsPage() {
                     {row.providerReference ? ` · ref ${row.providerReference}` : ''}
                   </p>
                   {row.failureReason ? (
-                    <p className="mt-1 text-xs text-destructive-text">{row.failureReason}</p>
+                    <p className="mt-1 text-sm font-medium text-destructive-text [overflow-wrap:anywhere]">
+                      Could not be paid: {row.failureReason}
+                    </p>
                   ) : null}
                 </div>
                 <StatusBadge status={row.status} />

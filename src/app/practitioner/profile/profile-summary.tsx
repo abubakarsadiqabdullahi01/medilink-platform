@@ -17,7 +17,10 @@ import { Avatar } from '@/components/app/avatar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
+import { ErrorState, LoadingStatus } from '@/components/app/states';
 import { formatDate } from '@/components/app/format';
+import { daysUntilExpiry, expiryPhrase, expiryTone } from '@/lib/ui/credential-timing';
+import { cn } from '@/lib/utils';
 
 interface Verification {
   identity: { ninLast4: string; nameMatch: boolean; verifiedAt: string } | null;
@@ -42,7 +45,11 @@ interface Verification {
  */
 const STATE_BADGE: Record<
   ApplicationState,
-  { variant: 'success' | 'info' | 'default' | 'warning' | 'destructive'; label: string; icon: typeof Clock }
+  {
+    variant: 'success' | 'info' | 'default' | 'warning' | 'destructive';
+    label: string;
+    icon: typeof Clock;
+  }
 > = {
   APPROVED: { variant: 'success', label: 'Can be offered shifts', icon: CircleCheck },
   WAITING: { variant: 'info', label: 'Waiting for approval', icon: Clock },
@@ -124,7 +131,18 @@ export function OnRecord({ blockers, eligible }: { blockers: string[]; eligible:
       </CardHeader>
       <CardContent className="space-y-4 text-sm">
         {verification.isPending ? (
-          <Skeleton className="h-16 w-full" />
+          <>
+            <LoadingStatus label="Loading what Medilink has on record" />
+            <Skeleton className="h-16 w-full" />
+          </>
+        ) : verification.isError ? (
+          // Not "Not recorded yet": a failed request says nothing about what is recorded.
+          <ErrorState
+            compact
+            error={verification.error}
+            onRetry={() => void verification.refetch()}
+            retrying={verification.isFetching}
+          />
         ) : (
           <>
             <div>
@@ -158,15 +176,13 @@ export function OnRecord({ blockers, eligible }: { blockers: string[]; eligible:
                   <div key={row.id} className="mt-1 flex flex-wrap items-center gap-2">
                     {row.regulator} {row.folioNumber}
                     <StatusBadge status={row.registrationStatus} />
-                    {row.expiresAt ? (
-                      <span className="text-xs text-muted-foreground">
-                        expires {formatDate(row.expiresAt)}
-                      </span>
-                    ) : null}
+                    {row.expiresAt ? <RegistrationExpiry expiresAt={row.expiresAt} /> : null}
                     {/* Where an officer read from the register that they stand. */}
                     {row.cadreLevel || row.registrationCategory ? (
                       <span className="w-full text-xs text-muted-foreground">
-                        {[row.cadreLevel?.name, row.registrationCategory?.name].filter(Boolean).join(' · ')}
+                        {[row.cadreLevel?.name, row.registrationCategory?.name]
+                          .filter(Boolean)
+                          .join(' · ')}
                         {row.registrationCategory?.supervisionRequired
                           ? ' · works under supervision, so only shifts that offer it'
                           : ''}
@@ -198,5 +214,23 @@ export function OnRecord({ blockers, eligible }: { blockers: string[]; eligible:
         )}
       </CardContent>
     </Card>
+  );
+}
+
+/** "expires 30 Jun 2027 · in 255 days", warning inside a month and stronger once it has lapsed. */
+function RegistrationExpiry({ expiresAt }: { expiresAt: string }) {
+  const days = daysUntilExpiry({ expiresAt });
+  const tone = days === null ? undefined : expiryTone(days);
+  return (
+    <span
+      className={cn(
+        'text-sm text-muted-foreground',
+        tone === 'danger' && 'font-medium text-destructive-text',
+        tone === 'warning' && 'font-medium text-warning',
+      )}
+    >
+      {days !== null && days < 0 ? 'expired' : 'expires'} {formatDate(expiresAt)}
+      {days !== null ? ` · ${expiryPhrase(days).replace(/^expires |^expired /, '')}` : ''}
+    </span>
   );
 }

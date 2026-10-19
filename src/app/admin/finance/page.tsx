@@ -3,13 +3,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import dynamic from 'next/dynamic';
-import { Banknote, ChevronLeft, ChevronRight, Landmark, TriangleAlert, Wallet } from 'lucide-react';
+import { Banknote, Landmark, Wallet } from 'lucide-react';
 import { api } from '@/lib/ui/api';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
+import { useCursorPager } from '@/lib/ui/cursor-pager';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import {
   Select,
   SelectContent,
@@ -26,8 +23,15 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { PageHeader } from '@/components/app/page-shell';
-import { formatNaira } from '@/components/app/format';
+import { DataTable, type Column } from '@/components/app/data-table';
+import { MetricTile } from '@/components/app/dashboard';
+import { Field } from '@/components/app/field';
+import { FilterBar } from '@/components/app/filter-bar';
+import { Money } from '@/components/app/money';
+import { EmptyState, PageHeader } from '@/components/app/page-shell';
+import { Pager } from '@/components/app/pager';
+import { ErrorState, FilteredEmpty, TableSkeleton } from '@/components/app/states';
+import { StatusBadge } from '@/components/app/status-badge';
 import { ReconciliationCard } from './reconciliation-card';
 
 const INVOICE_STATUSES = ['DRAFT', 'ISSUED', 'PAID'] as const;
@@ -59,16 +63,35 @@ interface InvoiceRow {
  * growing, and where the money is sitting.
  */
 /** The charting library loads after the tiles and navigation have drawn. */
-const SpendChart = dynamic(() => import('@/components/app/money-charts').then((m) => m.SpendChart), {
-  ssr: false,
-  loading: () => <Skeleton className="h-[260px] w-full" />,
-});
-const OutstandingChart = dynamic(() => import('@/components/app/money-charts').then((m) => m.OutstandingChart), {
-  ssr: false,
-  loading: () => <Skeleton className="h-[260px] w-full" />,
-});
+const SpendChart = dynamic(
+  () => import('@/components/app/money-charts').then((m) => m.SpendChart),
+  {
+    ssr: false,
+    loading: () => <Skeleton className="h-[260px] w-full" />,
+  },
+);
+const OutstandingChart = dynamic(
+  () => import('@/components/app/money-charts').then((m) => m.OutstandingChart),
+  {
+    ssr: false,
+    loading: () => <Skeleton className="h-[260px] w-full" />,
+  },
+);
 
-const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const SHORT_MONTHS = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
 
 /** "2026-10" as "Oct 26". */
 function monthLabel(key: string): string {
@@ -84,14 +107,6 @@ export default function FinancePage() {
     queryFn: () => api.get<Summary>('/api/v1/dashboard/finance'),
     retry: false,
   });
-  const loading = summary.isPending;
-
-  const totals = {
-    outstanding: summary.data?.totals.outstandingKobo ?? 0,
-    paid: summary.data?.totals.paidKobo ?? 0,
-    draft: summary.data?.totals.draftKobo ?? 0,
-    fees: summary.data?.totals.feesKobo ?? 0,
-  };
 
   const byMonth = useMemo(
     () =>
@@ -118,30 +133,30 @@ export default function FinancePage() {
   // make them answer a different, smaller question without saying so.
   const [facilitySearch, setFacilitySearch] = useState('');
   const [appliedSearch, setAppliedSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'ALL' | (typeof INVOICE_STATUSES)[number]>('ALL');
-  const [cursors, setCursors] = useState<(string | null)[]>([null]);
-  const [pageIndex, setPageIndex] = useState(0);
+  const [statusFilter, setStatusFilter] = useState<'ALL' | (typeof INVOICE_STATUSES)[number]>(
+    'ALL',
+  );
+  const pager = useCursorPager();
+  const { startOver } = pager;
 
   // Typing waits for a pause before it asks the server, so a name is one
   // request rather than one per keystroke.
   useEffect(() => {
     const timer = setTimeout(() => {
       setAppliedSearch(facilitySearch.trim());
-      setCursors([null]);
-      setPageIndex(0);
+      startOver();
     }, 300);
     return () => clearTimeout(timer);
-  }, [facilitySearch]);
+  }, [facilitySearch, startOver]);
 
-  const cursor = cursors[pageIndex] ?? null;
   const table = useQuery({
-    queryKey: ['finance-invoices', statusFilter, appliedSearch, cursor],
+    queryKey: ['finance-invoices', statusFilter, appliedSearch, pager.cursor],
     queryFn: () => {
       const parts = [
         `limit=${PAGE_SIZE}`,
         statusFilter !== 'ALL' ? `status=${statusFilter}` : '',
         appliedSearch ? `search=${encodeURIComponent(appliedSearch)}` : '',
-        cursor ? `cursor=${cursor}` : '',
+        pager.cursor ? `cursor=${pager.cursor}` : '',
       ].filter(Boolean);
       return api.get<{ invoices: InvoiceRow[]; nextCursor: string | null }>(
         `/api/v1/finance/invoices?${parts.join('&')}`,
@@ -152,27 +167,65 @@ export default function FinancePage() {
   });
   const pagedInvoices = table.data?.invoices ?? [];
   const nextCursor = table.data?.nextCursor ?? null;
-  const filtered = statusFilter !== 'ALL' || appliedSearch !== '';
+  const activeCount = (statusFilter !== 'ALL' ? 1 : 0) + (appliedSearch !== '' ? 1 : 0);
 
+  function clearFilters() {
+    setFacilitySearch('');
+    setAppliedSearch('');
+    setStatusFilter('ALL');
+    startOver();
+  }
+
+  const totals = summary.data?.totals;
   const tiles = [
     {
       label: 'Outstanding',
-      value: totals.outstanding,
+      kobo: totals?.outstandingKobo,
       icon: Landmark,
       hint: 'Issued and not yet paid.',
     },
-    { label: 'Paid', value: totals.paid, icon: Banknote, hint: 'Settled in full.' },
+    { label: 'Paid', kobo: totals?.paidKobo, icon: Banknote, hint: 'Settled in full.' },
     {
       label: 'In draft',
-      value: totals.draft,
+      kobo: totals?.draftKobo,
       icon: Wallet,
       hint: 'Raised but not yet issued to anybody.',
     },
     {
       label: 'Platform fees',
-      value: totals.fees,
+      kobo: totals?.feesKobo,
       icon: Wallet,
       hint: 'Zero until the revenue model is settled.',
+    },
+  ];
+
+  const columns: Column<InvoiceRow>[] = [
+    {
+      id: 'number',
+      header: 'Number',
+      role: 'identity',
+      cell: (row) => <span className="font-mono text-sm">{row.number}</span>,
+    },
+    { id: 'facility', header: 'Facility', cell: (row) => row.facilityName },
+    {
+      id: 'status',
+      header: 'Status',
+      role: 'status',
+      cell: (row) => <StatusBadge status={row.status} />,
+    },
+    {
+      id: 'gross',
+      header: 'Gross',
+      align: 'right',
+      numeric: true,
+      cell: (row) => <Money kobo={row.grossKobo} />,
+    },
+    {
+      id: 'fee',
+      header: 'Platform fee',
+      align: 'right',
+      numeric: true,
+      cell: (row) => <Money kobo={row.platformFeeKobo} className="text-muted-foreground" />,
     },
   ];
 
@@ -183,27 +236,32 @@ export default function FinancePage() {
         description="Every invoice across every verified facility. Figures are what the ledger says, summed from its entries rather than stored anywhere."
       />
 
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {tiles.map((tile) => {
-          const Icon = tile.icon;
-          return (
-            <Card key={tile.label}>
-              <CardHeader className="flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">{tile.label}</CardTitle>
-                <Icon className="size-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                {loading ? (
-                  <Skeleton className="h-8 w-32" />
-                ) : (
-                  <p className="tabular text-2xl font-semibold">{formatNaira(tile.value)}</p>
-                )}
-                <p className="mt-1 text-xs text-muted-foreground">{tile.hint}</p>
-              </CardContent>
-            </Card>
-          );
-        })}
+      {/* A failed summary says so on each figure: "could not load" is not ₦0.00. */}
+      {/* Two across until there is room for four full-width figures: a seven-figure amount with
+          kobo does not fit in a quarter of a laptop screen without breaking in the middle. */}
+      <div className="mb-6 grid gap-3 sm:grid-cols-2 sm:gap-4 2xl:grid-cols-4">
+        {tiles.map((tile) => (
+          <MetricTile
+            key={tile.label}
+            label={tile.label}
+            icon={tile.icon}
+            value={<Money kobo={tile.kobo ?? 0} />}
+            hint={tile.hint}
+            loading={summary.isPending}
+            error={summary.isError}
+          />
+        ))}
       </div>
+      {summary.isError ? (
+        <div className="-mt-2 mb-6">
+          <ErrorState
+            compact
+            error={summary.error}
+            onRetry={() => void summary.refetch()}
+            retrying={summary.isFetching}
+          />
+        </div>
+      ) : null}
 
       <ReconciliationCard />
 
@@ -214,14 +272,29 @@ export default function FinancePage() {
             <CardDescription>By the month the work was done, in naira.</CardDescription>
           </CardHeader>
           <CardContent>
-            {loading ? (
+            {summary.isPending ? (
               <Skeleton className="h-[260px] w-full" />
+            ) : summary.isError ? (
+              <p className="py-16 text-center text-sm text-muted-foreground">
+                The figures could not be loaded, so there is nothing to draw.
+              </p>
             ) : byMonth.length === 0 ? (
               <p className="py-20 text-center text-sm text-muted-foreground">
                 Nothing invoiced yet.
               </p>
             ) : (
-              <SpendChart data={byMonth} height={260} yAxisWidth={72} legend={false} />
+              <>
+                <SpendChart data={byMonth} height={260} yAxisWidth={56} legend={false} />
+                <FiguresAsTable
+                  caption="Invoiced and paid, by month"
+                  head={['Month', 'Invoiced', 'Paid']}
+                  rows={byMonth.map((row) => [
+                    row.month,
+                    <Money key="i" kobo={row.invoiced} />,
+                    <Money key="p" kobo={row.paid} />,
+                  ])}
+                />
+              </>
             )}
           </CardContent>
         </Card>
@@ -232,154 +305,172 @@ export default function FinancePage() {
             <CardDescription>Outstanding by facility, largest first.</CardDescription>
           </CardHeader>
           <CardContent>
-            {loading ? (
+            {summary.isPending ? (
               <Skeleton className="h-[260px] w-full" />
+            ) : summary.isError ? (
+              <p className="py-16 text-center text-sm text-muted-foreground">
+                The figures could not be loaded, so there is nothing to draw.
+              </p>
             ) : byFacility.length === 0 ? (
               <p className="py-20 text-center text-sm text-muted-foreground">
                 Nothing outstanding. Every issued invoice has been paid.
               </p>
             ) : (
-              <OutstandingChart data={byFacility} />
+              <>
+                <OutstandingChart data={byFacility} />
+                <FiguresAsTable
+                  caption="Outstanding, by facility"
+                  head={['Facility', 'Outstanding']}
+                  rows={byFacility.map((row) => [
+                    row.name,
+                    <Money key="o" kobo={row.outstanding} />,
+                  ])}
+                />
+              </>
             )}
           </CardContent>
         </Card>
       </div>
 
-      <Card className="mt-4">
-        <CardHeader>
-          <CardTitle className="text-base">Every invoice</CardTitle>
-          <CardDescription>
-            The same figures as the charts above, readable without colour.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {summary.isError || table.isError ? (
-            <Alert variant="destructive">
-              <TriangleAlert />
-              <AlertDescription>The invoices could not be loaded.</AlertDescription>
-            </Alert>
-          ) : table.isPending ? (
-            <div className="space-y-2">
-              {Array.from({ length: 4 }).map((_, index) => (
-                <Skeleton key={index} className="h-9 w-full" />
-              ))}
-            </div>
-          ) : pagedInvoices.length === 0 && !filtered && pageIndex === 0 ? (
-            <p className="py-10 text-center text-sm text-muted-foreground">
-              No invoices have been raised.
-            </p>
+      <section aria-labelledby="every-invoice" className="mt-8">
+        <h2 id="every-invoice" className="text-lg font-semibold">
+          Every invoice
+        </h2>
+        <p className="mb-4 mt-1 text-sm text-muted-foreground">
+          Filters here narrow this list only, not the figures and charts above.
+        </p>
+
+        <FilterBar
+          searchLabel="Facility"
+          searchPlaceholder="Search by facility name"
+          searchValue={facilitySearch}
+          onSearchChange={setFacilitySearch}
+          activeCount={activeCount}
+          onClear={clearFilters}
+          busy={table.isFetching && !table.isPending}
+          summary={
+            !table.isPending && pagedInvoices.length > 0
+              ? `${pagedInvoices.length} on this page`
+              : undefined
+          }
+        >
+          <Field label="Status" className="md:w-44">
+            {(a11y) => (
+              <Select
+                value={statusFilter}
+                onValueChange={(value) => {
+                  setStatusFilter(value as typeof statusFilter);
+                  startOver();
+                }}
+              >
+                <SelectTrigger {...a11y}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">Any status</SelectItem>
+                  {INVOICE_STATUSES.map((status) => (
+                    <SelectItem key={status} value={status}>
+                      {status.charAt(0) + status.slice(1).toLowerCase()}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </Field>
+        </FilterBar>
+
+        {table.isPending ? (
+          <TableSkeleton label="Loading invoices" columns={5} />
+        ) : table.isError && !table.data ? (
+          <ErrorState
+            error={table.error}
+            onRetry={() => void table.refetch()}
+            retrying={table.isFetching}
+          />
+        ) : pagedInvoices.length === 0 ? (
+          activeCount > 0 ? (
+            <FilteredEmpty noun="invoices" activeCount={activeCount} onClear={clearFilters} />
           ) : (
-            <>
-              <div className="mb-4 flex flex-wrap items-end gap-3">
-                <div className="min-w-[220px] flex-1 space-y-1.5">
-                  <Label htmlFor="invoice-facility-search">Facility</Label>
-                  <Input
-                    id="invoice-facility-search"
-                    value={facilitySearch}
-                    onChange={(event) => setFacilitySearch(event.target.value)}
-                    placeholder="Search by facility name…"
-                  />
-                </div>
-                <div className="w-40 space-y-1.5">
-                  <Label>Status</Label>
-                  <Select
-                    value={statusFilter}
-                    onValueChange={(value) => {
-                      setStatusFilter(value as typeof statusFilter);
-                      setCursors([null]);
-                      setPageIndex(0);
-                    }}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="ALL">Any status</SelectItem>
-                      {INVOICE_STATUSES.map((status) => (
-                        <SelectItem key={status} value={status}>
-                          {status.charAt(0) + status.slice(1).toLowerCase()}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
+            <EmptyState
+              icon={<Landmark />}
+              title="No invoices have been raised"
+              description="Invoices are raised from shifts a facility has approved. They appear here once one is."
+            />
+          )
+        ) : (
+          <DataTable
+            caption="Invoices across every facility"
+            rows={pagedInvoices}
+            columns={columns}
+            getKey={(row) => row.id}
+          />
+        )}
 
-              {pagedInvoices.length === 0 ? (
-                <p className="py-10 text-center text-sm text-muted-foreground">
-                  No invoice matches that facility and status.
-                </p>
-              ) : (
-                <>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Number</TableHead>
-                        <TableHead>Facility</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead className="text-right">Gross</TableHead>
-                        <TableHead className="text-right">Fee</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {pagedInvoices.map((row) => (
-                        <TableRow key={row.id}>
-                          <TableCell className="font-mono text-xs">{row.number}</TableCell>
-                          <TableCell>{row.facilityName}</TableCell>
-                          <TableCell className="text-xs">{row.status}</TableCell>
-                          <TableCell className="tabular text-right">
-                            {formatNaira(row.grossKobo)}
-                          </TableCell>
-                          <TableCell className="tabular text-right text-muted-foreground">
-                            {formatNaira(row.platformFeeKobo)}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-
-                  <div className="mt-4 flex items-center justify-between gap-3">
-                    <p className="text-xs text-muted-foreground">
-                      {pagedInvoices.length} on this page
-                    </p>
-                    <div className="flex items-center gap-3">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={pageIndex === 0}
-                        onClick={() => setPageIndex((current) => Math.max(0, current - 1))}
-                      >
-                        <ChevronLeft />
-                        Previous
-                      </Button>
-                      <p className="tabular text-xs text-muted-foreground">Page {pageIndex + 1}</p>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={!nextCursor}
-                        onClick={() => {
-                          setCursors((current) => [...current.slice(0, pageIndex + 1), nextCursor]);
-                          setPageIndex((current) => current + 1);
-                        }}
-                      >
-                        Next
-                        <ChevronRight />
-                      </Button>
-                    </div>
-                  </div>
-                </>
-              )}
-            </>
-          )}
-        </CardContent>
-      </Card>
+        <Pager
+          pageIndex={pager.pageIndex}
+          hasNext={Boolean(nextCursor)}
+          busy={table.isFetching}
+          onPrevious={pager.goPrevious}
+          onNext={() => pager.goNext(nextCursor)}
+        />
+      </section>
 
       {/* Kept off the charts and said once, plainly. */}
-      <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
+      <p className="mt-6 text-sm leading-relaxed text-muted-foreground">
         Platform fees read zero because the revenue model has not been settled. The account, the
         arithmetic and the column all exist — only the rate is unset, and setting it is
         configuration rather than a change to any of this.
       </p>
     </>
+  );
+}
+
+/**
+ * The numbers behind a chart, as words and a table.
+ *
+ * A bar chart is a picture of a table. Behind a disclosure so it costs nothing to look at, and
+ * there for anyone who cannot see the bars, cannot tell two hues apart, or wants a figure to the
+ * kobo rather than an axis tick rounded to the nearest thousand.
+ */
+function FiguresAsTable({
+  caption,
+  head,
+  rows,
+}: {
+  caption: string;
+  head: string[];
+  rows: React.ReactNode[][];
+}) {
+  return (
+    <details className="group mt-3 border-t pt-1">
+      <summary className="flex min-h-11 cursor-pointer items-center text-sm font-medium text-primary underline-offset-4 hover:underline">
+        Show these figures as a table
+      </summary>
+      <div className="overflow-x-auto pb-1">
+        <Table>
+          <caption className="sr-only">{caption}</caption>
+          <TableHeader>
+            <TableRow>
+              {head.map((label, index) => (
+                <TableHead key={label} scope="col" className={index > 0 ? 'text-right' : undefined}>
+                  {label}
+                </TableHead>
+              ))}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((cells, rowIndex) => (
+              <TableRow key={rowIndex}>
+                {cells.map((cell, index) => (
+                  <TableCell key={index} className={index > 0 ? 'tabular text-right' : undefined}>
+                    {cell}
+                  </TableCell>
+                ))}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </details>
   );
 }

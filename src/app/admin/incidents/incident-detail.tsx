@@ -8,7 +8,6 @@ import { api, errorMessage } from '@/lib/ui/api';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Label } from '@/components/ui/label';
 import {
   Select,
   SelectContent,
@@ -16,11 +15,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
+import { ConfirmDialog } from '@/components/app/confirm-dialog';
+import { Field } from '@/components/app/field';
+import { PageHeader } from '@/components/app/page-shell';
+import { ErrorState, ListSkeleton } from '@/components/app/states';
 import { SeverityBadge, StatusBadge, humanise } from '@/components/app/status-badge';
-import { Detail, DetailGrid, PageHeader } from '@/components/app/page-shell';
+import { Timeline } from '@/components/app/timeline';
 import { actionLabel, formatAgo, formatWhen, shortId } from '@/components/app/format';
 
 /**
@@ -68,10 +70,21 @@ const OUTCOMES = [
 
 const MIN_NOTE = 20;
 
+/** A fact with its label, wrapping rather than cutting a name or a number short. */
+function Fact({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-sm text-muted-foreground">{label}</dt>
+      <dd className="text-base [overflow-wrap:anywhere]">{children}</dd>
+    </div>
+  );
+}
+
 export function IncidentDetail({ incident, onBack }: { incident: Incident; onBack: () => void }) {
   const queryClient = useQueryClient();
   const [outcome, setOutcome] = useState('SYSTEM_ISSUE');
   const [note, setNote] = useState('');
+  const [confirming, setConfirming] = useState(false);
 
   // The route returns { incident, subjectHistory }, not the incident alone —
   // it always carries the subject's other reports alongside it, so a reader
@@ -106,6 +119,7 @@ export function IncidentDetail({ incident, onBack }: { incident: Incident; onBac
   // against it rather than arriving from a queue nobody owned.
   const mustReview = ['SEVERE', 'DEATH'].includes(row.severity);
   const blockedUntilTaken = mustReview && row.status === 'REPORTED';
+  const subjectName = fresh.data?.subject?.fullName ?? 'the practitioner';
 
   function refresh() {
     void queryClient.invalidateQueries({ queryKey: ['incident', incident.id] });
@@ -130,10 +144,15 @@ export function IncidentDetail({ incident, onBack }: { incident: Incident; onBac
     onSuccess: () => {
       toast.success('Incident closed');
       setNote('');
+      setConfirming(false);
       refresh();
     },
     onError: (error) => toast.error('Could not close it', { description: errorMessage(error) }),
   });
+
+  const noteLength = note.trim().length;
+  const noteTooShort = noteLength > 0 && noteLength < MIN_NOTE;
+  const outcomeLabel = OUTCOMES.find(([value]) => value === outcome)?.[1] ?? humanise(outcome);
 
   return (
     <>
@@ -149,11 +168,20 @@ export function IncidentDetail({ incident, onBack }: { incident: Incident; onBac
       />
 
       <div className="space-y-6">
+        {fresh.isError ? (
+          <ErrorState
+            compact
+            error={fresh.error}
+            onRetry={() => void fresh.refetch()}
+            retrying={fresh.isFetching}
+          />
+        ) : null}
+
         <Card>
           <CardContent className="flex flex-wrap items-center gap-3 pt-6">
             <SeverityBadge severity={row.severity} />
             <StatusBadge status={row.status} />
-            <span className="text-sm text-muted-foreground">{humanise(row.category)}</span>
+            <span className="text-base text-muted-foreground">{humanise(row.category)}</span>
           </CardContent>
         </Card>
 
@@ -166,35 +194,35 @@ export function IncidentDetail({ incident, onBack }: { incident: Incident; onBac
           <TabsContent value="case" className="space-y-6 pt-5">
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="text-sm">What was reported</CardTitle>
+                <CardTitle className="text-base">What was reported</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <p className="leading-relaxed">{row.summary}</p>
 
-                <DetailGrid>
-                  <Detail label="Occurred">{formatWhen(row.occurredAt)}</Detail>
-                  <Detail label="Reported">{formatWhen(row.reportedAt)}</Detail>
-                  <Detail label="Facility">{row.facilityName}</Detail>
-                  <Detail label="Shift">
+                <dl className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
+                  <Fact label="Occurred">{formatWhen(row.occurredAt)}</Fact>
+                  <Fact label="Reported">{formatWhen(row.reportedAt)}</Fact>
+                  <Fact label="Facility">{row.facilityName}</Fact>
+                  <Fact label="Shift">
                     {fresh.data?.shift
                       ? formatWhen(fresh.data.shift.startsAt)
                       : row.assignmentId
                         ? shortId(row.assignmentId)
                         : 'Not tied to one'}
-                  </Detail>
+                  </Fact>
                   {fresh.data?.subject ? (
-                    <Detail label="Practitioner">
+                    <Fact label="Practitioner">
                       {fresh.data.subject.fullName}{' '}
-                      <span className="font-mono text-xs text-muted-foreground">
+                      <span className="block font-mono text-sm text-muted-foreground">
                         {fresh.data.subject.phone}
                       </span>
-                    </Detail>
+                    </Fact>
                   ) : null}
-                </DetailGrid>
+                </dl>
 
                 {/* Said plainly because the absence is meaningful: an incident
                     naming nobody is the normal case, not an incomplete one. */}
-                <p className="text-xs leading-relaxed text-muted-foreground">
+                <p className="text-sm leading-relaxed text-muted-foreground">
                   {row.subjectUserId
                     ? `This report names ${fresh.data?.subject?.fullName ?? 'a practitioner'}. Naming somebody is not an accusation — most incidents close as a system issue.`
                     : 'This report names no practitioner, which is ordinary. An incident traceable to no one person is still worth having.'}
@@ -205,18 +233,16 @@ export function IncidentDetail({ incident, onBack }: { incident: Incident; onBac
             {row.status === 'CLOSED' ? (
               <Card>
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-sm">How it was closed</CardTitle>
+                  <CardTitle className="text-base">How it was closed</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  <DetailGrid>
-                    <Detail label="Outcome">{row.outcome ? humanise(row.outcome) : '—'}</Detail>
-                    <Detail label="Closed">{row.closedAt ? formatWhen(row.closedAt) : '—'}</Detail>
-                  </DetailGrid>
+                  <dl className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
+                    <Fact label="Outcome">{row.outcome ? humanise(row.outcome) : '—'}</Fact>
+                    <Fact label="Closed">{row.closedAt ? formatWhen(row.closedAt) : '—'}</Fact>
+                  </dl>
                   {row.closureNotes ? (
-                    <div className="rounded-md bg-muted px-3 py-2 text-sm">
-                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                        What was found
-                      </p>
+                    <div className="rounded-md bg-muted px-3 py-2">
+                      <p className="text-sm font-medium text-muted-foreground">What was found</p>
                       <p className="mt-1">{row.closureNotes}</p>
                     </div>
                   ) : null}
@@ -227,7 +253,7 @@ export function IncidentDetail({ incident, onBack }: { incident: Incident; onBac
             {open ? (
               <Card>
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-sm">Decide</CardTitle>
+                  <CardTitle className="text-base">Decide</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   {blockedUntilTaken ? (
@@ -241,51 +267,53 @@ export function IncidentDetail({ incident, onBack }: { incident: Incident; onBac
                     </Alert>
                   ) : null}
 
-                  <div className="space-y-1.5">
-                    <Label>Outcome</Label>
-                    <Select value={outcome} onValueChange={setOutcome}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {OUTCOMES.map(([value, label]) => (
-                          // Suspending needs somebody to suspend; the server
-                          // refuses it on a report naming nobody, so the
-                          // option says why rather than failing on click.
-                          <SelectItem
-                            key={value}
-                            value={value}
-                            disabled={value === 'PRACTITIONER_SUSPENDED' && !row.subjectUserId}
-                          >
-                            {value === 'PRACTITIONER_SUSPENDED'
-                              ? row.subjectUserId
-                                ? `Suspend ${fresh.data?.subject?.fullName ?? 'the practitioner'}`
-                                : 'Suspend the practitioner (this report names nobody)'
-                              : label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  <Field label="Outcome">
+                    {(a11y) => (
+                      <Select value={outcome} onValueChange={setOutcome}>
+                        <SelectTrigger {...a11y}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {OUTCOMES.map(([value, label]) => (
+                            // Suspending needs somebody to suspend; the server
+                            // refuses it on a report naming nobody, so the
+                            // option says why rather than failing on click.
+                            <SelectItem
+                              key={value}
+                              value={value}
+                              disabled={value === 'PRACTITIONER_SUSPENDED' && !row.subjectUserId}
+                            >
+                              {value === 'PRACTITIONER_SUSPENDED'
+                                ? row.subjectUserId
+                                  ? `Suspend ${subjectName}`
+                                  : 'Suspend the practitioner (this report names nobody)'
+                                : label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </Field>
 
-                  <div className="space-y-1.5">
-                    <Label htmlFor="closure-note">
-                      What was found{' '}
-                      <span className="font-normal text-muted-foreground">— required</span>
-                    </Label>
+                  <Field
+                    label="What was found"
+                    required
+                    hint={`At least ${MIN_NOTE} characters. This is what the record will say happened.`}
+                    error={
+                      noteTooShort
+                        ? `${MIN_NOTE - noteLength} more character${MIN_NOTE - noteLength === 1 ? '' : 's'} needed.`
+                        : undefined
+                    }
+                  >
                     <Textarea
-                      id="closure-note"
                       rows={3}
                       placeholder="The cause, and what follows from it."
                       value={note}
                       onChange={(event) => setNote(event.target.value)}
                     />
-                    <p className="text-xs text-muted-foreground">
-                      At least {MIN_NOTE} characters. This is what the record will say happened.
-                    </p>
-                  </div>
+                  </Field>
 
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-col gap-2 sm:flex-row">
                     {row.status === 'REPORTED' ? (
                       <Button
                         variant="outline"
@@ -297,15 +325,17 @@ export function IncidentDetail({ incident, onBack }: { incident: Incident; onBac
                     ) : null}
 
                     <Button
-                      disabled={
-                        note.trim().length < MIN_NOTE || blockedUntilTaken || close.isPending
-                      }
-                      loading={close.isPending}
-                      onClick={() => close.mutate()}
+                      disabled={noteLength < MIN_NOTE || blockedUntilTaken}
+                      onClick={() => setConfirming(true)}
                     >
-                      Close incident
+                      Review and close
                     </Button>
                   </div>
+                  {row.status === 'REPORTED' ? (
+                    <p className="text-sm text-muted-foreground">
+                      Taking a case marks it under review, with your name against it in the history.
+                    </p>
+                  ) : null}
                 </CardContent>
               </Card>
             ) : null}
@@ -314,41 +344,74 @@ export function IncidentDetail({ incident, onBack }: { incident: Incident; onBac
           <TabsContent value="history" className="pt-5">
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-sm">
+                <CardTitle className="flex items-center gap-2 text-base">
                   <History className="size-4 text-muted-foreground" aria-hidden="true" />
                   What has happened to this case
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 {history.isPending ? (
-                  <Skeleton className="h-32 w-full" />
+                  <ListSkeleton rows={2} label="Loading the history" />
                 ) : history.isError ? (
-                  <Alert variant="destructive">
-                    <TriangleAlert />
-                    <AlertDescription>The history could not be loaded.</AlertDescription>
-                  </Alert>
+                  <ErrorState
+                    compact
+                    error={history.error}
+                    onRetry={() => void history.refetch()}
+                    retrying={history.isFetching}
+                  />
                 ) : history.data.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">Nothing recorded yet.</p>
+                  <p className="text-base text-muted-foreground">Nothing recorded yet.</p>
                 ) : (
-                  <ol className="space-y-3">
-                    {history.data.map((entry) => (
-                      <li key={entry.id} className="border-l-2 border-border pl-4">
-                        <p className="text-sm font-medium">
-                          {actionLabel(entry.action)}
-                        </p>
-                        <p className="mt-0.5 text-xs text-muted-foreground">
-                          {formatWhen(entry.createdAt)} · {formatAgo(entry.createdAt)}
-                        </p>
-                        {entry.reason ? <p className="mt-1 text-sm">{entry.reason}</p> : null}
-                      </li>
-                    ))}
-                  </ol>
+                  <Timeline
+                    label="History of this incident"
+                    steps={history.data.map((entry) => ({
+                      id: entry.id,
+                      state: 'done' as const,
+                      title: actionLabel(entry.action),
+                      when: `${formatWhen(entry.createdAt)} · ${formatAgo(entry.createdAt)}`,
+                      detail: entry.reason ?? undefined,
+                    }))}
+                  />
                 )}
               </CardContent>
             </Card>
           </TabsContent>
         </Tabs>
       </div>
+
+      <ConfirmDialog
+        open={confirming}
+        onOpenChange={setConfirming}
+        title="Close this incident"
+        object={
+          <>
+            {humanise(row.category)} at {row.facilityName} · {humanise(row.severity)}
+            <span className="block font-normal text-muted-foreground">Outcome: {outcomeLabel}</span>
+          </>
+        }
+        consequence={
+          <>
+            The incident is closed with this outcome, and what you wrote becomes the record of what
+            was found. There is no way to reopen a closed incident from here.
+            {outcome === 'PRACTITIONER_SUSPENDED' ? (
+              <>
+                {' '}
+                <strong>{subjectName}&apos;s account is suspended in the same step.</strong> Lifting
+                a suspension is a separate action, taken from their record.
+              </>
+            ) : null}
+            {outcome === 'REFERRED_TO_REGULATOR' ? (
+              <> This records the decision to refer; nothing is sent to the regulator from here.</>
+            ) : null}
+          </>
+        }
+        reversible={false}
+        destructive={outcome === 'PRACTITIONER_SUSPENDED'}
+        confirmLabel="Close incident"
+        cancelLabel="Not yet"
+        loading={close.isPending}
+        onConfirm={() => close.mutate()}
+      />
     </>
   );
 }

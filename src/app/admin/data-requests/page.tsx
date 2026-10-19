@@ -2,13 +2,10 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, Search, ShieldCheck } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { CircleAlert, Clock, ShieldCheck } from 'lucide-react';
 import { api } from '@/lib/ui/api';
+import { useCursorPager } from '@/lib/ui/cursor-pager';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import {
   Select,
   SelectContent,
@@ -16,11 +13,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { StatusBadge, humanise } from '@/components/app/status-badge';
+import { DataTable, type Column } from '@/components/app/data-table';
+import { Field } from '@/components/app/field';
+import { FilterBar } from '@/components/app/filter-bar';
 import { EmptyState, PageHeader } from '@/components/app/page-shell';
-import { ErrorState } from '@/components/app/states';
+import { Pager } from '@/components/app/pager';
+import { ErrorState, FilteredEmpty, TableSkeleton } from '@/components/app/states';
+import { StatusBadge, humanise } from '@/components/app/status-badge';
 import { ScreenTransition } from '@/components/app/motion';
 import { formatAgo, formatWhen } from '@/components/app/format';
 import { RequestDetail, type SubjectRequest } from './request-detail';
@@ -56,25 +56,17 @@ export default function DataRequestsPage() {
   const [search, setSearch] = useState('');
   const [applied, setApplied] = useState('');
   const [selected, setSelected] = useState<SubjectRequest | null>(null);
-
-  const [cursors, setCursors] = useState<(string | null)[]>([null]);
-  const [pageIndex, setPageIndex] = useState(0);
-  const cursor = cursors[pageIndex] ?? null;
-
-  function startOver() {
-    setCursors([null]);
-    setPageIndex(0);
-  }
+  const pager = useCursorPager();
 
   const queue = useQuery({
-    queryKey: ['request-queue', status, kind, applied, cursor],
+    queryKey: ['request-queue', status, kind, applied, pager.cursor],
     queryFn: () => {
       const parts = [
         `status=${status}`,
         `limit=${PAGE_SIZE}`,
         kind !== 'all' ? `kind=${kind}` : '',
         applied ? `search=${encodeURIComponent(applied)}` : '',
-        cursor ? `cursor=${cursor}` : '',
+        pager.cursor ? `cursor=${pager.cursor}` : '',
       ].filter(Boolean);
       return api.get<{ requests?: SubjectRequest[]; nextCursor?: string | null }>(
         `/api/v1/data-requests?${parts.join('&')}`,
@@ -94,7 +86,70 @@ export default function DataRequestsPage() {
   const rows = queue.data?.requests ?? [];
   const nextCursor = queue.data?.nextCursor ?? null;
   const overdue = rows.filter((row) => row.overdue).length;
-  const filtered = kind !== 'all' || Boolean(applied);
+  const activeCount = (kind !== 'all' ? 1 : 0) + (applied ? 1 : 0);
+
+  function clearFilters() {
+    setSearch('');
+    setApplied('');
+    setKind('all');
+    pager.startOver();
+  }
+
+  const isOpen = (row: SubjectRequest) => row.status === 'RECEIVED' || row.status === 'IN_PROGRESS';
+
+  const columns: Column<SubjectRequest>[] = [
+    {
+      id: 'subject',
+      header: 'Subject',
+      role: 'identity',
+      cell: (row) => (
+        <span className="block">
+          <span className="block font-medium">{row.subjectName}</span>
+          <span className="block text-sm font-normal text-muted-foreground">
+            {humanise(row.kind)}
+          </span>
+        </span>
+      ),
+    },
+    {
+      id: 'status',
+      header: 'Status',
+      role: 'status',
+      cell: (row) => <StatusBadge status={row.status} />,
+    },
+    {
+      // The clock is the point of this queue, so it reads as a countdown rather than a date
+      // somebody has to subtract — with a mark and the words, not only a colour.
+      id: 'clock',
+      header: 'Deadline',
+      cell: (row) => {
+        if (!isOpen(row)) return '—';
+        const left = daysLeft(row.dueBy);
+        const text = row.overdue
+          ? `${Math.abs(left)} days over`
+          : left === 0
+            ? 'Due today'
+            : `${left} days left`;
+        const Icon = row.overdue ? CircleAlert : Clock;
+        return (
+          <span
+            className={
+              row.overdue
+                ? 'inline-flex items-center gap-1.5 font-medium text-destructive-text'
+                : left <= 7
+                  ? 'inline-flex items-center gap-1.5 font-medium text-warning'
+                  : 'inline-flex items-center gap-1.5 text-muted-foreground'
+            }
+          >
+            <Icon className="size-4 shrink-0" aria-hidden="true" />
+            {text}
+          </span>
+        );
+      },
+    },
+    { id: 'due', header: 'Due', cell: (row) => formatWhen(row.dueBy) },
+    { id: 'received', header: 'Received', cell: (row) => formatAgo(row.receivedAt) },
+  ];
 
   return (
     <>
@@ -107,11 +162,11 @@ export default function DataRequestsPage() {
         value={status}
         onValueChange={(value) => {
           setStatus(value);
-          startOver();
+          pager.startOver();
         }}
-        className="mb-5"
+        className="mb-4"
       >
-        <TabsList>
+        <TabsList aria-label="Request status">
           {STATUSES.map(([value, label]) => (
             <TabsTrigger key={value} value={value}>
               {label}
@@ -120,200 +175,109 @@ export default function DataRequestsPage() {
         </TabsList>
       </Tabs>
 
-      <Card className="mb-6">
-        <CardContent className="pt-6">
-          <form
-            className="flex flex-wrap items-end gap-3"
-            onSubmit={(event) => {
-              event.preventDefault();
-              setApplied(search.trim());
-              startOver();
-            }}
-          >
-            <div className="min-w-[240px] flex-1 space-y-1.5">
-              <Label htmlFor="request-search">Search by subject</Label>
-              <Input
-                id="request-search"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Their name, or the number they registered with"
-              />
-            </div>
-
-            <div className="min-w-[170px] space-y-1.5">
-              <Label htmlFor="request-kind">Right</Label>
-              <Select
-                value={kind}
-                onValueChange={(value) => {
-                  setKind(value);
-                  startOver();
-                }}
-              >
-                <SelectTrigger id="request-kind">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Any right</SelectItem>
-                  {KINDS.map((value) => (
-                    <SelectItem key={value} value={value}>
-                      {humanise(value)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <Button type="submit" loading={queue.isFetching}>
-              <Search />
-              Search
-            </Button>
-
-            {filtered ? (
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => {
-                  setSearch('');
-                  setApplied('');
-                  setKind('all');
-                  startOver();
-                }}
-              >
-                Clear
-              </Button>
-            ) : null}
-          </form>
-
-          {!queue.isPending && rows.length > 0 ? (
-            <p className="mt-3 text-xs text-muted-foreground">
+      <FilterBar
+        searchLabel="Search by subject"
+        searchPlaceholder="Their name, or the number they registered with"
+        searchValue={search}
+        onSearchChange={setSearch}
+        onSubmit={() => {
+          setApplied(search.trim());
+          pager.startOver();
+        }}
+        activeCount={activeCount}
+        onClear={clearFilters}
+        busy={queue.isFetching && !queue.isPending}
+        summary={
+          !queue.isPending && rows.length > 0 ? (
+            <>
               {rows.length} on this page
               {overdue > 0 ? (
-                <span className="font-medium text-destructive-text"> · {overdue} past the deadline</span>
+                <span className="font-medium text-destructive-text">
+                  {' '}
+                  · {overdue} past the deadline
+                </span>
               ) : null}
-            </p>
-          ) : null}
-        </CardContent>
-      </Card>
+            </>
+          ) : undefined
+        }
+      >
+        <Field label="Right" className="md:w-48">
+          {(a11y) => (
+            <Select
+              value={kind}
+              onValueChange={(value) => {
+                setKind(value);
+                pager.startOver();
+              }}
+            >
+              <SelectTrigger {...a11y}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Any right</SelectItem>
+                {KINDS.map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {humanise(value)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </Field>
+      </FilterBar>
 
       {queue.isPending ? (
-        <div className="space-y-3">
-          {Array.from({ length: 5 }).map((_, index) => (
-            <Skeleton key={index} className="h-20 w-full" />
-          ))}
-        </div>
-      ) : queue.isError ? (
+        <TableSkeleton label="Loading requests" columns={5} />
+      ) : queue.isError && !queue.data ? (
         <ErrorState
           error={queue.error}
           onRetry={() => void queue.refetch()}
           retrying={queue.isFetching}
         />
       ) : rows.length === 0 ? (
-        <EmptyState
-          icon={<ShieldCheck />}
-          title={filtered ? 'Nothing matches that' : 'Nothing waiting'}
-          description={
-            filtered
-              ? 'Try a different right, or clear the filters.'
-              : 'Every request has been answered within its month.'
-          }
-        />
+        activeCount > 0 ? (
+          <FilteredEmpty noun="requests" activeCount={activeCount} onClear={clearFilters} />
+        ) : (
+          <EmptyState
+            icon={<ShieldCheck />}
+            title="Nothing waiting"
+            description="Every request has been answered within its month."
+          />
+        )
       ) : (
-        <ul className="space-y-3">
-          {rows.map((row) => {
-            const left = daysLeft(row.dueBy);
-            const open = row.status === 'RECEIVED' || row.status === 'IN_PROGRESS';
-
-            return (
-              <li key={row.id}>
-                <button
-                  type="button"
-                  onClick={() => setSelected(row)}
-                  className={cn(
-                    'w-full rounded-xl border bg-card p-4 text-left transition-all hover:border-primary/50 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-                    row.overdue && 'border-destructive/40',
-                  )}
-                >
-                  <div className="flex flex-wrap items-center gap-4">
-                    <span className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-accent text-accent-foreground">
-                      <ShieldCheck className="size-5" aria-hidden="true" />
-                    </span>
-
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-medium">{row.subjectName}</p>
-                      <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                        {humanise(row.kind)} · received {formatAgo(row.receivedAt)}
-                      </p>
-                      <p className="mt-1 truncate text-xs text-muted-foreground">
-                        Due {formatWhen(row.dueBy)}
-                      </p>
-                    </div>
-
-                    {/* The clock is the point of this queue, so it reads as a
-                        countdown rather than a date somebody has to subtract. */}
-                    {open ? (
-                      <span
-                        className={cn(
-                          'shrink-0 rounded-full px-2.5 py-1 text-xs font-medium',
-                          row.overdue
-                            ? 'bg-destructive/10 text-destructive-text'
-                            : left <= 7
-                              ? 'bg-warning/10 text-warning'
-                              : 'bg-muted text-muted-foreground',
-                        )}
-                      >
-                        {row.overdue
-                          ? `${Math.abs(left)} days over`
-                          : left === 0
-                            ? 'Due today'
-                            : `${left} days left`}
-                      </span>
-                    ) : null}
-
-                    <StatusBadge status={row.status} />
-                  </div>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+        <DataTable
+          caption={`${humanise(status)} data requests`}
+          rows={rows}
+          columns={columns}
+          getKey={(row) => row.id}
+          actionHeader="Request"
+          rowTone={(row) =>
+            row.overdue && isOpen(row)
+              ? 'danger'
+              : isOpen(row) && daysLeft(row.dueBy) <= 7
+                ? 'warning'
+                : undefined
+          }
+          action={(row) => (
+            <Button
+              variant="outline"
+              size="sm"
+              aria-label={`Open the request: ${humanise(row.kind)}, ${row.subjectName}`}
+              onClick={() => setSelected(row)}
+            >
+              {isOpen(row) ? 'Answer' : 'View'}
+            </Button>
+          )}
+        />
       )}
 
-      {rows.length > 0 && (pageIndex > 0 || nextCursor) ? (
-        <div className="mt-5 flex items-center justify-between gap-3">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={pageIndex === 0 || queue.isFetching}
-            onClick={() => setPageIndex((index) => Math.max(0, index - 1))}
-          >
-            <ChevronLeft />
-            Previous
-          </Button>
-
-          <p className="tabular text-xs text-muted-foreground">
-            Page {pageIndex + 1}
-            {queue.isFetching ? ' · loading' : ''}
-          </p>
-
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={!nextCursor || queue.isFetching}
-            onClick={() => {
-              if (!nextCursor) return;
-              setCursors((current) => {
-                const next = current.slice(0, pageIndex + 1);
-                next.push(nextCursor);
-                return next;
-              });
-              setPageIndex((index) => index + 1);
-            }}
-          >
-            Next
-            <ChevronRight />
-          </Button>
-        </div>
-      ) : null}
+      <Pager
+        pageIndex={pager.pageIndex}
+        hasNext={Boolean(nextCursor)}
+        busy={queue.isFetching}
+        onPrevious={pager.goPrevious}
+        onNext={() => pager.goNext(nextCursor)}
+      />
     </>
   );
 }

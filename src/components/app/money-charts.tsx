@@ -9,11 +9,16 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from '@/components/ui/chart';
+import { nairaTick } from '@/lib/ui/naira-axis';
 
 /**
  * The charts the facility dashboard and the finance console draw, in one file
  * so the charting library is a single chunk that those pages load after their
  * tiles and navigation have appeared (see the `dynamic` imports there).
+ *
+ * Bars are drawn in place, not grown from the baseline: the grow-in is decoration that a
+ * `prefers-reduced-motion` visitor has asked not to get, and on a low-end phone it is a second of
+ * dropped frames on the page that matters most to finance.
  *
  * Both read the same validated colour slots — see docs/interfaces.md: fixed
  * slots of a categorical palette checked for contrast and colour-vision
@@ -56,12 +61,30 @@ export function SpendChart({
             categorical axis has not already said. */}
         <CartesianGrid vertical={false} strokeDasharray="3 3" />
         <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={8} />
-        <YAxis tickLine={false} axisLine={false} tickMargin={8} width={yAxisWidth} tickFormatter={naira} />
-        <ChartTooltip content={<ChartTooltipContent formatter={(value) => naira(Number(value))} />} />
+        <YAxis
+          tickLine={false}
+          axisLine={false}
+          tickMargin={8}
+          width={yAxisWidth}
+          tickFormatter={nairaTick}
+        />
+        <ChartTooltip
+          content={<ChartTooltipContent formatter={(value) => naira(Number(value))} />}
+        />
         {/* 2px surface gap between adjacent bars, and rounded data-ends
             anchored to the baseline. */}
-        <Bar dataKey="invoiced" fill="var(--color-invoiced)" radius={[4, 4, 0, 0]} />
-        <Bar dataKey="paid" fill="var(--color-paid)" radius={[4, 4, 0, 0]} />
+        <Bar
+          dataKey="invoiced"
+          fill="var(--color-invoiced)"
+          radius={[4, 4, 0, 0]}
+          isAnimationActive={false}
+        />
+        <Bar
+          dataKey="paid"
+          fill="var(--color-paid)"
+          radius={[4, 4, 0, 0]}
+          isAnimationActive={false}
+        />
         {legend ? <ChartLegend content={<ChartLegendContent />} /> : null}
       </BarChart>
     </ChartContainer>
@@ -69,7 +92,11 @@ export function SpendChart({
 }
 
 /** People needed against people confirmed, by week. */
-export function FulfilmentChart({ data }: { data: { week: string; needed: number; filled: number }[] }) {
+export function FulfilmentChart({
+  data,
+}: {
+  data: { week: string; needed: number; filled: number }[];
+}) {
   return (
     <ChartContainer config={FULFILMENT_CONFIG} className="h-[240px] w-full">
       <BarChart data={data} accessibilityLayer>
@@ -77,8 +104,18 @@ export function FulfilmentChart({ data }: { data: { week: string; needed: number
         <XAxis dataKey="week" tickLine={false} axisLine={false} tickMargin={8} />
         <YAxis tickLine={false} axisLine={false} tickMargin={8} width={28} allowDecimals={false} />
         <ChartTooltip content={<ChartTooltipContent />} />
-        <Bar dataKey="needed" fill="var(--color-needed)" radius={[4, 4, 0, 0]} />
-        <Bar dataKey="filled" fill="var(--color-filled)" radius={[4, 4, 0, 0]} />
+        <Bar
+          dataKey="needed"
+          fill="var(--color-needed)"
+          radius={[4, 4, 0, 0]}
+          isAnimationActive={false}
+        />
+        <Bar
+          dataKey="filled"
+          fill="var(--color-filled)"
+          radius={[4, 4, 0, 0]}
+          isAnimationActive={false}
+        />
         <ChartLegend content={<ChartLegendContent />} />
       </BarChart>
     </ChartContainer>
@@ -94,10 +131,12 @@ export function OutstandingChart({ data }: { data: { name: string; outstanding: 
     <ChartContainer config={OUTSTANDING_CONFIG} className="h-[260px] w-full">
       <BarChart data={data} layout="vertical" accessibilityLayer>
         <CartesianGrid horizontal={false} strokeDasharray="3 3" />
-        <XAxis type="number" tickLine={false} axisLine={false} tickFormatter={naira} />
+        <XAxis type="number" tickLine={false} axisLine={false} tickFormatter={nairaTick} />
         <YAxis type="category" dataKey="name" tickLine={false} axisLine={false} width={140} />
-        <ChartTooltip content={<ChartTooltipContent formatter={(value) => naira(Number(value))} />} />
-        <Bar dataKey="outstanding" radius={[0, 4, 4, 0]}>
+        <ChartTooltip
+          content={<ChartTooltipContent formatter={(value) => naira(Number(value))} />}
+        />
+        <Bar dataKey="outstanding" radius={[0, 4, 4, 0]} isAnimationActive={false}>
           {data.map((row) => (
             <Cell key={row.name} fill="var(--color-outstanding)" />
           ))}

@@ -3,7 +3,7 @@
 import { useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Trash2 } from 'lucide-react';
+import { RotateCw, Trash2, TriangleAlert } from 'lucide-react';
 import { api, errorMessage } from '@/lib/ui/api';
 import { usePhoto } from '@/lib/ui/practitioner';
 import { useSession } from '@/lib/ui/session';
@@ -45,6 +45,8 @@ export function PhotoField({
   const queryClient = useQueryClient();
   const fileInput = useRef<HTMLInputElement>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  // The file that did not save, kept so "Try again" does not mean finding it in the gallery again.
+  const [failed, setFailed] = useState<{ file: File; message: string } | null>(null);
 
   // The same photograph the top bar and the profile header show, from one
   // query, so a change here changes all three.
@@ -71,12 +73,12 @@ export function PhotoField({
       await api.patch('/api/v1/practitioners/me', { photoObjectKey: ticket.objectKey });
     },
     onSuccess: () => {
+      setFailed(null);
       toast.success('Photograph saved');
       void queryClient.invalidateQueries({ queryKey: ['profile'] });
       void queryClient.invalidateQueries({ queryKey: ['photo-url'] });
     },
-    onError: (error) =>
-      toast.error('Could not save the photograph', { description: errorMessage(error) }),
+    onError: (error, file) => setFailed({ file, message: errorMessage(error) }),
   });
 
   const remove = useMutation({
@@ -91,14 +93,17 @@ export function PhotoField({
 
   function choose(file: File | undefined) {
     setProblem(null);
+    setFailed(null);
     if (!file) return;
 
     if (!ACCEPTED.includes(file.type)) {
-      setProblem('Use a JPEG, PNG, WebP or HEIC image.');
+      setProblem(`${file.name}: use a JPEG, PNG, WebP or HEIC image.`);
       return;
     }
     if (file.size > MAX_BYTES) {
-      setProblem('That image is over 10MB. A photo from a phone camera is usually well under it.');
+      setProblem(
+        `${file.name} is over 10 MB. A photo from a phone camera is usually well under it.`,
+      );
       return;
     }
     upload.mutate(file);
@@ -107,24 +112,60 @@ export function PhotoField({
   const busy = upload.isPending || remove.isPending;
 
   return (
-    <div className="flex flex-wrap items-start gap-5">
+    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:gap-5">
       <Avatar name={session.user.fullName} src={photo.url} size="xl" />
 
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium">Photograph</p>
-        <p className="mt-1 max-w-md text-xs leading-relaxed text-muted-foreground">
+        <p id="photo-field-label" className="text-base font-medium leading-snug">
+          Photograph <span className="font-normal text-muted-foreground">(optional)</span>
+        </p>
+        <p
+          id="photo-field-help"
+          className="mt-1 max-w-md text-sm leading-relaxed text-muted-foreground"
+        >
           {profileExists
             ? 'So the ward knows who arrived. A clear head-and-shoulders picture, the way it would appear on an ID badge.'
             : 'Save your details first — a photograph attaches to a profile, and you do not have one yet.'}
         </p>
 
-        {problem ? <p className="mt-2 text-xs text-destructive-text">{problem}</p> : null}
+        {problem ? (
+          <p
+            role="alert"
+            className="mt-2 flex items-start gap-1.5 text-sm font-medium text-destructive-text"
+          >
+            <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+            {problem}
+          </p>
+        ) : null}
+
+        {failed ? (
+          <div role="alert" className="mt-2 space-y-2 text-sm">
+            <p className="flex items-start gap-1.5 font-medium text-destructive-text">
+              <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+              <span>
+                {failed.file.name} was not saved. {failed.message}
+              </span>
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busy}
+              loading={upload.isPending}
+              onClick={() => upload.mutate(failed.file)}
+            >
+              <RotateCw />
+              Try again
+            </Button>
+          </div>
+        ) : null}
 
         <input
           ref={fileInput}
           type="file"
           accept={ACCEPTED.join(',')}
           className="hidden"
+          aria-hidden="true"
+          tabIndex={-1}
           onChange={(event) => {
             choose(event.target.files?.[0]);
             // Cleared so picking the same file twice still fires a change.
@@ -136,9 +177,9 @@ export function PhotoField({
           <Button
             type="button"
             variant="outline"
-            size="sm"
             disabled={!profileExists || busy}
             loading={upload.isPending}
+            aria-describedby="photo-field-help"
             onClick={() => fileInput.current?.click()}
           >
             {hasPhoto ? 'Replace photograph' : 'Add a photograph'}
@@ -148,13 +189,12 @@ export function PhotoField({
             <Button
               type="button"
               variant="ghost"
-              size="sm"
               disabled={busy}
               loading={remove.isPending}
               onClick={() => remove.mutate()}
             >
               <Trash2 />
-              Remove
+              Remove photograph
             </Button>
           ) : null}
         </div>

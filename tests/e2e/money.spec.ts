@@ -42,13 +42,18 @@ test('an administrator raises an invoice for the approved work and issues it', a
   await expectToast(page, 'Draft raised');
 
   const invoice = card(page, world().practitioner.fullName).filter({
-    has: page.getByRole('button', { name: 'Issue it' }),
+    has: page.getByRole('button', { name: /^Issue invoice/ }),
   });
-  gross = (await invoice.locator('p.tabular.text-lg').innerText()).trim();
+  gross = (await invoice.locator('span.tabular.text-xl').first().innerText()).trim();
   expect(gross).toMatch(/^₦[\d,]+\.\d{2}$/);
   // The draft's toast can sit over this button once it is scrolled into view, and then never leaves.
   await toastsGone(page);
-  await invoice.getByRole('button', { name: 'Issue it' }).click();
+  await invoice.getByRole('button', { name: /^Issue invoice/ }).click();
+  // Issuing asks the facility for money and cannot be taken back, so it is confirmed first, with
+  // the invoice and the amount named.
+  const confirm = page.getByRole('dialog', { name: 'Issue this invoice' });
+  await expect(confirm.getByText(gross)).toBeVisible();
+  await confirm.getByRole('button', { name: 'Issue invoice', exact: true }).click();
   await expectToast(page, 'Issued');
 });
 
@@ -72,7 +77,7 @@ test('the payment is recorded, and the hospital owes nothing', async ({ page }) 
   await page.getByRole('button', { name: 'Record payment' }).click();
   // The transfer is recorded as the bank statement shows it: reference and amount, with the
   // date (today) and the payer (the hospital) already filled in. Not the card's button.
-  const dialog = page.getByRole('dialog', { name: /^Record payment of / });
+  const dialog = page.getByRole('dialog', { name: 'Record a payment received' });
   await dialog.getByLabel('Bank reference for the transfer').fill('E2E-TRANSFER-0001');
   await dialog.getByLabel('Amount received (₦)').fill(gross.replace(/[₦,]/g, ''));
   await dialog.getByRole('button', { name: 'Record payment' }).click();
@@ -107,8 +112,16 @@ test('finance pays her, and her earnings say so', async ({ page }) => {
   // waits two minutes for a name that never comes if the data wins. The amount is what the nurse
   // earned: waiting for it also checks that the page agrees with the invoice.
   await page.getByRole('button', { name: `Prepare ${gross}`, exact: true }).click();
+  await page
+    .getByRole('dialog', { name: 'Prepare a payout' })
+    .getByRole('button', { name: 'Prepare payout' })
+    .click();
   await expectToast(page, 'Prepared');
   await page.getByRole('button', { name: `Release ${gross}` }).click();
+  await page
+    .getByRole('dialog', { name: 'Release this payout' })
+    .getByRole('button', { name: 'Release payout' })
+    .click();
   await expectToast(page, 'Released to the gateway');
 
   await page.context().clearCookies();

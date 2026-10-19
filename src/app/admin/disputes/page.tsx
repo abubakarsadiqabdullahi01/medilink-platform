@@ -2,20 +2,20 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, Gavel, Search } from 'lucide-react';
+import { Gavel } from 'lucide-react';
 import { api } from '@/lib/ui/api';
+import { useCursorPager } from '@/lib/ui/cursor-pager';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { DataTable, type Column } from '@/components/app/data-table';
+import { FilterBar } from '@/components/app/filter-bar';
+import { EmptyState, PageHeader } from '@/components/app/page-shell';
+import { Pager } from '@/components/app/pager';
+import { ErrorState, FilteredEmpty, TableSkeleton } from '@/components/app/states';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
-import { EmptyState, PageHeader, QueueSkeleton } from '@/components/app/page-shell';
-import { ErrorState } from '@/components/app/states';
-import { formatAgo, formatWhen } from '@/components/app/format';
-import { cn } from '@/lib/utils';
 import { ScreenTransition } from '@/components/app/motion';
+import { formatAgo, formatWhen } from '@/components/app/format';
 import { DisputeDetail, type Dispute } from './dispute-detail';
 
 // [value, label] rather than the OPEN/UNDER_REVIEW pair the queue used to be
@@ -47,25 +47,16 @@ export default function DisputesPage() {
   const [search, setSearch] = useState('');
   const [applied, setApplied] = useState('');
   const [selected, setSelected] = useState<Dispute | null>(null);
+  const pager = useCursorPager();
 
-  const [cursors, setCursors] = useState<(string | null)[]>([null]);
-  const [pageIndex, setPageIndex] = useState(0);
-  const cursor = cursors[pageIndex] ?? null;
-
-  function startOver() {
-    setCursors([null]);
-    setPageIndex(0);
-  }
-
-  const queueKey = ['disputes', status, applied];
   const queue = useQuery({
-    queryKey: [...queueKey, cursor],
+    queryKey: ['disputes', status, applied, pager.cursor],
     queryFn: () => {
       const parts = [
         `status=${status}`,
         `limit=${PAGE_SIZE}`,
         applied ? `search=${encodeURIComponent(applied)}` : '',
-        cursor ? `cursor=${cursor}` : '',
+        pager.cursor ? `cursor=${pager.cursor}` : '',
       ].filter(Boolean);
       return api.get<{ disputes?: Dispute[]; nextCursor?: string | null }>(
         `/api/v1/disputes?${parts.join('&')}`,
@@ -76,6 +67,13 @@ export default function DisputesPage() {
 
   const rows = queue.data?.disputes ?? [];
   const nextCursor = queue.data?.nextCursor ?? null;
+  const activeCount = applied ? 1 : 0;
+
+  function clearFilters() {
+    setSearch('');
+    setApplied('');
+    pager.startOver();
+  }
 
   if (selected) {
     return (
@@ -84,6 +82,54 @@ export default function DisputesPage() {
       </ScreenTransition>
     );
   }
+
+  const columns: Column<Dispute>[] = [
+    {
+      id: 'practitioner',
+      header: 'Practitioner',
+      role: 'identity',
+      cell: (row) => (
+        <span className="block">
+          <span className="block font-medium">{row.practitionerName}</span>
+          <span className="block text-sm font-normal text-muted-foreground">
+            {row.facilityName}
+          </span>
+        </span>
+      ),
+    },
+    {
+      id: 'status',
+      header: 'Status',
+      role: 'status',
+      cell: (row) => <StatusBadge status={row.status} />,
+    },
+    { id: 'shift', header: 'Shift', cell: (row) => formatWhen(row.shiftStartsAt) },
+    {
+      id: 'raised',
+      header: 'Raised by',
+      cell: (row) => (
+        <span className="flex flex-wrap gap-1.5">
+          <Badge variant={row.raisedParty === 'PRACTITIONER' ? 'info' : 'warning'}>
+            {row.raisedParty === 'PRACTITIONER' ? 'Practitioner' : 'Facility'}
+          </Badge>
+          <Badge variant="secondary">{humanise(row.category)}</Badge>
+        </span>
+      ),
+    },
+    {
+      // One line of the reason. The whole of it is a click away, and a queue of full paragraphs
+      // is a queue nobody scans.
+      id: 'reason',
+      header: 'What they said',
+      cell: (row) => <span className="line-clamp-2 font-normal">{row.reason}</span>,
+    },
+    {
+      id: 'opened',
+      header: 'Opened',
+      cell: (row) =>
+        row.status === 'OPEN' || row.status === 'UNDER_REVIEW' ? formatAgo(row.createdAt) : '—',
+    },
+  ];
 
   return (
     <>
@@ -96,11 +142,11 @@ export default function DisputesPage() {
         value={status}
         onValueChange={(value) => {
           setStatus(value);
-          startOver();
+          pager.startOver();
         }}
-        className="mb-5"
+        className="mb-4"
       >
-        <TabsList>
+        <TabsList aria-label="Dispute status">
           {STATUSES.map(([value, label]) => (
             <TabsTrigger key={value} value={value}>
               {label}
@@ -109,153 +155,63 @@ export default function DisputesPage() {
         </TabsList>
       </Tabs>
 
-      <Card className="mb-6">
-        <CardContent className="pt-6">
-          <form
-            className="flex flex-wrap items-end gap-3"
-            onSubmit={(event) => {
-              event.preventDefault();
-              setApplied(search.trim());
-              startOver();
-            }}
-          >
-            <div className="min-w-[240px] flex-1 space-y-1.5">
-              <Label htmlFor="dispute-search">Search by practitioner or facility</Label>
-              <Input
-                id="dispute-search"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Ngozi, or Ibadan University Hospital"
-              />
-            </div>
-
-            <Button type="submit" loading={queue.isFetching}>
-              <Search />
-              Search
-            </Button>
-
-            {applied ? (
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => {
-                  setSearch('');
-                  setApplied('');
-                  startOver();
-                }}
-              >
-                Clear
-              </Button>
-            ) : null}
-          </form>
-
-          {!queue.isPending && rows.length > 0 ? (
-            <p className="mt-3 text-xs text-muted-foreground">{rows.length} on this page</p>
-          ) : null}
-        </CardContent>
-      </Card>
+      <FilterBar
+        searchLabel="Search by practitioner or facility"
+        searchPlaceholder="Ngozi, or Ibadan University Hospital"
+        searchValue={search}
+        onSearchChange={setSearch}
+        onSubmit={() => {
+          setApplied(search.trim());
+          pager.startOver();
+        }}
+        activeCount={activeCount}
+        onClear={clearFilters}
+        busy={queue.isFetching && !queue.isPending}
+        summary={!queue.isPending && rows.length > 0 ? `${rows.length} on this page` : undefined}
+      />
 
       {queue.isPending ? (
-        <QueueSkeleton />
-      ) : queue.isError ? (
+        <TableSkeleton label="Loading disputes" columns={5} />
+      ) : queue.isError && !queue.data ? (
         <ErrorState
           error={queue.error}
           onRetry={() => void queue.refetch()}
           retrying={queue.isFetching}
         />
       ) : rows.length === 0 ? (
-        <EmptyState
-          icon={<Gavel />}
-          title={applied ? 'Nothing matches that' : `No ${humanise(status).toLowerCase()} cases`}
-          description={applied ? 'Try part of a practitioner or facility name.' : undefined}
-        />
+        activeCount > 0 ? (
+          <FilteredEmpty noun="disputes" activeCount={activeCount} onClear={clearFilters} />
+        ) : (
+          <EmptyState icon={<Gavel />} title={`No ${humanise(status).toLowerCase()} cases`} />
+        )
       ) : (
-        <ul className="space-y-3">
-          {rows.map((row) => {
-            const open = row.status === 'OPEN' || row.status === 'UNDER_REVIEW';
-
-            return (
-              <li key={row.id}>
-                <button
-                  type="button"
-                  onClick={() => setSelected(row)}
-                  className={cn(
-                    'w-full rounded-xl border bg-card p-4 text-left transition-all hover:border-primary/50 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-                    row.status === 'OPEN' && 'border-warning/40',
-                  )}
-                >
-                  <div className="flex flex-wrap items-center gap-4">
-                    <span className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-accent text-accent-foreground">
-                      <Gavel className="size-5" aria-hidden="true" />
-                    </span>
-
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-medium">{row.practitionerName}</p>
-                      <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                        {row.facilityName} · shift {formatWhen(row.shiftStartsAt)}
-                      </p>
-                      {/* One line of the reason. The whole of it is a click
-                          away, and a queue of full paragraphs is a queue
-                          nobody scans. */}
-                      <p className="mt-1 truncate text-sm text-muted-foreground">{row.reason}</p>
-                    </div>
-
-                    <div className="flex shrink-0 flex-wrap items-center gap-2">
-                      <Badge variant={row.raisedParty === 'PRACTITIONER' ? 'info' : 'warning'}>
-                        {row.raisedParty === 'PRACTITIONER' ? 'Practitioner' : 'Facility'}
-                      </Badge>
-                      <Badge variant="secondary">{humanise(row.category)}</Badge>
-                      {open ? (
-                        <span className="text-xs text-muted-foreground">
-                          {formatAgo(row.createdAt)}
-                        </span>
-                      ) : null}
-                      <StatusBadge status={row.status} />
-                    </div>
-                  </div>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+        <DataTable
+          caption={`${humanise(status)} disputes`}
+          rows={rows}
+          columns={columns}
+          getKey={(row) => row.id}
+          actionHeader="Case"
+          rowTone={(row) => (row.status === 'OPEN' ? 'warning' : undefined)}
+          action={(row) => (
+            <Button
+              variant="outline"
+              size="sm"
+              aria-label={`Open the case: ${row.practitionerName} at ${row.facilityName}`}
+              onClick={() => setSelected(row)}
+            >
+              {row.status === 'OPEN' || row.status === 'UNDER_REVIEW' ? 'Open case' : 'View'}
+            </Button>
+          )}
+        />
       )}
 
-      {rows.length > 0 && (pageIndex > 0 || nextCursor) ? (
-        <div className="mt-5 flex items-center justify-between gap-3">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={pageIndex === 0 || queue.isFetching}
-            onClick={() => setPageIndex((index) => Math.max(0, index - 1))}
-          >
-            <ChevronLeft />
-            Previous
-          </Button>
-
-          <p className="tabular text-xs text-muted-foreground">
-            Page {pageIndex + 1}
-            {queue.isFetching ? ' · loading' : ''}
-          </p>
-
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={!nextCursor || queue.isFetching}
-            onClick={() => {
-              if (!nextCursor) return;
-              setCursors((current) => {
-                const next = current.slice(0, pageIndex + 1);
-                next.push(nextCursor);
-                return next;
-              });
-              setPageIndex((index) => index + 1);
-            }}
-          >
-            Next
-            <ChevronRight />
-          </Button>
-        </div>
-      ) : null}
+      <Pager
+        pageIndex={pager.pageIndex}
+        hasNext={Boolean(nextCursor)}
+        busy={queue.isFetching}
+        onPrevious={pager.goPrevious}
+        onNext={() => pager.goNext(nextCursor)}
+      />
     </>
   );
 }

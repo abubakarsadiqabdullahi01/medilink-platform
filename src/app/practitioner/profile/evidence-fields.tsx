@@ -1,8 +1,8 @@
 'use client';
 
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { DocumentUpload, type UploadedDocument } from '@/components/app/document-upload';
+import { Field } from '@/components/app/field';
 import type { ReferenceData } from '@/lib/ui/reference';
 
 /**
@@ -120,6 +120,25 @@ export function isComplete(
   return true;
 }
 
+/**
+ * Why a submission cannot be sent yet, in words, for the line beside the button.
+ *
+ * A disabled button that says nothing leaves a person guessing which of two fields it is waiting
+ * for. `null` when nothing is missing.
+ */
+export function whatIsMissing(
+  rule: EvidenceRule,
+  referenceNumber: string,
+  document: UploadedDocument | null,
+): string | null {
+  const missing: string[] = [];
+  if (rule.referenceRequired && !referenceNumber.trim()) missing.push(rule.referenceLabel);
+  if (rule.documentRequired && !document) missing.push(rule.documentLabel);
+  if (missing.length > 0) return `Still needed: ${missing.join(' and ')}.`;
+  if (referenceProblem(rule, referenceNumber)) return 'Correct the number above to send it.';
+  return null;
+}
+
 export function EvidenceFields({
   rule,
   idPrefix,
@@ -139,68 +158,70 @@ export function EvidenceFields({
   referenceOptionalNote?: string;
 }) {
   const problem = referenceProblem(rule, referenceNumber);
-  const optional = referenceOptionalNote ?? (rule.referenceRequired ? null : 'optional');
+  const documentLabelId = `${idPrefix}-document-label`;
+  const documentWhyId = `${idPrefix}-document-why`;
+
+  const reference = (
+    <Field
+      label={rule.referenceLabel}
+      required={rule.referenceRequired && !referenceOptionalNote}
+      optional={!rule.referenceRequired || Boolean(referenceOptionalNote)}
+      hint={
+        referenceOptionalNote
+          ? `Only if the one you sent was wrong${rule.referenceHint ? `. ${rule.referenceHint}` : '.'}`
+          : rule.referenceHint
+      }
+      error={problem ?? undefined}
+    >
+      <Input
+        id={`${idPrefix}-reference`}
+        value={referenceNumber}
+        inputMode={rule.isNin ? 'numeric' : undefined}
+        autoComplete="off"
+        onChange={(event) => onReferenceNumber(event.target.value)}
+        placeholder={rule.referencePlaceholder}
+      />
+    </Field>
+  );
 
   return (
     <>
       {/* Document-reviewed credentials lead with the document; the others lead
           with the number, which is what the photograph is read against. */}
-      {rule.referenceRequired ? (
-        <div className="space-y-1.5">
-          <Label htmlFor={`${idPrefix}-reference`}>
-            {rule.referenceLabel}
-            {optional ? (
-              <span className="font-normal text-muted-foreground"> — {optional}</span>
-            ) : null}
-          </Label>
-          <Input
-            id={`${idPrefix}-reference`}
-            value={referenceNumber}
-            inputMode={rule.isNin ? 'numeric' : undefined}
-            autoComplete="off"
-            onChange={(event) => onReferenceNumber(event.target.value)}
-            placeholder={rule.referencePlaceholder}
-            aria-invalid={Boolean(problem)}
-          />
-          {problem ? (
-            <p className="text-xs text-destructive-text">{problem}</p>
-          ) : rule.referenceHint ? (
-            <p className="text-xs text-muted-foreground">{rule.referenceHint}</p>
-          ) : null}
-        </div>
-      ) : null}
+      {rule.referenceRequired ? reference : null}
 
-      <div className="space-y-1.5">
-        <Label>
+      <div className="flex min-w-0 flex-col gap-1.5">
+        <p id={documentLabelId} className="text-base font-medium leading-snug">
           {rule.documentLabel}
-          {rule.documentRequired ? null : (
-            <span className="font-normal text-muted-foreground"> — optional</span>
+          {rule.documentRequired ? (
+            <>
+              <span className="text-destructive-text" aria-hidden="true">
+                {' '}
+                *
+              </span>
+              <span className="sr-only"> (required)</span>
+            </>
+          ) : (
+            <span className="font-normal text-muted-foreground"> (optional)</span>
           )}
-        </Label>
+        </p>
         <DocumentUpload
           endpoint="/api/v1/credentials/document-upload-url"
           value={document}
           onUploaded={onDocument}
           label={rule.documentPrompt}
           hint={rule.documentHint}
+          labelledBy={documentLabelId}
+          describedBy={rule.why ? documentWhyId : undefined}
         />
-        {rule.why ? <p className="text-xs text-muted-foreground">{rule.why}</p> : null}
+        {rule.why ? (
+          <p id={documentWhyId} className="text-sm leading-snug text-muted-foreground">
+            {rule.why}
+          </p>
+        ) : null}
       </div>
 
-      {!rule.referenceRequired ? (
-        <div className="space-y-1.5">
-          <Label htmlFor={`${idPrefix}-reference`}>
-            {rule.referenceLabel}
-            <span className="font-normal text-muted-foreground"> — optional</span>
-          </Label>
-          <Input
-            id={`${idPrefix}-reference`}
-            value={referenceNumber}
-            onChange={(event) => onReferenceNumber(event.target.value)}
-            placeholder={rule.referencePlaceholder}
-          />
-        </div>
-      ) : null}
+      {!rule.referenceRequired ? reference : null}
     </>
   );
 }

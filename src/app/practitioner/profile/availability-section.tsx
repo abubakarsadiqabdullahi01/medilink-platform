@@ -1,16 +1,14 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
-import { CalendarCheck, CalendarDays, CalendarOff, Moon, Sun, Trash2, TriangleAlert } from 'lucide-react';
+import { CalendarCheck, CalendarDays, CalendarOff, Moon, Sun, Trash2 } from 'lucide-react';
 import { api } from '@/lib/ui/api';
 import { useQuery } from '@tanstack/react-query';
 import { useQueueAction } from '@/lib/ui/queue';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import {
   Select,
   SelectContent,
@@ -20,7 +18,11 @@ import {
 } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
-import { EmptyState, QueueSkeleton } from '@/components/app/page-shell';
+import { ConfirmDialog } from '@/components/app/confirm-dialog';
+import { Field } from '@/components/app/field';
+import { EmptyState } from '@/components/app/page-shell';
+import { StaleNote } from '@/components/app/stale-note';
+import { ErrorState, ListSkeleton } from '@/components/app/states';
 import { formatWhen } from '@/components/app/format';
 import {
   allDay,
@@ -85,6 +87,10 @@ function toMinute(value: string): number {
  * questions: a recurring slot is a standing pattern, a block is a named
  * exception to it. A single grid would flatten that distinction and lose the
  * reason a block carries — which is exactly what a dispute later asks for.
+ *
+ * Every form here is one column on a phone with its labels always on screen, and a list that
+ * could not be loaded says so instead of reading as "nothing set": a practitioner who sees "No
+ * pattern set" over a failed request would add a pattern on top of one they already have.
  */
 export function AvailabilitySection() {
   // One request for both lists: the endpoint returns slots and blocks
@@ -108,7 +114,9 @@ export function AvailabilitySection() {
   const ordered = [...slots].sort(
     (a, b) => weekday(a) - weekday(b) || (a.startMinute ?? 0) - (b.startMinute ?? 0),
   );
-  const blocks = calendar.data?.blocks ?? [];
+  const blocks = [...(calendar.data?.blocks ?? [])].sort(
+    (a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime(),
+  );
 
   const [dayOfWeek, setDayOfWeek] = useState('1');
   const [startTime, setStartTime] = useState('08:00');
@@ -123,6 +131,11 @@ export function AvailabilitySection() {
   const [blockFrom, setBlockFrom] = useState('');
   const [blockTo, setBlockTo] = useState('');
   const [blockReason, setBlockReason] = useState('');
+  const [removing, setRemoving] = useState<Block | null>(null);
+
+  const blockEndsBeforeStart =
+    Boolean(blockFrom && blockTo) &&
+    lagosLocalToInstant(blockTo).getTime() <= lagosLocalToInstant(blockFrom).getTime();
 
   const addSlot = useQueueAction<void>({
     queueKey,
@@ -178,12 +191,73 @@ export function AvailabilitySection() {
         reason: blockReason.trim(),
       }),
     success: 'Blocked out',
+    // What was typed is cleared only once it has been saved.
+    onDone: () => {
+      setBlockFrom('');
+      setBlockTo('');
+      setBlockReason('');
+    },
   });
+
+  const removeBlock = useQueueAction<{ id: string }>({
+    queueKey,
+    run: ({ id }) => api.del(`/api/v1/availability/blocks/${id}`),
+    success: 'Time away removed',
+  });
+
+  /** What a list shows while it loads, when it could not be loaded, and — only then — when it is empty. */
+  function listArea(rows: number, whenLoaded: () => ReactNode) {
+    if (calendar.isPending) return <ListSkeleton rows={rows} label="Loading your availability" />;
+    if (calendar.isError && !calendar.data) {
+      return (
+        <ErrorState
+          error={calendar.error}
+          onRetry={() => void calendar.refetch()}
+          retrying={calendar.isFetching}
+          compact
+        />
+      );
+    }
+    return whenLoaded();
+  }
+
+  const removeButton = (what: string, onClick: () => void, busy = false) => (
+    <Button
+      variant="ghost"
+      size="sm"
+      aria-label={`Remove ${what}`}
+      loading={busy}
+      className="text-destructive-text hover:bg-destructive/10 hover:text-destructive-text"
+      onClick={onClick}
+    >
+      <Trash2 />
+      Remove
+    </Button>
+  );
+
+  const allDayCheckbox = (checked: boolean, onChange: (value: boolean) => void) => (
+    <label className="flex min-h-11 items-center gap-3">
+      <input
+        type="checkbox"
+        className="size-5"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+      All day
+    </label>
+  );
 
   return (
     <>
+      <StaleNote
+        show={calendar.isError && Boolean(calendar.data)}
+        onRetry={() => void calendar.refetch()}
+        retrying={calendar.isFetching}
+        what="your availability"
+      />
+
       <Tabs defaultValue="pattern">
-        <TabsList>
+        <TabsList aria-label="Kinds of availability">
           <TabsTrigger value="pattern">Weekly pattern</TabsTrigger>
           <TabsTrigger value="dates">Free on a date</TabsTrigger>
           <TabsTrigger value="away">Away</TabsTrigger>
@@ -195,113 +269,99 @@ export function AvailabilitySection() {
         >
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm">Add to your pattern</CardTitle>
+              <CardTitle className="text-base">Add to your pattern</CardTitle>
             </CardHeader>
-            <CardContent className="flex flex-wrap items-end gap-3">
-              <div className="min-w-[10rem] space-y-1.5">
-                <Label>Day</Label>
-                <Select value={dayOfWeek} onValueChange={setDayOfWeek}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={EVERY_DAY}>Every day</SelectItem>
-                    <SelectItem value={WEEKDAYS}>Monday to Friday</SelectItem>
-                    {[1, 2, 3, 4, 5, 6, 0].map((index) => (
-                      <SelectItem key={DAYS[index]} value={String(index)}>
-                        {DAYS[index]}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <label className="flex min-h-11 items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  className="h-5 w-5"
-                  checked={patternAllDay}
-                  onChange={(event) => setPatternAllDay(event.target.checked)}
-                />
-                All day
-              </label>
-              {patternAllDay ? null : (
-                <>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="from">From</Label>
-                    <Input
-                      id="from"
-                      type="time"
-                      value={startTime}
-                      onChange={(event) => setStartTime(event.target.value)}
-                    />
+            <CardContent>
+              <form
+                className="grid gap-4"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  addSlot.mutate();
+                }}
+              >
+                <Field label="Day">
+                  {(a11y) => (
+                    <Select value={dayOfWeek} onValueChange={setDayOfWeek}>
+                      <SelectTrigger {...a11y}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={EVERY_DAY}>Every day</SelectItem>
+                        <SelectItem value={WEEKDAYS}>Monday to Friday</SelectItem>
+                        {[1, 2, 3, 4, 5, 6, 0].map((index) => (
+                          <SelectItem key={DAYS[index]} value={String(index)}>
+                            {DAYS[index]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </Field>
+                {allDayCheckbox(patternAllDay, setPatternAllDay)}
+                {patternAllDay ? null : (
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="From">
+                      <Input
+                        type="time"
+                        value={startTime}
+                        onChange={(event) => setStartTime(event.target.value)}
+                      />
+                    </Field>
+                    <Field label="To">
+                      <Input
+                        type="time"
+                        value={endTime}
+                        onChange={(event) => setEndTime(event.target.value)}
+                      />
+                    </Field>
+                    <p className="col-span-2 text-sm text-muted-foreground">
+                      Nigerian time. For a night, put the later time first: 20:00 to 08:00 runs into
+                      the next morning.
+                    </p>
                   </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="to">To</Label>
-                    <Input
-                      id="to"
-                      type="time"
-                      value={endTime}
-                      onChange={(event) => setEndTime(event.target.value)}
-                    />
-                  </div>
-                </>
-              )}
-              <Button loading={addSlot.isPending} onClick={() => addSlot.mutate()}>
-                Add
-              </Button>
-              <p className="basis-full text-xs text-muted-foreground">
-                For a night, put the later time first: 20:00 to 08:00 runs into the next morning.
-              </p>
+                )}
+                <Button type="submit" loading={addSlot.isPending} className="sm:w-fit">
+                  Add to my pattern
+                </Button>
+              </form>
             </CardContent>
           </Card>
 
-          {calendar.isPending ? (
-            <QueueSkeleton rows={2} />
-          ) : calendar.isError ? (
-            <Alert variant="destructive">
-              <TriangleAlert />
-              <AlertDescription>Your availability could not be loaded.</AlertDescription>
-            </Alert>
-          ) : slots.length === 0 ? (
-            <EmptyState
-              compact
-              icon={<CalendarDays />}
-              title="No pattern set"
-              description="Without one the matcher has nothing to check a shift against, so you will not be offered work, unless you say you are free on a date."
-            />
-          ) : (
-            <Card>
-              <CardContent className="divide-y p-0">
-                {ordered.map((slot) => (
-                  <div
-                    key={slot.id}
-                    className="flex flex-wrap items-center justify-between gap-3 px-5 py-3"
-                  >
-                    <div className="flex items-center gap-4">
-                      <span className="w-24 text-sm font-medium">
-                        {slot.dayOfWeek !== null ? DAYS[slot.dayOfWeek] : ''}
-                      </span>
-                      <span className="tabular text-sm text-muted-foreground">
-                        {slot.startMinute !== null
-                          ? slot.startMinute === 0 && slot.endMinute === 1440
-                            ? 'All day'
-                            : `${clock(slot.startMinute)} – ${clock(slot.endMinute)}`
-                          : `${formatWhen(slot.startsAt)} – ${formatWhen(slot.endsAt)}`}
-                      </span>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-destructive-text hover:bg-destructive/10 hover:text-destructive-text"
-                      onClick={() => removeSlot.mutate({ id: slot.id })}
-                    >
-                      <Trash2 />
-                      Remove
-                    </Button>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
+          {listArea(2, () =>
+            slots.length === 0 ? (
+              <EmptyState
+                compact
+                icon={<CalendarDays />}
+                title="No pattern set"
+                description="Without one the matcher has nothing to check a shift against, so you will not be offered work, unless you say you are free on a date."
+              />
+            ) : (
+              <Card>
+                <CardContent className="divide-y p-0">
+                  {ordered.map((slot) => {
+                    const window =
+                      slot.startMinute !== null
+                        ? slot.startMinute === 0 && slot.endMinute === 1440
+                          ? 'All day'
+                          : `${clock(slot.startMinute)} – ${clock(slot.endMinute)}`
+                        : `${formatWhen(slot.startsAt)} – ${formatWhen(slot.endsAt)}`;
+                    const day = slot.dayOfWeek !== null ? DAYS[slot.dayOfWeek] : '';
+                    return (
+                      <div
+                        key={slot.id}
+                        className="flex flex-wrap items-center justify-between gap-3 px-4 py-2 sm:px-5"
+                      >
+                        <div className="flex min-w-0 flex-wrap items-baseline gap-x-4">
+                          <span className="w-24 font-medium">{day}</span>
+                          <span className="tabular text-muted-foreground">{window}</span>
+                        </div>
+                        {removeButton(`${day} ${window}`, () => removeSlot.mutate({ id: slot.id }))}
+                      </div>
+                    );
+                  })}
+                </CardContent>
+              </Card>
+            ),
           )}
         </TabsContent>
 
@@ -312,31 +372,39 @@ export function AvailabilitySection() {
           <div className="space-y-6">
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="text-sm">Say you are free</CardTitle>
+                <CardTitle className="text-base">Say you are free</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                <p className="text-xs text-muted-foreground">
+                <p className="text-sm text-muted-foreground">
                   One tap, for when your week is not the usual one. Hours are Nigerian time.
                 </p>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                   <Button
                     variant="outline"
-                    loading={addOneOff.isPending}
+                    disabled={addOneOff.isPending}
                     onClick={() => addOneOff.mutate(tonight(new Date()))}
                   >
                     <Moon />
                     Free tonight
                   </Button>
-                  <Button variant="outline" onClick={() => addOneOff.mutate(allDay(new Date()))}>
+                  <Button
+                    variant="outline"
+                    disabled={addOneOff.isPending}
+                    onClick={() => addOneOff.mutate(allDay(new Date()))}
+                  >
                     <Sun />
                     Free all day today
                   </Button>
-                  <Button variant="outline" onClick={() => addOneOff.mutate(allDay(new Date(), 1))}>
+                  <Button
+                    variant="outline"
+                    disabled={addOneOff.isPending}
+                    onClick={() => addOneOff.mutate(allDay(new Date(), 1))}
+                  >
                     <Sun />
                     Free all day tomorrow
                   </Button>
                 </div>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-sm text-muted-foreground">
                   &ldquo;Tonight&rdquo; is 19:00 to 08:00, and after midnight it means the rest of
                   tonight.
                 </p>
@@ -345,90 +413,84 @@ export function AvailabilitySection() {
 
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="text-sm">Or choose a date</CardTitle>
+                <CardTitle className="text-base">Or choose a date</CardTitle>
               </CardHeader>
-              <CardContent className="flex flex-wrap items-end gap-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor="free-date">Date</Label>
-                  <Input
-                    id="free-date"
-                    type="date"
-                    min={watDate(new Date())}
-                    value={date}
-                    onChange={(event) => setDate(event.target.value)}
-                  />
-                </div>
-                <label className="flex min-h-11 items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    className="h-5 w-5"
-                    checked={dateAllDay}
-                    onChange={(event) => setDateAllDay(event.target.checked)}
-                  />
-                  All day
-                </label>
-                {dateAllDay ? null : (
-                  <>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="free-from">From</Label>
-                      <Input
-                        id="free-from"
-                        type="time"
-                        value={dateFrom}
-                        onChange={(event) => setDateFrom(event.target.value)}
-                      />
+              <CardContent>
+                <form
+                  className="grid gap-4"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    if (date) addDate();
+                  }}
+                >
+                  <Field label="Date">
+                    <Input
+                      type="date"
+                      min={watDate(new Date())}
+                      value={date}
+                      onChange={(event) => setDate(event.target.value)}
+                    />
+                  </Field>
+                  {allDayCheckbox(dateAllDay, setDateAllDay)}
+                  {dateAllDay ? null : (
+                    <div className="grid grid-cols-2 gap-3">
+                      <Field label="From">
+                        <Input
+                          type="time"
+                          value={dateFrom}
+                          onChange={(event) => setDateFrom(event.target.value)}
+                        />
+                      </Field>
+                      <Field label="To">
+                        <Input
+                          type="time"
+                          value={dateTo}
+                          onChange={(event) => setDateTo(event.target.value)}
+                        />
+                      </Field>
                     </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="free-to">To</Label>
-                      <Input
-                        id="free-to"
-                        type="time"
-                        value={dateTo}
-                        onChange={(event) => setDateTo(event.target.value)}
-                      />
-                    </div>
-                  </>
-                )}
-                <Button disabled={!date} loading={addOneOff.isPending} onClick={addDate}>
-                  Add
-                </Button>
+                  )}
+                  <Button
+                    type="submit"
+                    disabled={!date}
+                    loading={addOneOff.isPending}
+                    className="sm:w-fit"
+                  >
+                    Add this date
+                  </Button>
+                </form>
               </CardContent>
             </Card>
           </div>
 
-          {calendar.isPending ? (
-            <QueueSkeleton rows={2} />
-          ) : upcoming.length === 0 ? (
-            <EmptyState
-              compact
-              icon={<CalendarCheck />}
-              title="No dates marked as free"
-              description="Dates you add here are offered on top of your weekly pattern."
-            />
-          ) : (
-            <Card>
-              <CardContent className="divide-y p-0">
-                {upcoming.map((slot) => (
-                  <div
-                    key={slot.id}
-                    className="flex flex-wrap items-center justify-between gap-3 px-5 py-3"
-                  >
-                    <span className="tabular text-sm">
-                      {formatWhen(slot.startsAt)} – {formatWhen(slot.endsAt)}
-                    </span>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-destructive-text hover:bg-destructive/10 hover:text-destructive-text"
-                      onClick={() => removeSlot.mutate({ id: slot.id })}
-                    >
-                      <Trash2 />
-                      Remove
-                    </Button>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
+          {listArea(2, () =>
+            upcoming.length === 0 ? (
+              <EmptyState
+                compact
+                icon={<CalendarCheck />}
+                title="No dates marked as free"
+                description="Dates you add here are offered on top of your weekly pattern."
+              />
+            ) : (
+              <Card>
+                <CardContent className="divide-y p-0">
+                  {upcoming.map((slot) => {
+                    const window = `${formatWhen(slot.startsAt)} – ${formatWhen(slot.endsAt)}`;
+                    return (
+                      <div
+                        key={slot.id}
+                        className="flex flex-wrap items-center justify-between gap-3 px-4 py-2 sm:px-5"
+                      >
+                        <span className="tabular">{window}</span>
+                        {removeButton(`free time ${window}`, () =>
+                          removeSlot.mutate({ id: slot.id }),
+                        )}
+                      </div>
+                    );
+                  })}
+                </CardContent>
+              </Card>
+            ),
           )}
         </TabsContent>
 
@@ -438,75 +500,114 @@ export function AvailabilitySection() {
         >
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm">Block out some dates</CardTitle>
+              <CardTitle className="text-base">Block out some dates</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-1.5">
-                  <Label htmlFor="block-from">From</Label>
+            <CardContent>
+              <form
+                className="grid gap-4"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (
+                    blockFrom &&
+                    blockTo &&
+                    !blockEndsBeforeStart &&
+                    blockReason.trim().length >= 3
+                  ) {
+                    addBlock.mutate();
+                  }
+                }}
+              >
+                <Field label="From" hint="Nigerian time.">
                   <Input
-                    id="block-from"
                     type="datetime-local"
                     value={blockFrom}
                     onChange={(event) => setBlockFrom(event.target.value)}
                   />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="block-to">Until</Label>
+                </Field>
+                <Field
+                  label="Until"
+                  error={blockEndsBeforeStart ? 'Until has to be after From.' : undefined}
+                >
                   <Input
-                    id="block-to"
                     type="datetime-local"
                     value={blockTo}
                     onChange={(event) => setBlockTo(event.target.value)}
                   />
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="block-reason">
-                  Reason{' '}
-                  <span className="font-normal text-muted-foreground">
-                    — required; &ldquo;why was this practitioner unavailable&rdquo; is a question
-                    disputes ask
-                  </span>
-                </Label>
-                <Textarea
-                  id="block-reason"
-                  rows={2}
-                  placeholder="Annual leave, exams, family commitment…"
-                  value={blockReason}
-                  onChange={(event) => setBlockReason(event.target.value)}
-                />
-              </div>
-              <Button
-                disabled={!blockFrom || !blockTo || blockReason.trim().length < 3}
-                loading={addBlock.isPending}
-                onClick={() => addBlock.mutate()}
-              >
-                Block it out
-              </Button>
+                </Field>
+                <Field
+                  label="Reason"
+                  hint="Required. “Why was this practitioner unavailable” is a question disputes ask."
+                >
+                  <Textarea
+                    rows={2}
+                    placeholder="Annual leave, exams, family commitment…"
+                    value={blockReason}
+                    onChange={(event) => setBlockReason(event.target.value)}
+                  />
+                </Field>
+                <Button
+                  type="submit"
+                  disabled={
+                    !blockFrom || !blockTo || blockEndsBeforeStart || blockReason.trim().length < 3
+                  }
+                  loading={addBlock.isPending}
+                  className="sm:w-fit"
+                >
+                  Block it out
+                </Button>
+              </form>
             </CardContent>
           </Card>
 
-          {calendar.isPending ? (
-            <QueueSkeleton rows={1} />
-          ) : blocks.length === 0 ? (
-            <EmptyState compact icon={<CalendarOff />} title="Nothing blocked out" />
-          ) : (
-            <div className="space-y-2">
-              {blocks.map((block) => (
-                <Card key={block.id}>
-                  <CardContent className="py-3">
-                    <p className="text-sm">
-                      {formatWhen(block.startsAt)} – {formatWhen(block.endsAt)}
-                    </p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">{block.reason}</p>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+          {listArea(1, () =>
+            blocks.length === 0 ? (
+              <EmptyState compact icon={<CalendarOff />} title="Nothing blocked out" />
+            ) : (
+              <Card>
+                <CardContent className="divide-y p-0">
+                  {blocks.map((block) => {
+                    const window = `${formatWhen(block.startsAt)} – ${formatWhen(block.endsAt)}`;
+                    return (
+                      <div
+                        key={block.id}
+                        className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-5"
+                      >
+                        <div className="min-w-0">
+                          <p className="tabular">{window}</p>
+                          <p className="text-sm text-muted-foreground [overflow-wrap:anywhere]">
+                            {block.reason}
+                          </p>
+                        </div>
+                        {removeButton(`time away ${window}`, () => setRemoving(block))}
+                      </div>
+                    );
+                  })}
+                </CardContent>
+              </Card>
+            ),
           )}
         </TabsContent>
       </Tabs>
+
+      <ConfirmDialog
+        open={removing !== null}
+        onOpenChange={(next) => !next && setRemoving(null)}
+        title="Remove this time away"
+        object={
+          removing
+            ? `${formatWhen(removing.startsAt)} – ${formatWhen(removing.endsAt)} · ${removing.reason}`
+            : ''
+        }
+        consequence="You will count as available again for these dates: your weekly pattern and any dates you have marked free apply to them, so offers can reach you."
+        reversible="You can block the same dates out again."
+        confirmLabel="Remove time away"
+        cancelLabel="Keep it"
+        loading={removeBlock.isPending}
+        onConfirm={() =>
+          removing &&
+          removeBlock.mutate({ id: removing.id }, { onSuccess: () => setRemoving(null) })
+        }
+      />
     </>
   );
 }

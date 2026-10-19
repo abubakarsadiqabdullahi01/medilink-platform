@@ -3,27 +3,21 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ArrowLeft, Banknote, HandCoins, Search, Send, TriangleAlert } from 'lucide-react';
+import { ArrowLeft, Banknote, HandCoins, Send, TriangleAlert } from 'lucide-react';
 import { api, errorMessage } from '@/lib/ui/api';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { AmountFigure } from '@/components/app/amount-figure';
+import { ConfirmDialog } from '@/components/app/confirm-dialog';
+import { Field } from '@/components/app/field';
+import { Money } from '@/components/app/money';
 import { PayoutAccountPanel, type AccountState } from '@/components/app/payout-account-panel';
 import { StatusBadge } from '@/components/app/status-badge';
-import { Detail, DetailGrid, EmptyState, PageHeader, QueueSkeleton } from '@/components/app/page-shell';
-import { ErrorState } from '@/components/app/states';
+import { EmptyState, PageHeader } from '@/components/app/page-shell';
+import { ErrorState, ListSkeleton } from '@/components/app/states';
 import { useStepUp } from '@/components/app/step-up';
 import { formatDate, formatNaira, formatWhen } from '@/components/app/format';
 import { lagosDate } from '@/lib/lagos-date';
@@ -70,11 +64,18 @@ export default function PayoutsPage() {
   const [applied, setApplied] = useState('');
   const [selected, setSelected] = useState<PractitionerHit | null>(null);
 
+  // Each act on money goes through a confirmation that names the practitioner and the amount.
+  const [preparing, setPreparing] = useState(false);
+  const [releasing, setReleasing] = useState<Payout | null>(null);
+
   // Paying by hand: finance make the transfer at the bank, then say here which one it
   // was. Either that or a reason it did not happen is what closes a released payout.
   const [recording, setRecording] = useState<Payout | null>(null);
   const [transfer, setTransfer] = useState({ reference: '', paidOn: '' });
-  const [withdrawing, setWithdrawing] = useState<{ payout: Payout; kind: 'fail' | 'cancel' } | null>(null);
+  const [withdrawing, setWithdrawing] = useState<{
+    payout: Payout;
+    kind: 'fail' | 'cancel';
+  } | null>(null);
   const [reason, setReason] = useState('');
 
   const results = useQuery({
@@ -98,9 +99,7 @@ export default function PayoutsPage() {
         account: { state: AccountState; readyAt: string | null };
         secondApproverRequired: boolean;
         paidByHand: boolean;
-      }>(
-        `/api/v1/payouts?scopeType=PLATFORM&scopeId=${selected!.userId}`,
-      ),
+      }>(`/api/v1/payouts?scopeType=PLATFORM&scopeId=${selected!.userId}`),
     enabled: Boolean(selected),
   });
 
@@ -132,6 +131,7 @@ export default function PayoutsPage() {
     mutationFn: () => api.post('/api/v1/payouts', { practitionerId: selected!.userId }),
     onSuccess: () => {
       toast.success('Prepared', { description: 'Nothing has moved yet. Release it to pay.' });
+      setPreparing(false);
       refresh();
     },
     onError: (error) => {
@@ -152,6 +152,7 @@ export default function PayoutsPage() {
       } else {
         toast.success('Released to the gateway');
       }
+      setReleasing(null);
       refresh();
     },
     onError: (error, payout) => {
@@ -216,63 +217,82 @@ export default function PayoutsPage() {
 
         <Alert variant="info" className="mb-6">
           <AlertDescription>
-            A practitioner is paid only from money a facility has actually paid, however much
-            they are owed. Where payouts are made by bank transfer, releasing one hands it to
-            finance; the transfer is made at the bank and recorded here, and recording it is what
-            completes the payout.
+            A practitioner is paid only from money a facility has actually paid, however much they
+            are owed. Where payouts are made by bank transfer, releasing one hands it to finance;
+            the transfer is made at the bank and recorded here, and recording it is what completes
+            the payout.
           </AlertDescription>
         </Alert>
 
         <Card className="mb-6">
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm">Find a practitioner</CardTitle>
+            <CardTitle className="text-base">Find a practitioner</CardTitle>
           </CardHeader>
           <CardContent>
             <form
-              className="flex flex-wrap items-end gap-3"
+              className="flex flex-col gap-3 sm:flex-row sm:items-end"
               onSubmit={(event) => {
                 event.preventDefault();
                 setApplied(search.trim());
               }}
             >
-              <div className="min-w-[240px] flex-1 space-y-1.5">
-                <Label htmlFor="practitioner-search">Search by name or number</Label>
+              <Field label="Search by name or number" className="flex-1 sm:min-w-[15rem]">
                 <Input
-                  id="practitioner-search"
+                  type="search"
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
                   placeholder="Amina, or 0803 123 4567"
                 />
-              </div>
+              </Field>
               <Button type="submit" loading={results.isFetching}>
-                <Search />
                 Search
               </Button>
             </form>
           </CardContent>
         </Card>
 
-        {(waiting.data?.accounts.length ?? 0) > 0 ? (
+        {waiting.isError ? (
+          <div className="mb-6">
+            <ErrorState
+              compact
+              error={waiting.error}
+              onRetry={() => void waiting.refetch()}
+              retrying={waiting.isFetching}
+            />
+          </div>
+        ) : (waiting.data?.accounts.length ?? 0) > 0 ? (
           <Card className="mb-6">
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm">Accounts waiting to be checked</CardTitle>
+              <CardTitle className="text-base">Accounts waiting to be checked</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
               {waiting.data!.accounts.map((row) => (
                 <button
                   key={row.id}
                   type="button"
-                  onClick={() => setSelected({ userId: row.practitionerId, fullName: row.practitionerName, phone: '' })}
-                  className="flex w-full flex-wrap items-center justify-between gap-2 rounded-lg border bg-card p-3 text-left transition-colors hover:border-primary/50 hover:bg-muted/50"
+                  onClick={() =>
+                    setSelected({
+                      userId: row.practitionerId,
+                      fullName: row.practitionerName,
+                      phone: '',
+                    })
+                  }
+                  className="flex min-h-11 w-full flex-wrap items-center justify-between gap-2 rounded-lg border bg-card p-3 text-left transition-colors hover:border-primary/50 hover:bg-muted/50"
                 >
                   <span>
                     <span className="font-medium">{row.practitionerName}</span>
-                    <span className="ml-2 text-xs text-muted-foreground">
-                      {row.bankName} · <span className="font-mono">••••••{row.last4}</span> · given {formatDate(row.createdAt)}
+                    <span className="block text-sm text-muted-foreground sm:ml-2 sm:inline">
+                      {row.bankName} · <span className="font-mono">••••••{row.last4}</span> · given{' '}
+                      {formatDate(row.createdAt)}
                     </span>
                   </span>
                   {row.problems.length > 0 ? (
-                    <span className="text-xs text-warning">Needs a look: {row.problems.length === 1 ? '1 thing' : `${row.problems.length} things`} to resolve</span>
+                    <span className="flex items-center gap-1.5 text-sm font-medium text-warning">
+                      <TriangleAlert className="size-4" aria-hidden="true" />
+                      Needs a look:{' '}
+                      {row.problems.length === 1 ? '1 thing' : `${row.problems.length} things`} to
+                      resolve
+                    </span>
                   ) : null}
                 </button>
               ))}
@@ -287,7 +307,7 @@ export default function PayoutsPage() {
             description="Payouts are per person, and the ledger is what decides the amount."
           />
         ) : results.isPending ? (
-          <QueueSkeleton rows={2} />
+          <ListSkeleton rows={2} label="Searching" />
         ) : results.isError ? (
           <ErrorState
             error={results.error}
@@ -301,28 +321,37 @@ export default function PayoutsPage() {
             description="Try part of a name, or the number they registered with."
           />
         ) : (
-          <div className="space-y-2">
+          <ul className="space-y-2" aria-label="Practitioners found">
             {hits.map((hit) => (
-              <button
-                key={hit.userId}
-                type="button"
-                onClick={() => setSelected(hit)}
-                className="w-full rounded-lg border bg-card p-3 text-left transition-colors hover:border-primary/50 hover:bg-muted/50"
-              >
-                <p className="font-medium">{hit.fullName}</p>
-                <p className="mt-0.5 font-mono text-xs text-muted-foreground">{hit.phone}</p>
-              </button>
+              <li key={hit.userId}>
+                <button
+                  type="button"
+                  onClick={() => setSelected(hit)}
+                  className="min-h-11 w-full rounded-lg border bg-card p-3 text-left transition-colors hover:border-primary/50 hover:bg-muted/50"
+                >
+                  <p className="font-medium">{hit.fullName}</p>
+                  <p className="mt-0.5 font-mono text-sm text-muted-foreground">{hit.phone}</p>
+                </button>
+              </li>
             ))}
-          </div>
+          </ul>
         )}
       </>
     );
   }
 
+  const blocked =
+    payouts.data !== undefined &&
+    (payouts.data.payableKobo <= 0 ||
+      ['missing', 'unverified', 'cooling_off'].includes(payouts.data.account.state));
+  const accountBlocked =
+    payouts.data !== undefined &&
+    ['missing', 'unverified', 'cooling_off'].includes(payouts.data.account.state);
+
   return (
     <>
       {stepUp.dialog}
-      <Button variant="ghost" size="sm" className="mb-4 -ml-2" onClick={() => setSelected(null)}>
+      <Button variant="ghost" className="-ml-2 mb-4" onClick={() => setSelected(null)}>
         <ArrowLeft />
         Find somebody else
       </Button>
@@ -362,53 +391,118 @@ export default function PayoutsPage() {
         />
       ) : null}
 
-      <Dialog open={recording !== null} onOpenChange={(open) => (open ? null : setRecording(null))}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Record the transfer of {recording ? formatNaira(recording.amountKobo) : ''}</DialogTitle>
-            <DialogDescription>
-              Make the transfer from the bank first, then enter what the statement shows. This is
-              what completes the payout, and the practitioner is told once it is recorded.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="transfer-reference">Bank reference for the transfer</Label>
-              <Input
-                id="transfer-reference"
-                value={transfer.reference}
-                maxLength={100}
-                onChange={(event) => setTransfer({ ...transfer, reference: event.target.value })}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="transfer-date">Date it left the bank</Label>
-              <Input
-                id="transfer-date"
-                type="date"
-                value={transfer.paidOn}
-                onChange={(event) => setTransfer({ ...transfer, paidOn: event.target.value })}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRecording(null)}>
-              Cancel
-            </Button>
-            <Button
-              variant="success"
-              disabled={transfer.reference.trim().length < 3 || transfer.paidOn === ''}
-              loading={settle.isPending}
-              onClick={() => recording && settle.mutate(recording)}
-            >
-              <Banknote />
-              Record transfer
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={preparing}
+        onOpenChange={setPreparing}
+        title="Prepare a payout"
+        object={
+          <>
+            {selected.fullName} · <Money kobo={payouts.data?.payableKobo ?? 0} strong />
+          </>
+        }
+        consequence={
+          <>
+            This proposes paying what has been collected from facilities, less anything already in
+            flight and anything held for a dispute. It moves no money and writes nothing to the
+            ledger: a colleague, or you, still has to release it. The amount is worked out again
+            from the ledger when you confirm.
+          </>
+        }
+        reversible="Until it is released, you can cancel it and what it was holding is freed."
+        confirmLabel="Prepare payout"
+        loading={prepare.isPending}
+        onConfirm={() => prepare.mutate()}
+      />
 
-      <Dialog
+      <ConfirmDialog
+        open={releasing !== null}
+        onOpenChange={(open) => !open && setReleasing(null)}
+        title="Release this payout"
+        object={
+          releasing ? (
+            <>
+              {selected.fullName} · <Money kobo={releasing.amountKobo} strong /> · prepared{' '}
+              {formatWhen(releasing.createdAt)}
+            </>
+          ) : (
+            ''
+          )
+        }
+        consequence={
+          byHand ? (
+            <>
+              This hands the payout to finance. No money moves and the ledger is not changed yet:
+              finance make the transfer at the bank and record it here, and recording it is what
+              completes the payout.
+            </>
+          ) : (
+            <>
+              This sends the amount to the payment gateway. The ledger records it once the gateway
+              confirms the money went; if the gateway refuses, nothing moves.
+            </>
+          )
+        }
+        reversible={
+          byHand
+            ? 'If the transfer is never made, record it as not paid and the money can be prepared again.'
+            : false
+        }
+        confirmLabel="Release payout"
+        loading={release.isPending}
+        onConfirm={() => releasing && release.mutate(releasing)}
+      >
+        {byHand ? null : (
+          <p className="text-sm text-muted-foreground">
+            Once the gateway has it, it cannot be recalled from here.
+          </p>
+        )}
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={recording !== null}
+        onOpenChange={(open) => !open && setRecording(null)}
+        title="Record the transfer"
+        object={
+          recording ? (
+            <>
+              {selected.fullName} · <Money kobo={recording.amountKobo} strong />
+            </>
+          ) : (
+            ''
+          )
+        }
+        consequence={
+          <>
+            Make the transfer from the bank first, then enter what the statement shows. Recording it
+            completes the payout: the ledger shows it paid, and the practitioner is sent a message
+            with the amount and your bank reference.
+          </>
+        }
+        reversible={false}
+        confirmLabel="Record transfer"
+        loading={settle.isPending}
+        confirmDisabled={transfer.reference.trim().length < 3 || transfer.paidOn === ''}
+        onConfirm={() => recording && settle.mutate(recording)}
+      >
+        <div className="space-y-4">
+          <Field label="Bank reference for the transfer" hint="At least 3 characters." required>
+            <Input
+              value={transfer.reference}
+              maxLength={100}
+              onChange={(event) => setTransfer({ ...transfer, reference: event.target.value })}
+            />
+          </Field>
+          <Field label="Date it left the bank" required>
+            <Input
+              type="date"
+              value={transfer.paidOn}
+              onChange={(event) => setTransfer({ ...transfer, paidOn: event.target.value })}
+            />
+          </Field>
+        </div>
+      </ConfirmDialog>
+
+      <ConfirmDialog
         open={withdrawing !== null}
         onOpenChange={(open) => {
           if (!open) {
@@ -416,52 +510,60 @@ export default function PayoutsPage() {
             setReason('');
           }
         }}
+        title={
+          withdrawing?.kind === 'cancel' ? 'Cancel this payout' : 'The transfer did not go through'
+        }
+        object={
+          withdrawing ? (
+            <>
+              {selected.fullName} · <Money kobo={withdrawing.payout.amountKobo} strong />
+            </>
+          ) : (
+            ''
+          )
+        }
+        consequence={
+          withdrawing?.kind === 'cancel' ? (
+            <>
+              Nothing has been released, so nothing has moved. This payout is cancelled and cannot
+              be reopened; what it was holding can be prepared again.
+            </>
+          ) : (
+            <>
+              Use this only if the money did not leave the bank. If it did, record the transfer
+              instead, or the practitioner will be paid twice. This payout is closed as not paid,
+              and what it was holding can be prepared again.
+            </>
+          )
+        }
+        reversible={false}
+        destructive
+        confirmLabel={withdrawing?.kind === 'cancel' ? 'Cancel payout' : 'Record as not paid'}
+        cancelLabel={withdrawing?.kind === 'cancel' ? 'Keep the payout' : 'Back'}
+        loading={withdraw.isPending}
+        confirmDisabled={reason.trim().length === 0}
+        onConfirm={() => withdrawing && withdraw.mutate(withdrawing)}
       >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {withdrawing?.kind === 'cancel' ? 'Cancel this payout' : 'The transfer did not go through'}
-            </DialogTitle>
-            <DialogDescription>
-              {withdrawing?.kind === 'cancel'
-                ? 'Nothing has been released, so nothing has moved. What it was holding can be prepared again.'
-                : 'Use this only if the money did not leave the bank. If it did, record the transfer instead, or the practitioner will be paid twice.'}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-1.5">
-            <Label htmlFor="payout-reason">
-              {withdrawing?.kind === 'cancel' ? 'Why is it being cancelled?' : 'What happened?'}
-            </Label>
-            <Textarea
-              id="payout-reason"
-              value={reason}
-              maxLength={500}
-              rows={3}
-              onChange={(event) => setReason(event.target.value)}
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setWithdrawing(null)}>
-              Back
-            </Button>
-            <Button
-              variant="destructive"
-              disabled={reason.trim().length === 0}
-              loading={withdraw.isPending}
-              onClick={() => withdrawing && withdraw.mutate(withdrawing)}
-            >
-              {withdrawing?.kind === 'cancel' ? 'Cancel payout' : 'Record as not paid'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        <Field
+          label={withdrawing?.kind === 'cancel' ? 'Why is it being cancelled?' : 'What happened?'}
+          hint="Required. It is kept on the record."
+          required
+        >
+          <Textarea
+            value={reason}
+            maxLength={500}
+            rows={3}
+            onChange={(event) => setReason(event.target.value)}
+          />
+        </Field>
+      </ConfirmDialog>
 
       <Card className="mb-6">
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm">Prepare a payout</CardTitle>
+          <CardTitle className="text-base">Prepare a payout</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="mb-3 text-xs text-muted-foreground">
+          <p className="mb-3 text-sm text-muted-foreground">
             For what has been collected, less anything already in flight and anything held for a
             dispute.
           </p>
@@ -484,25 +586,24 @@ export default function PayoutsPage() {
               </AlertDescription>
             </Alert>
           ) : null}
-          <Button
-            loading={prepare.isPending}
-            disabled={
-              payouts.data !== undefined &&
-              (payouts.data.payableKobo <= 0 ||
-                ['missing', 'unverified', 'cooling_off'].includes(payouts.data.account.state))
-            }
-            onClick={() => prepare.mutate()}
-          >
+          <Button disabled={blocked} onClick={() => setPreparing(true)}>
             <HandCoins />
             {payouts.data && payouts.data.payableKobo > 0
               ? `Prepare ${formatNaira(payouts.data.payableKobo)}`
               : 'Prepare'}
           </Button>
+          {payouts.data && blocked ? (
+            <p className="mt-2 text-sm text-muted-foreground">
+              {accountBlocked
+                ? 'A payout cannot be prepared yet: see the payout account above.'
+                : 'Nothing can be paid out right now.'}
+            </p>
+          ) : null}
         </CardContent>
       </Card>
 
       {payouts.isPending ? (
-        <QueueSkeleton rows={2} />
+        <ListSkeleton rows={2} label="Loading payouts" />
       ) : payouts.isError ? (
         <ErrorState
           error={payouts.error}
@@ -510,93 +611,123 @@ export default function PayoutsPage() {
           retrying={payouts.isFetching}
         />
       ) : payouts.data.payouts.length === 0 ? (
-        <EmptyState icon={<HandCoins />} title="No payouts for this practitioner" />
+        <EmptyState
+          icon={<HandCoins />}
+          title="No payouts for this practitioner"
+          description="Prepare one above once there is something that can be paid."
+        />
       ) : (
-        <div className="space-y-4">
+        <ul className="space-y-4" aria-label="Payouts">
           {payouts.data.payouts.map((payout) => (
-            <Card key={payout.id}>
-              <CardHeader className="flex-row items-start justify-between gap-4 space-y-0 pb-4">
-                <p className="tabular text-lg font-semibold">{formatNaira(payout.amountKobo)}</p>
-                <StatusBadge status={payout.status} />
-              </CardHeader>
+            <li key={payout.id}>
+              <Card>
+                <CardHeader className="flex-row items-start justify-between gap-4 space-y-0 pb-4">
+                  <Money kobo={payout.amountKobo} strong className="text-xl" />
+                  <StatusBadge status={payout.status} />
+                </CardHeader>
 
-              <CardContent className="space-y-4">
-                <DetailGrid>
-                  <Detail label="Prepared">{formatWhen(payout.createdAt)}</Detail>
-                  <Detail label="Released">{formatWhen(payout.releasedAt)}</Detail>
-                  <Detail label="Settled">{formatWhen(payout.settledAt)}</Detail>
-                  {payout.paidOn ? <Detail label="Left the bank">{formatDate(payout.paidOn)}</Detail> : null}
-                  <Detail label="Reference">
-                    <span className="font-mono text-xs">{payout.providerReference ?? '—'}</span>
-                  </Detail>
-                </DetailGrid>
+                <CardContent className="space-y-4">
+                  <dl className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3 lg:grid-cols-5">
+                    {(
+                      [
+                        ['Prepared', formatWhen(payout.createdAt)],
+                        ['Released', formatWhen(payout.releasedAt)],
+                        ['Settled', formatWhen(payout.settledAt)],
+                        ...(payout.paidOn ? [['Left the bank', formatDate(payout.paidOn)]] : []),
+                        [
+                          'Reference',
+                          <span key="ref" className="font-mono text-sm">
+                            {payout.providerReference ?? '—'}
+                          </span>,
+                        ],
+                      ] as [string, React.ReactNode][]
+                    ).map(([label, value]) => (
+                      <div key={label} className="min-w-0">
+                        <dt className="text-sm text-muted-foreground">{label}</dt>
+                        <dd className="text-base [overflow-wrap:anywhere]">{value}</dd>
+                      </div>
+                    ))}
+                  </dl>
 
-                {payout.failureReason ? (
-                  <Alert variant="destructive">
-                    <TriangleAlert />
-                    <AlertDescription>
-                      {payout.failureReason}
-                      {/* Said explicitly, because "failed" alone invites a
-                          second attempt that would double-pay if it were
-                          wrong about what happened. */}
-                      <span className="mt-1 block text-xs">
-                        Nothing moved and the ledger was not touched.
-                      </span>
-                    </AlertDescription>
-                  </Alert>
-                ) : null}
+                  {payout.failureReason ? (
+                    <Alert variant="destructive">
+                      <TriangleAlert />
+                      <AlertDescription>
+                        {payout.failureReason}
+                        {/* Said explicitly, because "failed" alone invites a
+                            second attempt that would double-pay if it were
+                            wrong about what happened. */}
+                        <span className="mt-1 block text-sm">
+                          Nothing moved and the ledger was not touched.
+                        </span>
+                      </AlertDescription>
+                    </Alert>
+                  ) : null}
 
-                {payout.status === 'PREPARED' ? (
-                  <div className="space-y-2">
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        disabled={payouts.data.secondApproverRequired && payout.preparedByYou}
-                        loading={release.isPending && release.variables?.id === payout.id}
-                        onClick={() => release.mutate(payout)}
-                      >
-                        <Send />
-                        Release {formatNaira(payout.amountKobo)}
-                      </Button>
-                      <Button variant="outline" onClick={() => setWithdrawing({ payout, kind: 'cancel' })}>
-                        Cancel it
-                      </Button>
-                    </div>
-                    {payouts.data.secondApproverRequired && payout.preparedByYou ? (
-                      <p className="text-xs text-muted-foreground">
-                        You prepared this one, so a colleague who can manage payouts has to release
-                        it. Two people, not one, between a balance and the bank.
-                      </p>
-                    ) : null}
-                  </div>
-                ) : null}
-
-                {payout.status === 'RELEASED' ? (
-                  payouts.data.paidByHand ? (
+                  {payout.status === 'PREPARED' ? (
                     <div className="space-y-2">
-                      <p className="text-xs text-muted-foreground">
-                        Released to finance. Make the transfer of {formatNaira(payout.amountKobo)} at
-                        the bank, then record it here.
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        <Button variant="success" onClick={() => startRecording(payout)}>
-                          <Banknote />
-                          Record the transfer
+                      <div className="flex flex-col gap-2 sm:flex-row">
+                        <Button
+                          disabled={payouts.data.secondApproverRequired && payout.preparedByYou}
+                          onClick={() => setReleasing(payout)}
+                        >
+                          <Send />
+                          Release {formatNaira(payout.amountKobo)}
                         </Button>
-                        <Button variant="outline" onClick={() => setWithdrawing({ payout, kind: 'fail' })}>
-                          It did not go through
+                        <Button
+                          variant="outline"
+                          aria-label={`Cancel the prepared payout of ${formatNaira(payout.amountKobo)}`}
+                          onClick={() => {
+                            setReason('');
+                            setWithdrawing({ payout, kind: 'cancel' });
+                          }}
+                        >
+                          Cancel it
                         </Button>
                       </div>
+                      {payouts.data.secondApproverRequired && payout.preparedByYou ? (
+                        <p className="text-sm text-muted-foreground">
+                          You prepared this one, so a colleague who can manage payouts has to
+                          release it. Two people, not one, between a balance and the bank.
+                        </p>
+                      ) : null}
                     </div>
-                  ) : (
-                    <p className="text-xs text-muted-foreground">
-                      Sent to the payment gateway. It completes when the gateway confirms.
-                    </p>
-                  )
-                ) : null}
-              </CardContent>
-            </Card>
+                  ) : null}
+
+                  {payout.status === 'RELEASED' ? (
+                    payouts.data.paidByHand ? (
+                      <div className="space-y-2">
+                        <p className="text-sm text-muted-foreground">
+                          Released to finance. Make the transfer of {formatNaira(payout.amountKobo)}{' '}
+                          at the bank, then record it here.
+                        </p>
+                        <div className="flex flex-col gap-2 sm:flex-row">
+                          <Button variant="success" onClick={() => startRecording(payout)}>
+                            <Banknote />
+                            Record the transfer
+                          </Button>
+                          <Button
+                            variant="outline"
+                            onClick={() => {
+                              setReason('');
+                              setWithdrawing({ payout, kind: 'fail' });
+                            }}
+                          >
+                            It did not go through
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">
+                        Sent to the payment gateway. It completes when the gateway confirms.
+                      </p>
+                    )
+                  ) : null}
+                </CardContent>
+              </Card>
+            </li>
           ))}
-        </div>
+        </ul>
       )}
     </>
   );

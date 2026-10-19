@@ -1,23 +1,15 @@
 'use client';
 
-import { useState } from 'react';
+import { Fragment, useState, type ReactNode } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Gavel, History, ReceiptText, TriangleAlert } from 'lucide-react';
+import { ChevronRight, CircleAlert, Gavel, ReceiptText } from 'lucide-react';
 import { api, errorMessage } from '@/lib/ui/api';
 import { useQueue } from '@/lib/ui/queue';
+import { timesheetSteps } from '@/lib/ui/timesheet-steps';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Label } from '@/components/ui/label';
+import { Card, CardContent } from '@/components/ui/card';
 import {
   Select,
   SelectContent,
@@ -25,17 +17,22 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
+import { ConfirmDialog } from '@/components/app/confirm-dialog';
+import { Field } from '@/components/app/field';
+import { Money, SubmittedVsApproved } from '@/components/app/money';
+import { EmptyState, PageHeader } from '@/components/app/page-shell';
+import { StaleNote } from '@/components/app/stale-note';
+import { ErrorState, ListSkeleton } from '@/components/app/states';
 import { StatusBadge } from '@/components/app/status-badge';
+import { Timeline } from '@/components/app/timeline';
 import {
-  Detail,
-  DetailGrid,
-  EmptyState,
-  PageHeader,
-  QueueSkeleton,
-} from '@/components/app/page-shell';
-import { formatMinutes, formatNaira, formatWhen } from '@/components/app/format';
+  formatClock,
+  formatMinutes,
+  formatNaira,
+  formatShiftWindow,
+  formatWhen,
+} from '@/components/app/format';
 
 interface Assignment {
   id: string;
@@ -46,6 +43,13 @@ interface Assignment {
   endsAt: string;
   /** Joined by `include=timesheet`; null for a shift with nothing worked yet. */
   sheet?: { timesheet: Timesheet; revisions: Revision[] } | null;
+  /** Joined by `include=attendance`: the times the ward's code recorded. */
+  attendance?: {
+    checkedInAt: string | null;
+    checkedOutAt: string | null;
+    submittedAt: string | null;
+    reviewedAt: string | null;
+  } | null;
 }
 
 interface Timesheet {
@@ -83,28 +87,66 @@ const CATEGORIES = [
 
 const MIN_REASON = 20;
 
+/** Sheets that can be sent, or sent again. */
+const SENDABLE = ['CHECKED_OUT', 'MANUALLY_CORRECTED', 'REJECTED'];
+/** Sheets the facility has decided, and so can be disputed. */
+const DECIDED = ['APPROVED', 'REJECTED'];
+/** Decided sheets shown before "show all": months of history must not bury the one that needs sending. */
+const RECENT_DECIDED = 8;
+
+/** "45m" under an hour, "8h 30m" over: formatMinutes alone would say "0h 45m". */
+const duration = (minutes: number) => (minutes < 60 ? `${minutes}m` : formatMinutes(minutes));
+
+const clockRange = (sheet: Assignment['attendance']) =>
+  sheet?.checkedInAt && sheet.checkedOutAt
+    ? `${formatClock(sheet.checkedInAt)} to ${formatClock(sheet.checkedOutAt)}`
+    : null;
+
+/** A section a card can fold away, with the whole row — not just the chevron — as the target. */
+function Disclosure({ summary, children }: { summary: string; children: ReactNode }) {
+  return (
+    <details className="group rounded-md border">
+      <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 px-3 text-sm font-medium [&::-webkit-details-marker]:hidden">
+        <ChevronRight
+          className="size-4 shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none"
+          aria-hidden="true"
+        />
+        {summary}
+      </summary>
+      <div className="space-y-3 border-t px-3 py-3">{children}</div>
+    </details>
+  );
+}
+
 /**
- * The practitioner's side of a timesheet: submit it, then live with what the
- * facility decides — or dispute it.
+ * The practitioner's side of a timesheet: send it, then live with what the facility decides — or
+ * dispute it.
  *
- * Disputing is offered on the same card as the outcome rather than buried in
- * a help page. A decision you cannot contest from where you read it is one
- * most people will not contest at all.
+ * What needs doing comes first. A sheet that is worked and not sent is the one thing on this page
+ * that costs the practitioner money by waiting, so "Ready to send" is the first section and months
+ * of decided sheets sit below it, a few at a time. Sending is a review, not a click: the hours and
+ * the figure are read back with what the facility will do with them, because once sent they are
+ * the facility's to decide.
+ *
+ * Disputing is offered on the same card as the outcome rather than buried in a help page. A
+ * decision you cannot contest from where you read it is one most people will not contest at all.
  */
 export default function MyTimesheetsPage() {
   const queryClient = useQueryClient();
 
   const shifts = useQueue<Assignment>(
     ['my-assignments-for-timesheets'],
-    // The timesheet and its revisions arrive with each shift: one request for the
-    // page, where it used to be one more for every shift ever worked.
-    '/api/v1/assignments?scopeType=SELF&include=timesheet',
+    // The timesheet, its revisions and the attendance times arrive with each shift: one request
+    // for the page, where it used to be one more for every shift ever worked.
+    '/api/v1/assignments?scopeType=SELF&include=timesheet,attendance',
     (body) => (body as { assignments?: Assignment[] }).assignments ?? [],
   );
 
+  const [sending, setSending] = useState<Assignment | null>(null);
   const [disputing, setDisputing] = useState<Assignment | null>(null);
   const [category, setCategory] = useState('HOURS');
   const [reason, setReason] = useState('');
+  const [showAllDecided, setShowAllDecided] = useState(false);
 
   const submit = useMutation({
     mutationFn: (assignmentId: string) =>
@@ -112,6 +154,8 @@ export default function MyTimesheetsPage() {
     onSuccess: () => {
       toast.success('Submitted', { description: 'The facility decides next.' });
       void queryClient.invalidateQueries({ queryKey: ['my-assignments-for-timesheets'] });
+      void queryClient.invalidateQueries({ queryKey: ['tile'] });
+      setSending(null);
     },
     onError: (error) => toast.error('Could not submit', { description: errorMessage(error) }),
   });
@@ -133,14 +177,220 @@ export default function MyTimesheetsPage() {
     onError: (error) => toast.error('Could not open it', { description: errorMessage(error) }),
   });
 
-  const withSheets = (shifts.data ?? [])
-    .filter((row) => row.sheet)
-    .map((row) => ({ assignment: row, data: row.sheet! }));
+  const sheets = (shifts.data ?? []).filter((row) => row.sheet);
+  const latestFirst = (a: Assignment, b: Assignment) =>
+    new Date(b.startsAt).getTime() - new Date(a.startsAt).getTime();
+  const status = (row: Assignment) => row.sheet!.timesheet.attendanceStatus;
 
-  const checkedOut = (shifts.data ?? []).filter((row) => {
-    const status = row.sheet?.timesheet.attendanceStatus;
-    return status === 'CHECKED_OUT' || status === 'MANUALLY_CORRECTED';
-  });
+  const toSend = sheets.filter((row) => SENDABLE.includes(status(row))).sort(latestFirst);
+  const withFacility = sheets.filter((row) => status(row) === 'SUBMITTED').sort(latestFirst);
+  const decided = sheets
+    .filter((row) => !SENDABLE.includes(status(row)) && status(row) !== 'SUBMITTED')
+    .sort(latestFirst);
+  const visibleDecided = showAllDecided ? decided : decided.slice(0, RECENT_DECIDED);
+  const readyCount = sheets.filter((row) =>
+    ['CHECKED_OUT', 'MANUALLY_CORRECTED'].includes(status(row)),
+  ).length;
+
+  const sheetCard = (assignment: Assignment) => {
+    const sheet = assignment.sheet!.timesheet;
+    const revisions = assignment.sheet!.revisions;
+    const canSubmit = SENDABLE.includes(sheet.attendanceStatus);
+    const canDispute = DECIDED.includes(sheet.attendanceStatus);
+    const range = clockRange(assignment.attendance);
+
+    // What was on the sheet before anybody changed it: the earliest revision's "previous".
+    const first = revisions[0]?.previous;
+    const before =
+      first && typeof first.amountKobo === 'number' && typeof first.billableMinutes === 'number'
+        ? { amountKobo: first.amountKobo, billableMinutes: first.billableMinutes }
+        : null;
+
+    return (
+      <Card>
+        <CardContent className="space-y-3 p-4 sm:p-5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="font-medium">{formatWhen(assignment.startsAt)}</p>
+              <p className="text-sm text-muted-foreground [overflow-wrap:anywhere]">
+                {assignment.facilityName}
+                {sheet.revision > 1 ? ` · revision ${sheet.revision}` : ''}
+              </p>
+            </div>
+            <StatusBadge status={sheet.attendanceStatus} />
+          </div>
+
+          {/* The text message says only that hours were sent back; this is where the reason is
+              read, next to the button that sends them again. */}
+          {sheet.attendanceStatus === 'REJECTED' ? (
+            <Alert variant="warning">
+              <CircleAlert />
+              <AlertDescription>
+                <strong className="font-medium">The facility sent these hours back.</strong>{' '}
+                {sheet.rejectionReason
+                  ? `They said: ${sheet.rejectionReason}`
+                  : 'They did not say why. Check the hours, correct what is wrong and send them again.'}
+              </AlertDescription>
+            </Alert>
+          ) : null}
+
+          <dl className="grid grid-cols-2 gap-x-4 gap-y-3">
+            {range ? (
+              <div className="col-span-2 min-w-0">
+                <dt className="text-sm text-muted-foreground">On shift</dt>
+                <dd className="tabular">
+                  {range}
+                  <span className="text-muted-foreground">
+                    {sheet.breakMinutes > 0
+                      ? ` · ${duration(sheet.breakMinutes)} unpaid break`
+                      : ''}
+                  </span>
+                </dd>
+              </div>
+            ) : null}
+            <div className="min-w-0">
+              <dt className="text-sm text-muted-foreground">Worked</dt>
+              <dd className="tabular">{duration(sheet.workedMinutes)}</dd>
+            </div>
+            {/* Not "you are owed": this is the timesheet at the base rate, and what is actually
+                credited is priced against the facility's rate card when the shift is invoiced. */}
+            <div className="min-w-0">
+              <dt className="text-sm text-muted-foreground">At the agreed rate</dt>
+              <dd>
+                <Money kobo={sheet.amountKobo} strong />
+              </dd>
+            </div>
+          </dl>
+
+          {before && sheet.attendanceStatus === 'APPROVED' ? (
+            <SubmittedVsApproved
+              label="Amount at the agreed rate"
+              submitted={before.amountKobo}
+              approved={sheet.amountKobo}
+              format={formatNaira}
+            />
+          ) : null}
+
+          <Disclosure summary="How this was worked out">
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+              <div>
+                <dt className="text-muted-foreground">Billable</dt>
+                <dd className="tabular">{duration(sheet.billableMinutes)}</dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">Rate</dt>
+                <dd className="tabular">{formatNaira(sheet.hourlyRateKobo)}/hour</dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">Night hours</dt>
+                <dd className="tabular">{duration(sheet.nightMinutes)}</dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">Holiday hours</dt>
+                <dd className="tabular">{duration(sheet.holidayMinutes)}</dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">Overtime</dt>
+                <dd className="tabular">{duration(sheet.overtimeMinutes)}</dd>
+              </div>
+            </dl>
+            {sheet.premiumKobo ? (
+              <p className="text-sm text-muted-foreground">
+                The facility&apos;s rate card adds {formatNaira(sheet.premiumKobo)} for night,
+                holiday or overtime hours on this shift.
+              </p>
+            ) : null}
+            {/* Said plainly, because a practitioner reading a night figure will reasonably
+                expect it to be worth more. */}
+            {sheet.nightMinutes > 0 || sheet.holidayMinutes > 0 ? (
+              <p className="text-sm text-muted-foreground">
+                Night and holiday hours are priced against the facility&rsquo;s rate card when the
+                shift is invoiced. A facility that has not set one pays them at the ordinary rate.
+              </p>
+            ) : null}
+          </Disclosure>
+
+          <Disclosure summary="Where this has got to">
+            <Timeline
+              label="Progress of this timesheet"
+              steps={timesheetSteps({
+                status: sheet.attendanceStatus,
+                checkedOutAt: assignment.attendance?.checkedOutAt,
+                submittedAt: assignment.attendance?.submittedAt,
+                reviewedAt: assignment.attendance?.reviewedAt,
+                rejectionReason: sheet.rejectionReason,
+              })}
+            />
+          </Disclosure>
+
+          {revisions.length > 0 ? (
+            <Disclosure
+              summary={`${revisions.length} earlier version${revisions.length === 1 ? '' : 's'}, kept`}
+            >
+              {revisions.map((revision) => (
+                <div key={revision.revision} className="text-sm">
+                  <p className="tabular font-medium">
+                    Was {formatNaira(revision.previous.amountKobo as number)} ·{' '}
+                    {formatMinutes(revision.previous.billableMinutes as number)}
+                  </p>
+                  <p className="text-muted-foreground [overflow-wrap:anywhere]">
+                    {revision.reason}
+                  </p>
+                </div>
+              ))}
+            </Disclosure>
+          ) : null}
+
+          {canSubmit || canDispute ? (
+            <div className="flex flex-col gap-2 sm:flex-row">
+              {canSubmit ? (
+                <Button
+                  className="sm:flex-1"
+                  onClick={() => setSending(assignment)}
+                  aria-label={`Submit ${formatNaira(sheet.amountKobo)} for ${formatShiftWindow(assignment.startsAt, assignment.endsAt)}`}
+                >
+                  Submit {formatNaira(sheet.amountKobo)}
+                </Button>
+              ) : null}
+              {canDispute ? (
+                <Button
+                  variant="outline"
+                  className="sm:flex-1"
+                  onClick={() => {
+                    setDisputing(assignment);
+                    setReason('');
+                    setCategory('HOURS');
+                  }}
+                >
+                  <Gavel />
+                  Dispute this
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
+    );
+  };
+
+  const section = (id: string, heading: string, rows: Assignment[], note?: string) =>
+    rows.length === 0 ? null : (
+      <section aria-labelledby={id}>
+        <h2 id={id} className="mb-1 text-base font-semibold">
+          {heading}
+        </h2>
+        {note ? (
+          <p className="mb-3 text-sm text-muted-foreground">{note}</p>
+        ) : (
+          <div className="mb-3" />
+        )}
+        <div className="grid items-start gap-4 lg:grid-cols-2 2xl:grid-cols-3">
+          {rows.map((row) => (
+            <Fragment key={row.id}>{sheetCard(row)}</Fragment>
+          ))}
+        </div>
+      </section>
+    );
 
   return (
     <>
@@ -149,176 +399,128 @@ export default function MyTimesheetsPage() {
         description="What each shift came to, at the rate agreed when it was offered. Submit yours and the facility approves or asks you to correct it."
       />
 
-      {checkedOut.length > 0 ? (
+      {readyCount > 0 ? (
         <Alert className="mb-6" variant="info">
           <ReceiptText />
           <AlertDescription>
-            {checkedOut.length} shift{checkedOut.length === 1 ? '' : 's'} ready to submit. Nothing
-            is paid until you do.
+            {readyCount} shift{readyCount === 1 ? '' : 's'} ready to submit. Nothing is paid until
+            you do.
           </AlertDescription>
         </Alert>
       ) : null}
 
+      <StaleNote
+        show={shifts.isError && Boolean(shifts.data)}
+        onRetry={() => void shifts.refetch()}
+        retrying={shifts.isFetching}
+        what="your timesheets"
+      />
+
       {shifts.isPending ? (
-        <QueueSkeleton />
-      ) : shifts.isError ? (
-        <Alert variant="destructive">
-          <TriangleAlert />
-          <AlertDescription>Your timesheets could not be loaded.</AlertDescription>
-        </Alert>
-      ) : withSheets.length === 0 ? (
+        <ListSkeleton rows={2} label="Loading your timesheets" />
+      ) : shifts.isError && !shifts.data ? (
+        <ErrorState
+          error={shifts.error}
+          onRetry={() => void shifts.refetch()}
+          retrying={shifts.isFetching}
+        />
+      ) : sheets.length === 0 ? (
         <EmptyState
           icon={<ReceiptText />}
           title="No timesheets yet"
           description="One is worked out for you as soon as you check out of a shift."
         />
       ) : (
-        <div className="grid items-start gap-4 lg:grid-cols-2 2xl:grid-cols-3">
-          {withSheets.map(({ assignment, data }) => {
-            const sheet = data!.timesheet;
-            const revisions = data!.revisions;
-            const canSubmit = ['CHECKED_OUT', 'MANUALLY_CORRECTED', 'REJECTED'].includes(
-              sheet.attendanceStatus,
-            );
-            const decided = ['APPROVED', 'REJECTED'].includes(sheet.attendanceStatus);
-
-            return (
-              <Card key={assignment.id}>
-                <CardHeader className="flex-row items-start justify-between gap-4 space-y-0 pb-4">
-                  <div className="min-w-0">
-                    <p className="font-medium">{formatWhen(assignment.startsAt)}</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      {assignment.facilityName}
-                    </p>
-                    {sheet.revision > 1 ? (
-                      <p className="mt-0.5 text-xs text-muted-foreground">
-                        revision {sheet.revision}
-                      </p>
-                    ) : null}
-                  </div>
-                  <StatusBadge status={sheet.attendanceStatus} />
-                </CardHeader>
-
-                <CardContent className="space-y-4">
-                  {/* The text message says only that hours were sent back; this is where the
-                      reason is read, next to the button that sends them again. */}
-                  {sheet.attendanceStatus === 'REJECTED' ? (
-                    <Alert variant="warning">
-                      <TriangleAlert />
-                      <AlertDescription>
-                        <strong className="font-medium">The facility sent these hours back.</strong>{' '}
-                        {sheet.rejectionReason
-                          ? `They said: ${sheet.rejectionReason}`
-                          : 'They did not say why. Check the hours, correct what is wrong and send them again.'}
-                      </AlertDescription>
-                    </Alert>
-                  ) : null}
-
-                  <DetailGrid>
-                    <Detail label="Worked">{formatMinutes(sheet.workedMinutes)}</Detail>
-                    <Detail label="Break">{formatMinutes(sheet.breakMinutes)}</Detail>
-                    <Detail label="Billable">{formatMinutes(sheet.billableMinutes)}</Detail>
-                    {/* Not "you are owed": this is the timesheet at the base
-                        rate, and what is actually credited is priced against
-                        the facility's rate card when the shift is invoiced. */}
-                    <Detail label="At the agreed rate">
-                      <strong>{formatNaira(sheet.amountKobo)}</strong>
-                    </Detail>
-                  </DetailGrid>
-
-                  {sheet.premiumKobo ? (
-                    <p className="text-xs text-muted-foreground">
-                      The facility&apos;s rate card adds {formatNaira(sheet.premiumKobo)} for night,
-                      holiday or overtime hours on this shift.
-                    </p>
-                  ) : null}
-
-                  <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
-                    <span>Night {formatMinutes(sheet.nightMinutes)}</span>
-                    <span>Overtime {formatMinutes(sheet.overtimeMinutes)}</span>
-                    <span>Holiday {formatMinutes(sheet.holidayMinutes)}</span>
-                    <span>at {formatNaira(sheet.hourlyRateKobo)}/hour</span>
-                  </div>
-
-                  {/* Said plainly, because a practitioner reading a night
-                      figure will reasonably expect it to be worth more. */}
-                  {sheet.nightMinutes > 0 || sheet.holidayMinutes > 0 ? (
-                    <p className="text-xs text-muted-foreground">
-                      Night and holiday hours are priced against the facility&rsquo;s rate card when
-                      the shift is invoiced. A facility that has not set one pays them at the
-                      ordinary rate.
-                    </p>
-                  ) : null}
-
-                  {revisions.length > 0 ? (
-                    <details className="rounded-md border px-3 py-2">
-                      <summary className="cursor-pointer text-sm text-muted-foreground">
-                        <History className="mr-1 inline size-3.5" />
-                        {revisions.length} earlier version{revisions.length === 1 ? '' : 's'}, kept
-                      </summary>
-                      <div className="mt-2 space-y-2">
-                        {revisions.map((revision) => (
-                          <div key={revision.revision} className="text-xs">
-                            <p className="font-medium">
-                              Was {formatNaira(revision.previous.amountKobo as number)} ·{' '}
-                              {formatMinutes(revision.previous.billableMinutes as number)}
-                            </p>
-                            <p className="text-muted-foreground">{revision.reason}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </details>
-                  ) : null}
-
-                  {canSubmit || decided ? <Separator /> : null}
-
-                  <div className="flex flex-wrap gap-2">
-                    {canSubmit ? (
-                      <Button
-                        loading={submit.isPending && submit.variables === assignment.id}
-                        onClick={() => submit.mutate(assignment.id)}
-                      >
-                        Submit {formatNaira(sheet.amountKobo)}
-                      </Button>
-                    ) : null}
-
-                    {decided ? (
-                      <Button
-                        variant="outline"
-                        onClick={() => {
-                          setDisputing(assignment);
-                          setReason('');
-                        }}
-                      >
-                        <Gavel />
-                        Dispute this
-                      </Button>
-                    ) : null}
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
+        <div className="space-y-8">
+          {section('to-send', 'Ready to send', toSend, 'Worked, and waiting for you.')}
+          {section('with-facility', 'With the facility', withFacility, 'Sent. They decide next.')}
+          {section('decided', 'Decided', visibleDecided)}
+          {decided.length > RECENT_DECIDED ? (
+            <Button variant="outline" onClick={() => setShowAllDecided((value) => !value)}>
+              {showAllDecided
+                ? 'Show only the most recent'
+                : `Show all ${decided.length} decided timesheets`}
+            </Button>
+          ) : null}
         </div>
       )}
 
-      <Dialog
-        open={disputing !== null}
-        onOpenChange={(next: boolean) => !next && setDisputing(null)}
+      <ConfirmDialog
+        open={sending !== null}
+        onOpenChange={(next) => !next && setSending(null)}
+        title="Send these hours to the facility"
+        object={
+          sending
+            ? `${sending.facilityName} · ${formatShiftWindow(sending.startsAt, sending.endsAt)}`
+            : ''
+        }
+        consequence="The facility sees these hours and approves them or sends them back with a reason. Nothing is paid until they approve and the shift is invoiced."
+        reversible={false}
+        confirmLabel="Send to the facility"
+        cancelLabel="Not yet"
+        loading={submit.isPending}
+        onConfirm={() => sending && submit.mutate(sending.id)}
       >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Dispute this shift</DialogTitle>
-            <DialogDescription>
-              An officer at the platform decides, not the facility. You have fourteen days from
-              their decision, and the shift is held until yours is resolved.
-            </DialogDescription>
-          </DialogHeader>
+        {sending ? (
+          <>
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-md border p-3 text-sm">
+              <div className="col-span-2">
+                <dt className="text-muted-foreground">Checked in and out</dt>
+                <dd className="tabular font-medium">
+                  {clockRange(sending.attendance) ?? 'Recorded by the facility'}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">Worked</dt>
+                <dd className="tabular font-medium">
+                  {duration(sending.sheet!.timesheet.workedMinutes)}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">Unpaid break</dt>
+                <dd className="tabular font-medium">
+                  {sending.sheet!.timesheet.breakMinutes > 0
+                    ? duration(sending.sheet!.timesheet.breakMinutes)
+                    : 'None'}
+                </dd>
+              </div>
+              <div className="col-span-2">
+                <dt className="text-muted-foreground">At the agreed rate</dt>
+                <dd>
+                  <Money kobo={sending.sheet!.timesheet.amountKobo} strong />
+                </dd>
+              </div>
+            </dl>
+            <p className="text-sm text-muted-foreground">
+              The hours are worked out again from your check-in and check-out when you send them, so
+              the figure the facility sees is what the record says at that moment. Once sent you
+              cannot change them yourself; if the facility sends them back you can send them again.
+            </p>
+          </>
+        ) : null}
+      </ConfirmDialog>
 
-          <div className="space-y-1.5">
-            <Label>What is wrong</Label>
+      <ConfirmDialog
+        open={disputing !== null}
+        onOpenChange={(next) => !next && setDisputing(null)}
+        title="Dispute this shift"
+        object={
+          disputing
+            ? `${disputing.facilityName} · ${formatShiftWindow(disputing.startsAt, disputing.endsAt)}`
+            : ''
+        }
+        consequence="An officer at the platform decides, not the facility. You have fourteen days from their decision, and the shift is held until yours is resolved."
+        reversible={false}
+        confirmLabel="Open the dispute"
+        cancelLabel="Not now"
+        loading={dispute.isPending}
+        confirmDisabled={reason.trim().length < MIN_REASON}
+        onConfirm={() => disputing && dispute.mutate(disputing)}
+      >
+        <Field label="What is wrong" required>
+          {(a11y) => (
             <Select value={category} onValueChange={setCategory}>
-              <SelectTrigger>
+              <SelectTrigger {...a11y}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -329,38 +531,20 @@ export default function MyTimesheetsPage() {
                 ))}
               </SelectContent>
             </Select>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="dispute-reason">In your words</Label>
-            <Textarea
-              id="dispute-reason"
-              rows={4}
-              placeholder="What happened, and what the record should say instead."
-              value={reason}
-              onChange={(event) => setReason(event.target.value)}
-            />
-            {reason.length > 0 && reason.trim().length < MIN_REASON ? (
-              <p className="text-xs text-muted-foreground">
-                {MIN_REASON - reason.trim().length} more characters needed.
-              </p>
-            ) : null}
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDisputing(null)}>
-              Cancel
-            </Button>
-            <Button
-              disabled={reason.trim().length < MIN_REASON}
-              loading={dispute.isPending}
-              onClick={() => disputing && dispute.mutate(disputing)}
-            >
-              Open the dispute
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          )}
+        </Field>
+        <Field
+          label="In your words"
+          required
+          hint={
+            reason.trim().length < MIN_REASON
+              ? `What happened, and what the record should say instead. ${MIN_REASON - reason.trim().length} more characters needed.`
+              : 'What happened, and what the record should say instead.'
+          }
+        >
+          <Textarea rows={4} value={reason} onChange={(event) => setReason(event.target.value)} />
+        </Field>
+      </ConfirmDialog>
     </>
   );
 }

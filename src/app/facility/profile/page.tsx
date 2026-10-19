@@ -2,11 +2,18 @@
 
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ExternalLink, TriangleAlert } from 'lucide-react';
+import { CircleAlert, Clock, ExternalLink, Octagon, TriangleAlert } from 'lucide-react';
 import { toast } from 'sonner';
 import { api, errorMessage } from '@/lib/ui/api';
+import { daysUntilExpiry, expiryPhrase, expiryTone } from '@/lib/ui/credential-timing';
 import { useFacilityId } from '@/lib/ui/facility';
+import { isNigerianPhone } from '@/lib/phone';
 import { useSession } from '@/lib/ui/session';
+import { cn } from '@/lib/utils';
+import {
+  normaliseRegistrationReference,
+  registrationReferenceProblem,
+} from '@/modules/facilities/domain/facility';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -16,7 +23,6 @@ import {
   registrationOption,
   type RegistrationKind,
 } from '@/lib/ui/registration';
-import { Label } from '@/components/ui/label';
 import {
   Select,
   SelectContent,
@@ -25,10 +31,13 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
+import { ConfirmDialog } from '@/components/app/confirm-dialog';
 import { DocumentUpload, type UploadedDocument } from '@/components/app/document-upload';
+import { Field } from '@/components/app/field';
+import { formatDate } from '@/components/app/format';
 import { StatusBadge } from '@/components/app/status-badge';
 import { PageHeader } from '@/components/app/page-shell';
-import { ErrorState } from '@/components/app/states';
+import { ErrorState, LoadingStatus } from '@/components/app/states';
 
 /** The facility as /api/v1/facilities/:id returns it. */
 interface FacilityRecord {
@@ -53,12 +62,47 @@ function dateOnly(value: string | null): string {
 }
 
 /**
+ * "31 Mar 2027 · in 163 days", warning inside a month. A lapsed licence says what that costs,
+ * in the words the registration form already uses: a facility whose licence has lapsed cannot
+ * publish shifts.
+ */
+function LicenceExpiry({ day }: { day: string }) {
+  const days = daysUntilExpiry({ documentExpiresOn: day });
+  if (days === null) return null;
+  const tone = expiryTone(days);
+  return (
+    <span
+      className={cn(
+        'flex items-start gap-1.5',
+        tone === 'danger' && 'font-medium text-destructive-text',
+        tone === 'warning' && 'font-medium text-warning',
+      )}
+    >
+      {tone ? (
+        <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+      ) : (
+        <Clock className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+      )}
+      <span>
+        {formatDate(day)} · {expiryPhrase(days)}
+        {days < 0 ? '. A facility whose licence has lapsed cannot publish shifts.' : ''}
+      </span>
+    </span>
+  );
+}
+
+/**
  * What compliance holds about this facility, and the way to correct it.
  *
  * There was no such page. The licence upload route existed and nothing called it,
  * a refused facility was told to "reply to Medilink with the corrected documents"
  * and had nowhere to, and an owner could not see what compliance held or fix a
  * wrong address. Everything here goes through routes that already existed.
+ *
+ * **Two saves change what compliance has to do again, and both ask first.** Changing the licence
+ * of a verified facility puts it back to pending, and "Save and send for review" on a refused one
+ * puts it in front of a reviewer as it stands. The page says which it is about to do, and what
+ * the facility can and cannot do after.
  */
 export default function FacilityProfilePage() {
   const facilityId = useFacilityId();
@@ -83,6 +127,7 @@ export default function FacilityProfilePage() {
   const [cacNumber, setCacNumber] = useState('');
   const [registrationKind, setRegistrationKind] = useState<RegistrationKind>('CAC');
   const [licence, setLicence] = useState<UploadedDocument | null>(null);
+  const [confirming, setConfirming] = useState<'licence' | 'resubmit' | null>(null);
 
   // Filled from the record once it arrives, and again after a save.
   useEffect(() => {
@@ -124,6 +169,32 @@ export default function FacilityProfilePage() {
 
   const pending = changes();
   const nothingToSave = Object.keys(pending).length === 0;
+
+  // The same rules the server applies, said under the field instead of in a refusal. Only for what
+  // has been changed: a value already on file is not the person's mistake to fix.
+  const problems: Record<string, string | undefined> = {
+    address:
+      'addressLine' in pending && addressLine.trim().length < 5
+        ? 'Enter the street, area and city.'
+        : undefined,
+    phone:
+      'contactPhone' in pending && !isNigerianPhone(contactPhone)
+        ? 'Enter a Nigerian mobile number, for example 0803 123 4567.'
+        : undefined,
+    email:
+      'contactEmail' in pending && !/^\S+@\S+\.\S+$/.test(contactEmail.trim())
+        ? 'Enter a valid email address.'
+        : undefined,
+    cac:
+      'cacNumber' in pending || 'registrationKind' in pending
+        ? (registrationReferenceProblem(
+            registrationKind,
+            normaliseRegistrationReference(registrationKind, cacNumber),
+          ) ?? undefined)
+        : undefined,
+  };
+  const hasProblem = Object.values(problems).some(Boolean);
+
   // A verified facility that changes its licence goes back for review: say so
   // before the click, not after.
   const sendsBackForReview =
@@ -132,25 +203,34 @@ export default function FacilityProfilePage() {
 
   const save = useMutation({
     mutationFn: (resubmit: boolean) =>
-      api.patch(`/api/v1/facilities/${facilityId}`, { ...pending, ...(resubmit ? { resubmit: true } : {}) }),
+      api.patch(`/api/v1/facilities/${facilityId}`, {
+        ...pending,
+        ...(resubmit ? { resubmit: true } : {}),
+      }),
     onSuccess: (_data, resubmit) => {
+      setConfirming(null);
       toast.success(resubmit ? 'Sent back to compliance for review' : 'Saved');
       void queryClient.invalidateQueries({ queryKey: ['facility-profile', facilityId] });
       void queryClient.invalidateQueries({ queryKey: ['facility'] });
     },
-    onError: (error) => toast.error('That did not save', { description: errorMessage(error) }),
   });
 
   const viewLicence = useMutation({
-    mutationFn: () => api.post<{ downloadUrl: string }>(`/api/v1/facilities/${facilityId}/licence-url`, {}),
+    mutationFn: () =>
+      api.post<{ downloadUrl: string }>(`/api/v1/facilities/${facilityId}/licence-url`, {}),
     onSuccess: ({ downloadUrl }) => window.open(downloadUrl, '_blank', 'noopener,noreferrer'),
-    onError: (error) => toast.error('Could not open the licence', { description: errorMessage(error) }),
+    onError: (error) =>
+      toast.error('Could not open the licence', { description: errorMessage(error) }),
   });
 
   if (!facilityId || facility.isPending) {
     return (
       <>
-        <PageHeader title="Facility profile" description="What Medilink holds about this facility." />
+        <PageHeader
+          title="Facility profile"
+          description="What Medilink holds about this facility."
+        />
+        <LoadingStatus label="Loading the facility" />
         <Skeleton className="h-64 w-full" />
       </>
     );
@@ -159,7 +239,10 @@ export default function FacilityProfilePage() {
   if (facility.isError || !record) {
     return (
       <>
-        <PageHeader title="Facility profile" description="What Medilink holds about this facility." />
+        <PageHeader
+          title="Facility profile"
+          description="What Medilink holds about this facility."
+        />
         <ErrorState
           error={facility.error}
           onRetry={() => void facility.refetch()}
@@ -170,6 +253,27 @@ export default function FacilityProfilePage() {
   }
 
   const referenceLabel = registrationOption(registrationKind).referenceLabel;
+  const changedLabels = [
+    'licenceNumber' in pending ? 'licence number' : null,
+    'licenceExpiresAt' in pending ? 'licence expiry date' : null,
+    'licenceObjectKey' in pending ? 'licence document' : null,
+  ].filter(Boolean);
+
+  // Why the save buttons are off, beside them, so a disabled button is never a mystery.
+  const saveNote = nothingToSave
+    ? refused
+      ? 'Change something first — sent back as it is, it would be refused for the same reason.'
+      : 'Nothing has changed yet.'
+    : hasProblem
+      ? 'Correct the fields marked above to save.'
+      : null;
+
+  function trySave(resubmit: boolean) {
+    save.reset();
+    if (resubmit) setConfirming('resubmit');
+    else if (sendsBackForReview) setConfirming('licence');
+    else save.mutate(false);
+  }
 
   return (
     <>
@@ -195,9 +299,17 @@ export default function FacilityProfilePage() {
         </Alert>
       ) : record.status === 'PENDING' ? (
         <Alert variant="warning" className="mb-6">
+          <Clock />
           <AlertDescription>
-            Waiting for verification. Medilink checks the registration and licence before this
-            facility can publish shifts.
+            <strong>Waiting for verification.</strong> Medilink checks the registration and licence
+            before this facility can publish shifts.
+          </AlertDescription>
+        </Alert>
+      ) : record.status === 'SUSPENDED' ? (
+        <Alert variant="destructive" className="mb-6">
+          <Octagon />
+          <AlertDescription>
+            <strong>This facility is suspended</strong> and cannot publish shifts.
           </AlertDescription>
         </Alert>
       ) : null}
@@ -205,122 +317,138 @@ export default function FacilityProfilePage() {
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Details</CardTitle>
+            <CardTitle className="text-base">Details</CardTitle>
             <CardDescription>The name and type are changed through Medilink.</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-1.5">
-              <p className="text-sm font-medium leading-none">Name</p>
-              <p className="text-sm">{record.name}</p>
-            </div>
+          <CardContent className="space-y-5">
+            <dl className="space-y-4">
+              <div>
+                <dt className="text-sm font-medium text-muted-foreground">Name</dt>
+                <dd className="text-base">{record.name}</dd>
+              </div>
+              {!(refused && canEdit) ? (
+                <div>
+                  <dt className="text-sm font-medium text-muted-foreground">{referenceLabel}</dt>
+                  <dd className="font-mono text-base">{record.cacNumber}</dd>
+                </div>
+              ) : null}
+            </dl>
 
-            <div className="space-y-1.5">
-              {refused && canEdit ? (
-                <Label htmlFor="cac">{referenceLabel}</Label>
-              ) : (
-                <p className="text-sm font-medium leading-none">{referenceLabel}</p>
-              )}
-              {refused && canEdit ? (
-                <>
-                  <Select
-                    value={registrationKind}
-                    onValueChange={(value) => setRegistrationKind(value as RegistrationKind)}
-                  >
-                    <SelectTrigger aria-label="What the facility is registered as">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {REGISTRATION_KIND_OPTIONS.map((row) => (
-                        <SelectItem key={row.value} value={row.value}>
-                          {row.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Input id="cac" value={cacNumber} onChange={(event) => setCacNumber(event.target.value)} />
-                  <p className="text-xs text-muted-foreground">
-                    Correct it if it was mistyped or filed under the wrong kind. It cannot be changed
-                    once the facility is verified.
-                  </p>
-                </>
-              ) : (
-                <p className="font-mono text-sm">{record.cacNumber}</p>
-              )}
-            </div>
+            {refused && canEdit ? (
+              <>
+                <Field label="What the facility is registered as">
+                  {(a11y) => (
+                    <Select
+                      value={registrationKind}
+                      onValueChange={(value) => setRegistrationKind(value as RegistrationKind)}
+                    >
+                      <SelectTrigger
+                        {...a11y}
+                        className="h-auto min-h-11 whitespace-normal py-2 text-left [&>span]:line-clamp-none"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {REGISTRATION_KIND_OPTIONS.map((row) => (
+                          <SelectItem key={row.value} value={row.value}>
+                            {row.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </Field>
+                <Field
+                  label={referenceLabel}
+                  hint="Correct it if it was mistyped or filed under the wrong kind. It cannot be changed once the facility is verified."
+                  error={problems.cac}
+                >
+                  <Input
+                    value={cacNumber}
+                    onChange={(event) => setCacNumber(event.target.value)}
+                    autoComplete="off"
+                  />
+                </Field>
+              </>
+            ) : null}
 
-            <div className="space-y-1.5">
-              <Label htmlFor="address">Address</Label>
+            <Field label="Address" error={problems.address}>
               <Input
-                id="address"
                 value={addressLine}
                 onChange={(event) => setAddressLine(event.target.value)}
                 disabled={!canEdit}
+                autoComplete="street-address"
               />
-            </div>
+            </Field>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label htmlFor="phone">Contact phone</Label>
+            <div className="grid gap-5 sm:grid-cols-2">
+              <Field label="Contact phone" error={problems.phone}>
                 <Input
-                  id="phone"
+                  type="tel"
                   value={contactPhone}
                   onChange={(event) => setContactPhone(event.target.value)}
                   inputMode="tel"
                   disabled={!canEdit}
+                  autoComplete="tel"
                 />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="email">Contact email</Label>
+              </Field>
+              <Field label="Contact email" error={problems.email}>
                 <Input
-                  id="email"
                   type="email"
                   value={contactEmail}
                   onChange={(event) => setContactEmail(event.target.value)}
                   disabled={!canEdit}
+                  autoComplete="email"
                 />
-              </div>
+              </Field>
             </div>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle>Licence</CardTitle>
+            <CardTitle className="text-base">Licence</CardTitle>
             <CardDescription>
               Compliance reads the licence beside the number before verifying the facility.
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label htmlFor="licence-number">Licence number</Label>
+          <CardContent className="space-y-5">
+            <div className="grid gap-5 sm:grid-cols-2">
+              <Field label="Licence number">
                 <Input
-                  id="licence-number"
                   value={licenceNumber}
                   onChange={(event) => setLicenceNumber(event.target.value)}
                   disabled={!canEdit}
+                  autoComplete="off"
                 />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="licence-expiry">Expires</Label>
+              </Field>
+              <Field label="Expires">
                 <Input
-                  id="licence-expiry"
                   type="date"
                   value={licenceExpiresAt}
                   onChange={(event) => setLicenceExpiresAt(event.target.value)}
                   disabled={!canEdit}
                 />
-              </div>
+              </Field>
             </div>
 
+            <p role="status" className="-mt-2 text-sm">
+              {licenceExpiresAt ? (
+                <LicenceExpiry day={licenceExpiresAt} />
+              ) : (
+                <span className="text-muted-foreground">No expiry date on file.</span>
+              )}
+            </p>
+
             <div className="space-y-2">
-              <p className="text-sm font-medium leading-none">Licence document</p>
+              <p id="licence-document-label" className="text-base font-medium leading-snug">
+                Licence document
+              </p>
               {record.licenceObjectKey && !licence ? (
-                <div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm">
-                  <span>A licence document is on file.</span>
+                <div className="flex flex-col gap-2 rounded-md border px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+                  <span className="text-base">A licence document is on file.</span>
                   <Button
                     variant="outline"
-                    size="sm"
                     loading={viewLicence.isPending}
                     onClick={() => viewLicence.mutate()}
                   >
@@ -334,7 +462,10 @@ export default function FacilityProfilePage() {
                   endpoint={`/api/v1/facilities/${facilityId}/licence-upload-url`}
                   value={licence}
                   onUploaded={setLicence}
-                  label={record.licenceObjectKey ? 'Replace the licence document' : 'Attach the licence'}
+                  labelledBy="licence-document-label"
+                  label={
+                    record.licenceObjectKey ? 'Replace the licence document' : 'Attach the licence'
+                  }
                   hint="A clear photograph or PDF, up to 10 MB. The number and expiry date must be readable."
                 />
               ) : null}
@@ -344,7 +475,7 @@ export default function FacilityProfilePage() {
               <Alert variant="warning">
                 <AlertDescription>
                   Changing the licence of a verified facility sends it back to compliance, and it
-                  cannot publish shifts until it is verified again.
+                  cannot publish shifts until it is verified again. You will be asked to confirm.
                 </AlertDescription>
               </Alert>
             ) : null}
@@ -353,31 +484,84 @@ export default function FacilityProfilePage() {
       </div>
 
       {canEdit ? (
-        <div className="mt-6 flex flex-wrap items-center gap-3">
-          <Button
-            variant={refused ? 'outline' : 'default'}
-            disabled={nothingToSave}
-            loading={save.isPending && !save.variables}
-            onClick={() => save.mutate(false)}
-          >
-            Save changes
-          </Button>
-          {refused ? (
-            <Button
-              disabled={nothingToSave}
-              loading={save.isPending && save.variables === true}
-              onClick={() => save.mutate(true)}
-            >
-              Save and send for review
-            </Button>
+        <div className="mt-6 space-y-3">
+          {save.isError && confirming === null ? (
+            <Alert variant="destructive">
+              <TriangleAlert />
+              <AlertDescription>
+                <strong>That did not save.</strong> {errorMessage(save.error)} What you changed is
+                still here: fix it and try again.
+              </AlertDescription>
+            </Alert>
           ) : null}
-          {refused && nothingToSave ? (
-            <p className="text-xs text-muted-foreground">
-              Change something first — sent back as it is, it would be refused for the same reason.
+          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+            <Button
+              variant={refused ? 'outline' : 'default'}
+              disabled={nothingToSave || hasProblem}
+              aria-describedby={saveNote ? 'facility-save-note' : undefined}
+              loading={save.isPending && confirming === null}
+              onClick={() => trySave(false)}
+              className="w-full sm:w-auto"
+            >
+              Save changes
+            </Button>
+            {refused ? (
+              <Button
+                disabled={nothingToSave || hasProblem}
+                aria-describedby={saveNote ? 'facility-save-note' : undefined}
+                onClick={() => trySave(true)}
+                className="w-full sm:w-auto"
+              >
+                Save and send for review
+              </Button>
+            ) : null}
+          </div>
+          {saveNote ? (
+            <p id="facility-save-note" className="text-sm text-muted-foreground">
+              {saveNote}
             </p>
           ) : null}
         </div>
       ) : null}
+
+      <ConfirmDialog
+        open={confirming === 'licence'}
+        onOpenChange={(next) => !next && setConfirming(null)}
+        title="Send this facility back for verification?"
+        object={`${record.name} · changing the ${changedLabels.join(', ')}`}
+        consequence="The facility goes back to Pending. It cannot publish shifts until compliance has verified it again."
+        reversible={false}
+        confirmLabel="Save and send back"
+        cancelLabel="Keep it verified"
+        destructive
+        loading={save.isPending}
+        onConfirm={() => save.mutate(false)}
+      >
+        {save.isError ? (
+          <p role="alert" className="text-sm font-medium text-destructive-text">
+            That did not save. {errorMessage(save.error)} What you changed is still here.
+          </p>
+        ) : null}
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={confirming === 'resubmit'}
+        onOpenChange={(next) => !next && setConfirming(null)}
+        title="Send this to compliance again?"
+        object={`${record.name} · refused, corrected, sent for review`}
+        consequence="It goes back to compliance as it is now, and the note they gave is cleared. They review what is on file when they get to it."
+        reversible={false}
+        confirmLabel="Send for review"
+        cancelLabel="Keep editing"
+        loading={save.isPending}
+        onConfirm={() => save.mutate(true)}
+      >
+        {save.isError ? (
+          <p role="alert" className="text-sm font-medium text-destructive-text">
+            That did not send. {errorMessage(save.error)} What you changed is still here.
+          </p>
+        ) : null}
+      </ConfirmDialog>
     </>
   );
 }

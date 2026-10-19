@@ -1,7 +1,8 @@
 'use client';
 
-import { Suspense, useRef } from 'react';
+import { Suspense, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 import { ArrowRight, CircleAlert, CircleCheck, Clock } from 'lucide-react';
 import { usePractitionerSetup } from '@/lib/ui/practitioner';
 import { useSession } from '@/lib/ui/session';
@@ -10,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { PageHeader } from '@/components/app/page-shell';
+import { ErrorState, LoadingStatus } from '@/components/app/states';
 import { formatWhen } from '@/components/app/format';
 import { AvailabilitySection } from './availability-section';
 import { CredentialsSection } from './credentials-section';
@@ -19,6 +21,9 @@ import { ProfileForm } from './profile-form';
 import { OnRecord, ProfileSummary } from './profile-summary';
 import { ReturnedNotice } from './returned-notice';
 import { SetupWizard } from './setup-wizard';
+
+/** What the setup checks stand on; the keys `usePractitionerSetup` reads. */
+const SETUP_QUERIES = ['profile', 'eligibility', 'availability', 'my-credentials'] as const;
 
 const TABS = [
   ['profile', 'Profile'],
@@ -40,7 +45,14 @@ const TABS = [
  */
 export default function MyProfilePage() {
   return (
-    <Suspense fallback={<Skeleton className="h-96 w-full" />}>
+    <Suspense
+      fallback={
+        <>
+          <LoadingStatus label="Loading your profile" />
+          <Skeleton className="h-96 w-full" />
+        </>
+      }
+    >
       <MyProfile />
     </Suspense>
   );
@@ -67,6 +79,37 @@ function MyProfile() {
     router.replace('/practitioner/profile', { scroll: false });
   }
 
+  // A request that failed with nothing to show is a failure, not "no profile yet": left alone the
+  // setup checks read it as an empty answer and invite a person who already has a profile to
+  // create one. (A refetch that fails over data already on screen is not this: the page stays.)
+  const queryClient = useQueryClient();
+  const [retrying, setRetrying] = useState(false);
+  const failedKey = SETUP_QUERIES.find((key) => {
+    const state = queryClient.getQueryState([key]);
+    return state?.status === 'error' && state.data === undefined;
+  });
+
+  if (failedKey) {
+    return (
+      <div>
+        <PageHeader
+          title="My profile"
+          description={`${session.user.fullName} · ${session.user.phone}`}
+        />
+        <ErrorState
+          error={queryClient.getQueryState([failedKey])?.error}
+          retrying={retrying}
+          onRetry={() => {
+            setRetrying(true);
+            void Promise.all(
+              SETUP_QUERIES.map((key) => queryClient.refetchQueries({ queryKey: [key] })),
+            ).finally(() => setRetrying(false));
+          }}
+        />
+      </div>
+    );
+  }
+
   if (!setup.ready) {
     return (
       <div>
@@ -74,6 +117,7 @@ function MyProfile() {
           title="My profile"
           description={`${session.user.fullName} · ${session.user.phone}`}
         />
+        <LoadingStatus label="Loading your profile" />
         <Skeleton className="h-96 w-full" />
       </div>
     );
@@ -110,7 +154,9 @@ function MyProfile() {
 
       {setup.profile ? <ProfileSummary profile={setup.profile} state={setup.state} /> : null}
 
-      {setup.state === 'CHANGES_NEEDED' ? <ReturnedNotice rejected={setup.rejected} className="mb-6" /> : null}
+      {setup.state === 'CHANGES_NEEDED' ? (
+        <ReturnedNotice rejected={setup.rejected} className="mb-6" />
+      ) : null}
 
       {setup.state === 'WAITING' ? (
         <Alert variant="info" className="mb-6">

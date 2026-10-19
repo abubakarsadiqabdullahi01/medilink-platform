@@ -8,23 +8,16 @@ import { api, errorMessage } from '@/lib/ui/api';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
+import { ConfirmDialog } from '@/components/app/confirm-dialog';
+import { Field } from '@/components/app/field';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
-import { Detail, DetailGrid, PageHeader } from '@/components/app/page-shell';
-import { ErrorState } from '@/components/app/states';
+import { PageHeader } from '@/components/app/page-shell';
+import { ErrorState, ListSkeleton } from '@/components/app/states';
 import { useStepUp } from '@/components/app/step-up';
+import { Timeline } from '@/components/app/timeline';
 import { actionLabel, formatAgo, formatWhen } from '@/components/app/format';
 import { ERASURE_RETAINED } from '@/modules/audit-compliance/domain/erasure';
 
@@ -71,6 +64,16 @@ const KIND_DUTY: Record<string, string> = {
 
 const MIN_OUTCOME = 10;
 
+/** A fact with its label, wrapping rather than cutting a name short. */
+function Fact({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-sm text-muted-foreground">{label}</dt>
+      <dd className="text-base [overflow-wrap:anywhere]">{children}</dd>
+    </div>
+  );
+}
+
 export function RequestDetail({
   request,
   onBack,
@@ -81,6 +84,7 @@ export function RequestDetail({
   const queryClient = useQueryClient();
   const [outcome, setOutcome] = useState('');
   const [erasing, setErasing] = useState(false);
+  const [closing, setClosing] = useState<'COMPLETED' | 'REFUSED' | null>(null);
   const [confirmation, setConfirmation] = useState('');
   const stepUp = useStepUp('Erasing a person cannot be undone.');
 
@@ -113,6 +117,7 @@ export function RequestDetail({
       api.post(`/api/v1/data-requests/${request.id}/close`, { status, outcome: outcome.trim() }),
     onSuccess: (_result, status) => {
       toast.success(status === 'COMPLETED' ? 'Answered' : 'Refused, with the reason recorded');
+      setClosing(null);
       void queryClient.invalidateQueries({ queryKey: ['request-queue'] });
       void queryClient.invalidateQueries({ queryKey: ['request-history', request.id] });
       onBack();
@@ -121,7 +126,10 @@ export function RequestDetail({
   });
 
   const erase = useMutation({
-    mutationFn: () => api.post<{ files: { deleted: number; pending: number } }>(`/api/v1/data-requests/${request.id}/erase`),
+    mutationFn: () =>
+      api.post<{ files: { deleted: number; pending: number } }>(
+        `/api/v1/data-requests/${request.id}/erase`,
+      ),
     onSuccess: (report) => {
       toast.success('Erased', {
         description:
@@ -146,7 +154,7 @@ export function RequestDetail({
   return (
     <>
       {stepUp.dialog}
-      <Dialog
+      <ConfirmDialog
         open={erasing}
         onOpenChange={(next) => {
           if (!next) {
@@ -154,50 +162,92 @@ export function RequestDetail({
             setConfirmation('');
           }
         }}
+        title={`Erase ${request.subjectName}`}
+        object={
+          <>
+            {request.subjectName}
+            <span className="block font-mono text-sm font-normal text-muted-foreground">
+              {request.subjectPhone}
+            </span>
+          </>
+        }
+        consequence={
+          <>
+            Their name, email and number are replaced, their sign-ins ended, what they wrote or was
+            sent to them deleted, their files deleted from storage and the account closed.
+          </>
+        }
+        reversible={false}
+        destructive
+        confirmLabel="Erase this person"
+        cancelLabel="Do not erase"
+        loading={erase.isPending}
+        confirmDisabled={confirmation.trim() !== 'ERASE'}
+        onConfirm={() => erase.mutate()}
       >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Erase {request.subjectName}</DialogTitle>
-            <DialogDescription>
-              This cannot be undone. Their name, email and number are replaced, their sign-ins
-              ended, what they wrote or was sent to them deleted, their files deleted from storage
-              and the account closed.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3 text-sm">
-            <p className="font-medium">What is kept, and why</p>
-            <ul className="space-y-2 text-xs text-muted-foreground">
-              {ERASURE_RETAINED.map((row) => (
-                <li key={row.area}>
-                  <span className="font-medium text-foreground">{row.area}.</span> {row.reason}
-                </li>
-              ))}
-            </ul>
-            <div className="space-y-1.5 pt-2">
-              <Label htmlFor="erase-confirmation">Type ERASE to confirm</Label>
-              <Input
-                id="erase-confirmation"
-                value={confirmation}
-                autoComplete="off"
-                onChange={(event) => setConfirmation(event.target.value)}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setErasing(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              disabled={confirmation.trim() !== 'ERASE'}
-              loading={erase.isPending}
-              onClick={() => erase.mutate()}
-            >
-              Erase
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        <div className="space-y-3">
+          <p className="font-medium">What is kept, and why</p>
+          <ul className="space-y-2 text-sm text-muted-foreground">
+            {ERASURE_RETAINED.map((row) => (
+              <li key={row.area}>
+                <span className="font-medium text-foreground">{row.area}.</span> {row.reason}
+              </li>
+            ))}
+          </ul>
+          <Field label="Type ERASE to confirm" required>
+            <Input
+              value={confirmation}
+              autoComplete="off"
+              autoCapitalize="characters"
+              onChange={(event) => setConfirmation(event.target.value)}
+            />
+          </Field>
+        </div>
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={closing !== null}
+        onOpenChange={(next) => !next && setClosing(null)}
+        title={closing === 'COMPLETED' ? 'Record the request as answered' : 'Refuse the request'}
+        object={
+          <>
+            {humanise(request.kind)} · {request.subjectName}
+            <span className="block font-normal text-muted-foreground">
+              Due {formatWhen(request.dueBy)}
+            </span>
+          </>
+        }
+        consequence={
+          closing === 'COMPLETED' ? (
+            <>
+              The request is closed as answered, with what you wrote as the answer. No message is
+              sent: they can read it in the app.
+            </>
+          ) : (
+            <>
+              The request is closed as refused, with your reason as the answer. A refusal is the
+              outcome people appeal, so the reason is what stands. No message is sent: they can read
+              it in the app.
+            </>
+          )
+        }
+        reversible={false}
+        destructive={closing === 'REFUSED'}
+        confirmLabel={closing === 'COMPLETED' ? 'Record as answered' : 'Refuse the request'}
+        cancelLabel="Not yet"
+        loading={close.isPending}
+        onConfirm={() => closing && close.mutate(closing)}
+      >
+        <figure className="rounded-md border bg-muted/40 px-3 py-2">
+          <figcaption className="text-sm font-medium text-muted-foreground">
+            What they will read
+          </figcaption>
+          <blockquote className="mt-1 whitespace-pre-wrap text-base [overflow-wrap:anywhere]">
+            {outcome.trim()}
+          </blockquote>
+        </figure>
+      </ConfirmDialog>
+
       <PageHeader
         title={`${humanise(request.kind)} — ${request.subjectName}`}
         description={`Received ${formatAgo(request.receivedAt)} · due ${formatWhen(request.dueBy)}`}
@@ -220,7 +270,8 @@ export function RequestDetail({
             </div>
             <div className="flex items-center gap-3">
               {request.overdue ? (
-                <span className="rounded-full bg-destructive/10 px-2.5 py-1 text-xs font-medium text-destructive-text">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-destructive/10 px-2.5 py-1 text-sm font-medium text-destructive-text">
+                  <TriangleAlert className="size-4" aria-hidden="true" />
                   Past its deadline
                 </span>
               ) : null}
@@ -241,20 +292,18 @@ export function RequestDetail({
                 <CardTitle className="text-sm">What they asked for</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <DetailGrid>
-                  <Detail label="Right">{humanise(request.kind)}</Detail>
-                  <Detail label="Received">{formatWhen(request.receivedAt)}</Detail>
-                  <Detail label="Due by">{formatWhen(request.dueBy)}</Detail>
-                  <Detail label="Answered">
+                <dl className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <Fact label="Right">{humanise(request.kind)}</Fact>
+                  <Fact label="Received">{formatWhen(request.receivedAt)}</Fact>
+                  <Fact label="Due by">{formatWhen(request.dueBy)}</Fact>
+                  <Fact label="Answered">
                     {request.completedAt ? formatWhen(request.completedAt) : 'Not yet'}
-                  </Detail>
-                </DetailGrid>
+                  </Fact>
+                </dl>
 
                 {request.detail ? (
-                  <div className="rounded-md bg-muted px-3 py-2 text-sm">
-                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                      In their words
-                    </p>
+                  <div className="rounded-md bg-muted px-3 py-2">
+                    <p className="text-sm font-medium text-muted-foreground">In their words</p>
                     <p className="mt-1">{request.detail}</p>
                   </div>
                 ) : null}
@@ -274,17 +323,15 @@ export function RequestDetail({
                   <CardTitle className="text-sm">How it was answered</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  <DetailGrid>
-                    <Detail label="Outcome">{humanise(request.status)}</Detail>
-                    <Detail label="Closed">
+                  <dl className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
+                    <Fact label="Outcome">{humanise(request.status)}</Fact>
+                    <Fact label="Closed">
                       {request.completedAt ? formatWhen(request.completedAt) : '—'}
-                    </Detail>
-                  </DetailGrid>
+                    </Fact>
+                  </dl>
                   {request.outcome ? (
-                    <div className="rounded-md bg-muted px-3 py-2 text-sm">
-                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                        What was done
-                      </p>
+                    <div className="rounded-md bg-muted px-3 py-2">
+                      <p className="text-sm font-medium text-muted-foreground">What was done</p>
                       <p className="mt-1">{request.outcome}</p>
                     </div>
                   ) : null}
@@ -305,12 +352,11 @@ export function RequestDetail({
                        opening the queue does not start it again. */
                     <div className="flex flex-wrap items-center gap-3 rounded-lg border p-3">
                       <p className="min-w-0 flex-1 text-sm text-muted-foreground">
-                        Nobody has picked this up yet. Marking it in progress says you have it —
-                        the month still runs from the day it arrived.
+                        Nobody has picked this up yet. Marking it in progress says you have it — the
+                        month still runs from the day it arrived.
                       </p>
                       <Button
                         variant="outline"
-                        size="sm"
                         loading={start.isPending}
                         onClick={() => start.mutate()}
                       >
@@ -331,50 +377,55 @@ export function RequestDetail({
                     </Alert>
                   ) : null}
 
-                  <div className="space-y-1.5">
-                    <Label htmlFor="request-outcome">
-                      What was done{' '}
-                      <span className="font-normal text-muted-foreground">
-                        — required either way, and the subject reads it
-                      </span>
-                    </Label>
+                  <Field
+                    label="What was done"
+                    required
+                    hint={`Required either way, and the subject reads it. At least ${MIN_OUTCOME} characters.`}
+                    error={
+                      outcome.trim().length > 0 && outcome.trim().length < MIN_OUTCOME
+                        ? `${MIN_OUTCOME - outcome.trim().length} more character${MIN_OUTCOME - outcome.trim().length === 1 ? '' : 's'} needed.`
+                        : undefined
+                    }
+                  >
                     <Textarea
-                      id="request-outcome"
                       rows={4}
                       placeholder="What you did, or why you are refusing."
                       value={outcome}
                       onChange={(event) => setOutcome(event.target.value)}
                     />
-                  </div>
+                  </Field>
 
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-col gap-2 sm:flex-row">
                     {isErasure ? (
                       <Button
                         variant="destructive"
                         disabled={request.status !== 'IN_PROGRESS'}
                         onClick={() => setErasing(true)}
                       >
-                        Erase this person
+                        Erase this person…
                       </Button>
                     ) : (
                       <Button
                         variant="success"
-                        disabled={outcome.trim().length < MIN_OUTCOME || close.isPending}
-                        loading={close.isPending && close.variables === 'COMPLETED'}
-                        onClick={() => close.mutate('COMPLETED')}
+                        disabled={outcome.trim().length < MIN_OUTCOME}
+                        onClick={() => setClosing('COMPLETED')}
                       >
-                        Answered
+                        Answered…
                       </Button>
                     )}
                     <Button
                       variant={isErasure ? 'outline' : 'destructive'}
-                      disabled={outcome.trim().length < MIN_OUTCOME || close.isPending}
-                      loading={close.isPending && close.variables === 'REFUSED'}
-                      onClick={() => close.mutate('REFUSED')}
+                      disabled={outcome.trim().length < MIN_OUTCOME}
+                      onClick={() => setClosing('REFUSED')}
                     >
-                      Refuse
+                      Refuse…
                     </Button>
                   </div>
+                  {isErasure && request.status !== 'IN_PROGRESS' ? (
+                    <p className="text-sm text-muted-foreground">
+                      Erasing is available once the request is marked in progress.
+                    </p>
+                  ) : null}
                 </CardContent>
               </Card>
             ) : null}
@@ -390,7 +441,7 @@ export function RequestDetail({
               </CardHeader>
               <CardContent>
                 {history.isPending ? (
-                  <Skeleton className="h-32 w-full" />
+                  <ListSkeleton rows={2} label="Loading the history" />
                 ) : history.isError ? (
                   <ErrorState
                     error={history.error}
@@ -399,21 +450,18 @@ export function RequestDetail({
                     compact
                   />
                 ) : history.data.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">Nothing recorded yet.</p>
+                  <p className="text-base text-muted-foreground">Nothing recorded yet.</p>
                 ) : (
-                  <ol className="space-y-3">
-                    {history.data.map((entry) => (
-                      <li key={entry.id} className="border-l-2 border-border pl-4">
-                        <p className="text-sm font-medium">
-                          {actionLabel(entry.action)}
-                        </p>
-                        <p className="mt-0.5 text-xs text-muted-foreground">
-                          {formatWhen(entry.createdAt)} · {formatAgo(entry.createdAt)}
-                        </p>
-                        {entry.reason ? <p className="mt-1 text-sm">{entry.reason}</p> : null}
-                      </li>
-                    ))}
-                  </ol>
+                  <Timeline
+                    label="History of this request"
+                    steps={history.data.map((entry) => ({
+                      id: entry.id,
+                      state: 'done' as const,
+                      title: actionLabel(entry.action),
+                      when: `${formatWhen(entry.createdAt)} · ${formatAgo(entry.createdAt)}`,
+                      detail: entry.reason ?? undefined,
+                    }))}
+                  />
                 )}
               </CardContent>
             </Card>

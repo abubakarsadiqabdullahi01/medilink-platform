@@ -3,18 +3,19 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ArrowLeft, CircleCheck, History } from 'lucide-react';
+import { ArrowLeft, History } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { api, errorMessage } from '@/lib/ui/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Label } from '@/components/ui/label';
-import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
+import { ConfirmDialog } from '@/components/app/confirm-dialog';
+import { Field } from '@/components/app/field';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
-import { Detail, DetailGrid, PageHeader } from '@/components/app/page-shell';
-import { ErrorState } from '@/components/app/states';
+import { PageHeader } from '@/components/app/page-shell';
+import { ErrorState, ListSkeleton } from '@/components/app/states';
+import { Timeline } from '@/components/app/timeline';
 import { actionLabel, formatAgo, formatWhen } from '@/components/app/format';
 
 /**
@@ -73,10 +74,31 @@ const FAULTS = [
 
 const MIN_REASON = 10;
 
+/** What recording each finding does, for the confirmation: said as the code does it. */
+const WHAT_FOLLOWS: Record<string, string> = {
+  PRACTITIONER:
+    'The shift is recorded as a no-show against them, and it counts in their reliability score. Nobody is sent a message about it: they learn of it only by finding the status in the app.',
+  FACILITY:
+    'The flag is closed as the facility’s fault. The shift is recorded as cancelled, with no mark on the practitioner.',
+  NEITHER:
+    'The flag is closed as nobody’s fault. The shift is recorded as cancelled, with no mark on the practitioner.',
+};
+
+/** A fact with its label, wrapping rather than cutting a name short. */
+function Fact({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-sm text-muted-foreground">{label}</dt>
+      <dd className="text-base [overflow-wrap:anywhere]">{children}</dd>
+    </div>
+  );
+}
+
 export function UnhonouredDetail({ record, onBack }: { record: Unhonoured; onBack: () => void }) {
   const queryClient = useQueryClient();
   const [fault, setFault] = useState<string | null>(null);
   const [reason, setReason] = useState('');
+  const [confirming, setConfirming] = useState(false);
 
   const history = useQuery({
     queryKey: ['unhonoured-history', record.id],
@@ -99,6 +121,7 @@ export function UnhonouredDetail({ record, onBack }: { record: Unhonoured; onBac
       }),
     onSuccess: () => {
       toast.success('Fault recorded');
+      setConfirming(false);
       void queryClient.invalidateQueries({ queryKey: ['unhonoured-queue'] });
       void queryClient.invalidateQueries({ queryKey: ['unhonoured-history', record.id] });
       void queryClient.invalidateQueries({ queryKey: ['tile'] });
@@ -145,14 +168,14 @@ export function UnhonouredDetail({ record, onBack }: { record: Unhonoured; onBac
                 <CardTitle className="text-sm">What the sweep found</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <DetailGrid>
-                  <Detail label="Facility">{record.facilityName}</Detail>
-                  <Detail label="Shift started">{formatWhen(record.shiftStartsAt)}</Detail>
-                  <Detail label="Shift ended">{formatWhen(record.shiftEndedAt)}</Detail>
-                  <Detail label="Flagged">{formatAgo(record.detectedAt)}</Detail>
-                </DetailGrid>
+                <dl className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <Fact label="Facility">{record.facilityName}</Fact>
+                  <Fact label="Shift started">{formatWhen(record.shiftStartsAt)}</Fact>
+                  <Fact label="Shift ended">{formatWhen(record.shiftEndedAt)}</Fact>
+                  <Fact label="Flagged">{formatAgo(record.detectedAt)}</Fact>
+                </dl>
 
-                <p className="text-xs leading-relaxed text-muted-foreground">
+                <p className="text-sm leading-relaxed text-muted-foreground">
                   The shift ended with no check-in and no check-out recorded against it. That is all
                   the platform knows — it cannot tell an absence from a failed network or a ward
                   that closed, which is why nothing here closes without a person.
@@ -166,17 +189,15 @@ export function UnhonouredDetail({ record, onBack }: { record: Unhonoured; onBac
                   <CardTitle className="text-sm">What was decided</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  <DetailGrid>
-                    <Detail label="Fault">{record.fault ? humanise(record.fault) : '—'}</Detail>
-                    <Detail label="Decided">
+                  <dl className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
+                    <Fact label="Fault">{record.fault ? humanise(record.fault) : '—'}</Fact>
+                    <Fact label="Decided">
                       {record.decidedAt ? formatWhen(record.decidedAt) : '—'}
-                    </Detail>
-                  </DetailGrid>
+                    </Fact>
+                  </dl>
                   {record.reason ? (
-                    <div className="rounded-md bg-muted px-3 py-2 text-sm">
-                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                        What was found
-                      </p>
+                    <div className="rounded-md bg-muted px-3 py-2">
+                      <p className="text-sm font-medium text-muted-foreground">What was found</p>
                       <p className="mt-1">{record.reason}</p>
                     </div>
                   ) : null}
@@ -192,61 +213,65 @@ export function UnhonouredDetail({ record, onBack }: { record: Unhonoured; onBac
                   <CardTitle className="text-sm">Whose fault was it?</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="space-y-2">
+                  <fieldset className="space-y-2">
+                    <legend className="sr-only">Whose fault was it?</legend>
                     {FAULTS.map((option) => (
-                      <button
+                      <label
                         key={option.value}
-                        type="button"
-                        onClick={() => setFault(option.value)}
                         className={cn(
-                          'flex w-full gap-3 rounded-lg border p-4 text-left transition-colors',
+                          'flex min-h-11 cursor-pointer gap-3 rounded-lg border p-4 transition-colors',
+                          'has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:focus-visible]:ring-offset-2',
                           fault === option.value
                             ? 'border-primary bg-accent/50'
                             : 'hover:border-primary/40',
                         )}
                       >
-                        <span
-                          className={cn(
-                            'mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border',
-                            fault === option.value ? 'border-primary bg-primary' : 'border-input',
-                          )}
-                          aria-hidden="true"
-                        >
-                          {fault === option.value ? (
-                            <CircleCheck className="size-3 text-primary-foreground" />
-                          ) : null}
-                        </span>
+                        <input
+                          type="radio"
+                          name="fault"
+                          value={option.value}
+                          checked={fault === option.value}
+                          onChange={() => setFault(option.value)}
+                          className="mt-1 size-4 shrink-0 accent-primary"
+                        />
                         <span className="min-w-0">
                           <span className="block font-medium">{option.label}</span>
-                          <span className="mt-0.5 block text-sm text-muted-foreground">
+                          <span className="mt-0.5 block text-base text-muted-foreground">
                             {option.consequence}
                           </span>
                         </span>
-                      </button>
+                      </label>
                     ))}
-                  </div>
+                  </fieldset>
 
-                  <div className="space-y-1.5">
-                    <Label htmlFor="fault-reason">
-                      What you found{' '}
-                      <span className="font-normal text-muted-foreground">— required</span>
-                    </Label>
+                  <Field
+                    label="What you found"
+                    required
+                    hint={`Who you spoke to and what they said. At least ${MIN_REASON} characters.`}
+                    error={
+                      reason.trim().length > 0 && reason.trim().length < MIN_REASON
+                        ? `${MIN_REASON - reason.trim().length} more character${MIN_REASON - reason.trim().length === 1 ? '' : 's'} needed.`
+                        : undefined
+                    }
+                  >
                     <Textarea
-                      id="fault-reason"
                       rows={3}
-                      placeholder="Who you spoke to and what they said."
                       value={reason}
                       onChange={(event) => setReason(event.target.value)}
                     />
-                  </div>
+                  </Field>
 
                   <Button
-                    disabled={!fault || reason.trim().length < MIN_REASON || decide.isPending}
-                    loading={decide.isPending}
-                    onClick={() => decide.mutate()}
+                    disabled={!fault || reason.trim().length < MIN_REASON}
+                    onClick={() => setConfirming(true)}
                   >
-                    Record the decision
+                    Review the decision
                   </Button>
+                  {!fault ? (
+                    <p className="text-sm text-muted-foreground">
+                      Choose whose fault it was first.
+                    </p>
+                  ) : null}
                 </CardContent>
               </Card>
             ) : null}
@@ -262,7 +287,7 @@ export function UnhonouredDetail({ record, onBack }: { record: Unhonoured; onBac
               </CardHeader>
               <CardContent>
                 {history.isPending ? (
-                  <Skeleton className="h-32 w-full" />
+                  <ListSkeleton rows={2} label="Loading the history" />
                 ) : history.isError ? (
                   <ErrorState
                     error={history.error}
@@ -271,26 +296,23 @@ export function UnhonouredDetail({ record, onBack }: { record: Unhonoured; onBac
                     compact
                   />
                 ) : history.data.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">Nothing recorded yet.</p>
+                  <p className="text-base text-muted-foreground">Nothing recorded yet.</p>
                 ) : (
-                  <ol className="space-y-3">
-                    {history.data.map((entry) => (
-                      <li key={entry.id} className="border-l-2 border-border pl-4">
-                        <p className="text-sm font-medium">
-                          {actionLabel(entry.action)}
-                        </p>
-                        <p className="mt-0.5 text-xs text-muted-foreground">
-                          {formatWhen(entry.createdAt)} · {formatAgo(entry.createdAt)}
-                        </p>
-                        {entry.reason ? <p className="mt-1 text-sm">{entry.reason}</p> : null}
-                      </li>
-                    ))}
-                  </ol>
+                  <Timeline
+                    label="History of this flag"
+                    steps={history.data.map((entry) => ({
+                      id: entry.id,
+                      state: 'done' as const,
+                      title: actionLabel(entry.action),
+                      when: `${formatWhen(entry.createdAt)} · ${formatAgo(entry.createdAt)}`,
+                      detail: entry.reason ?? undefined,
+                    }))}
+                  />
                 )}
 
                 {/* The sweep has no actor, and a name against a finding nobody
                     made would read as somebody having decided it. */}
-                <p className="mt-4 border-t pt-3 text-xs leading-relaxed text-muted-foreground">
+                <p className="mt-4 border-t pt-3 text-sm leading-relaxed text-muted-foreground">
                   The flag itself was raised by the nightly sweep, which is not a person and so
                   carries no name.
                 </p>
@@ -299,6 +321,39 @@ export function UnhonouredDetail({ record, onBack }: { record: Unhonoured; onBac
           </TabsContent>
         </Tabs>
       </div>
+
+      <ConfirmDialog
+        open={confirming}
+        onOpenChange={setConfirming}
+        title="Record whose fault it was"
+        object={
+          <>
+            {record.practitionerName} · {record.facilityName}
+            <span className="block font-normal text-muted-foreground">
+              Shift {formatWhen(record.shiftStartsAt)} · finding:{' '}
+              {fault ? FAULTS.find((option) => option.value === fault)?.label : ''}
+            </span>
+          </>
+        }
+        consequence={
+          <>{fault ? WHAT_FOLLOWS[fault] : null} The flag closes and is not reopened from here.</>
+        }
+        reversible={false}
+        destructive={fault === 'PRACTITIONER'}
+        confirmLabel="Record the decision"
+        cancelLabel="Not yet"
+        loading={decide.isPending}
+        onConfirm={() => decide.mutate()}
+      >
+        <figure className="rounded-md border bg-muted/40 px-3 py-2">
+          <figcaption className="text-sm font-medium text-muted-foreground">
+            What you found, as it will be kept
+          </figcaption>
+          <blockquote className="mt-1 whitespace-pre-wrap text-base [overflow-wrap:anywhere]">
+            {reason.trim()}
+          </blockquote>
+        </figure>
+      </ConfirmDialog>
     </>
   );
 }
@@ -333,6 +388,9 @@ function ExcusalRequests({
 }) {
   const queryClient = useQueryClient();
   const [notes, setNotes] = useState('');
+  const [deciding, setDeciding] = useState<{ id: string; decision: 'grant' | 'refuse' } | null>(
+    null,
+  );
 
   const excusals = useQuery({
     queryKey: ['excusals', record.assignmentId],
@@ -352,18 +410,22 @@ function ExcusalRequests({
         notes: notes.trim() || undefined,
       }),
     onSuccess: (_data, input) => {
-      toast.success(input.decision === 'grant' ? 'Excused — the flag is closed' : 'Request refused');
+      toast.success(
+        input.decision === 'grant' ? 'Excused — the flag is closed' : 'Request refused',
+      );
       void queryClient.invalidateQueries({ queryKey: ['excusals', record.assignmentId] });
       void queryClient.invalidateQueries({ queryKey: ['unhonoured-queue'] });
       void queryClient.invalidateQueries({ queryKey: ['unhonoured-history', record.id] });
       void queryClient.invalidateQueries({ queryKey: ['tile'] });
       setNotes('');
+      setDeciding(null);
       if (input.decision === 'grant') onDecided();
     },
     onError: (error) => toast.error('Could not decide it', { description: errorMessage(error) }),
   });
 
-  if (excusals.isPending) return <Skeleton className="h-24 w-full" />;
+  if (excusals.isPending)
+    return <ListSkeleton rows={1} label="Loading what the practitioner said" />;
   if (excusals.isError) {
     return (
       <ErrorState
@@ -378,11 +440,11 @@ function ExcusalRequests({
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-sm">What the practitioner said</CardTitle>
+        <CardTitle className="text-base">What the practitioner said</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         {excusals.data.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
+          <p className="text-base text-muted-foreground">
             They have not asked to be excused. They can, from their own shifts page, until this is
             decided.
           </p>
@@ -390,43 +452,47 @@ function ExcusalRequests({
           excusals.data.map((excusal) => (
             <div key={excusal.id} className="space-y-3 rounded-md border p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-xs text-muted-foreground">Asked {formatAgo(excusal.createdAt)}</p>
+                <p className="text-sm text-muted-foreground">
+                  Asked {formatAgo(excusal.createdAt)}
+                </p>
                 <StatusBadge status={excusal.status} />
               </div>
-              <p className="text-sm">{excusal.reason}</p>
+              <p className="text-base">{excusal.reason}</p>
               {excusal.decisionNotes ? (
-                <p className="text-xs text-muted-foreground">Decision: {excusal.decisionNotes}</p>
+                <p className="text-sm text-muted-foreground">Decision: {excusal.decisionNotes}</p>
               ) : null}
 
               {open && excusal.status === 'REQUESTED' ? (
-                <div className="space-y-2 border-t pt-3">
-                  <Label htmlFor={`excusal-notes-${excusal.id}`}>
-                    Your note{' '}
-                    <span className="font-normal text-muted-foreground">— required to refuse</span>
-                  </Label>
-                  <Textarea
-                    id={`excusal-notes-${excusal.id}`}
-                    rows={2}
-                    placeholder="What you checked, and what it showed."
-                    value={notes}
-                    onChange={(event) => setNotes(event.target.value)}
-                  />
-                  <div className="flex flex-wrap gap-2">
+                <div className="space-y-3 border-t pt-3">
+                  <Field
+                    label="Your note"
+                    hint={`Required to refuse (at least ${MIN_REASON} characters); optional to excuse. The practitioner sees it as Medilink’s reply.`}
+                    error={
+                      notes.trim().length > 0 && notes.trim().length < MIN_REASON
+                        ? 'Too short to refuse with. Say what you checked.'
+                        : undefined
+                    }
+                  >
+                    <Textarea
+                      rows={2}
+                      placeholder="What you checked, and what it showed."
+                      value={notes}
+                      onChange={(event) => setNotes(event.target.value)}
+                    />
+                  </Field>
+                  <div className="flex flex-col gap-2 sm:flex-row">
                     <Button
                       variant="success"
-                      loading={decide.isPending && decide.variables?.decision === 'grant'}
-                      disabled={decide.isPending}
-                      onClick={() => decide.mutate({ id: excusal.id, decision: 'grant' })}
+                      onClick={() => setDeciding({ id: excusal.id, decision: 'grant' })}
                     >
-                      Excuse them
+                      Excuse them…
                     </Button>
                     <Button
                       variant="destructive"
-                      loading={decide.isPending && decide.variables?.decision === 'refuse'}
-                      disabled={decide.isPending || notes.trim().length < MIN_REASON}
-                      onClick={() => decide.mutate({ id: excusal.id, decision: 'refuse' })}
+                      disabled={notes.trim().length < MIN_REASON}
+                      onClick={() => setDeciding({ id: excusal.id, decision: 'refuse' })}
                     >
-                      Refuse
+                      Refuse…
                     </Button>
                   </div>
                 </div>
@@ -435,6 +501,51 @@ function ExcusalRequests({
           ))
         )}
       </CardContent>
+
+      <ConfirmDialog
+        open={deciding !== null}
+        onOpenChange={(next) => !next && setDeciding(null)}
+        title={deciding?.decision === 'grant' ? 'Excuse the practitioner' : 'Refuse the request'}
+        object={
+          <>
+            {record.practitionerName} · {record.facilityName}
+            <span className="block font-normal text-muted-foreground">
+              Shift {formatWhen(record.shiftStartsAt)}
+            </span>
+          </>
+        }
+        consequence={
+          deciding?.decision === 'grant' ? (
+            <>
+              The flag closes as nobody’s fault and the shift is recorded as cancelled, with no mark
+              on their record. Nobody is sent a message; they see your note, if you wrote one, on
+              their shifts page.
+            </>
+          ) : (
+            <>
+              The request is refused and your note is shown to them as Medilink’s reply. It decides
+              nothing about fault: the flag stays open for you to decide below.
+            </>
+          )
+        }
+        reversible={false}
+        destructive={deciding?.decision === 'refuse'}
+        confirmLabel={deciding?.decision === 'grant' ? 'Excuse them' : 'Refuse the request'}
+        cancelLabel="Not yet"
+        loading={decide.isPending}
+        onConfirm={() => deciding && decide.mutate(deciding)}
+      >
+        {notes.trim() ? (
+          <figure className="rounded-md border bg-muted/40 px-3 py-2">
+            <figcaption className="text-sm font-medium text-muted-foreground">
+              Your note, as they will read it
+            </figcaption>
+            <blockquote className="mt-1 whitespace-pre-wrap text-base [overflow-wrap:anywhere]">
+              {notes.trim()}
+            </blockquote>
+          </figure>
+        ) : null}
+      </ConfirmDialog>
     </Card>
   );
 }
