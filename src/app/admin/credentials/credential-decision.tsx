@@ -1,22 +1,14 @@
 'use client';
 
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ComponentProps } from 'react';
 import Link from 'next/link';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { CircleAlert, Info } from 'lucide-react';
 import { api, errorMessage } from '@/lib/ui/api';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { ConfirmDialog, type Reversibility } from '@/components/app/confirm-dialog';
 import { Field } from '@/components/app/field';
 import { formatDate } from '@/components/app/format';
 import { isRecordChecked, type Submission } from '@/app/admin/practitioners/submissions';
@@ -36,125 +28,23 @@ import { canDecide, isAwaitingPractitioner, type CredentialDecision } from './cr
  *   pending. It is the middle answer, and it is the only one a reviewer can give without
  *   deciding.
  *
- * `ConfirmDialog` has one way of saying "you can undo this", which would be untrue of the third.
- * `DecisionDialog` carries the same three facts with the wording supplied by the caller.
+ * "You can undo this" would be untrue of the third, so these dialogs pass `ConfirmDialog` a
+ * `Reversibility` — final, or open with the way on — instead of the plain true/false.
  */
 
-export interface Reversibility {
-  /** `final`: nothing on any screen takes it back. `open`: there is a way on from here. */
-  tone: 'final' | 'open';
-  label: string;
-  detail?: string;
-}
+export type { Reversibility };
 
+/**
+ * The credential screens' name for `ConfirmDialog`, keeping their `reversibility` prop. Kept as
+ * a wrapper so the six call sites read the same as before the two were merged.
+ */
 export function DecisionDialog({
-  open,
-  onOpenChange,
-  title,
-  object,
-  consequence,
   reversibility,
-  confirmLabel,
-  destructive = false,
-  loading = false,
-  error = null,
-  onConfirm,
-  children,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  title: string;
-  /** What this is about, as a fact: "Professional Indemnity Cover · Amina Yusuf". */
-  object: ReactNode;
-  consequence: ReactNode;
+  ...rest
+}: Omit<ComponentProps<typeof ConfirmDialog>, 'reversible'> & {
   reversibility: Reversibility;
-  confirmLabel: string;
-  destructive?: boolean;
-  loading?: boolean;
-  /** Why the last attempt failed. The dialog stays open on failure, with everything typed. */
-  error?: string | null;
-  onConfirm: () => void;
-  children?: ReactNode;
 }) {
-  const final = reversibility.tone === 'final';
-  return (
-    <Dialog open={open} onOpenChange={(next) => (loading ? undefined : onOpenChange(next))}>
-      <DialogContent
-        onOpenAutoFocus={(event) => {
-          // Enter on a dialog that has just opened must never be the thing that does the harm.
-          if (!final) return;
-          event.preventDefault();
-          (event.currentTarget as HTMLElement)
-            .querySelector<HTMLElement>('[data-decision-cancel]')
-            ?.focus();
-        }}
-      >
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription className="sr-only">
-            Confirm or cancel. This says what it applies to and what will happen.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-3 text-base">
-          <p className="rounded-md border bg-muted/40 px-3 py-2 font-medium leading-snug [overflow-wrap:anywhere]">
-            {object}
-          </p>
-          <div className="space-y-2 leading-relaxed">{consequence}</div>
-          <p className="flex items-start gap-2 text-sm text-muted-foreground">
-            {final ? (
-              <CircleAlert
-                className="mt-0.5 size-4 shrink-0 text-destructive-text"
-                aria-hidden="true"
-              />
-            ) : (
-              <Info className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-            )}
-            <span>
-              <span
-                className={
-                  final ? 'font-semibold text-destructive-text' : 'font-medium text-foreground'
-                }
-              >
-                {reversibility.label}
-              </span>
-              {reversibility.detail ? ` ${reversibility.detail}` : null}
-            </span>
-          </p>
-          {children}
-          {error ? (
-            <p
-              role="alert"
-              className="flex items-start gap-1.5 text-sm font-medium text-destructive-text"
-            >
-              <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-              {error}
-            </p>
-          ) : null}
-        </div>
-
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            disabled={loading}
-            data-decision-cancel
-          >
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            variant={destructive ? 'destructive' : 'default'}
-            onClick={onConfirm}
-            loading={loading}
-          >
-            {confirmLabel}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
+  return <ConfirmDialog {...rest} reversible={reversibility} />;
 }
 
 type DecisionSubject = Pick<
