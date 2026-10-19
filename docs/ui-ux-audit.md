@@ -392,7 +392,7 @@ committed with this audit; "Applied" says where it is already in use.
 | `SuccessScreen` ("what happens next") | toast-only results | 12+ | Done |
 | `Money`, `SubmittedVsApproved` | money in muted text; timesheet figures | timesheets ×3, invoices | Done |
 | `useMediaQuery` | — | filter bar, tables | Done |
-| `useCursorPager` + `Pager` | ten copies | 10 | **Not done** (listed for Phase 7) |
+| `useCursorPager` + `Pager` | ten copies of two arrays and three handlers | shifts, audit trail, credentials queue, practitioners directory, timesheets | Done; unit-tested (`Newer`/`Older` labels for time-ordered lists) |
 | `SelectField` | unbound `Select` | 39 | Covered by `Field`; per-site adoption in Phase 7 |
 | `ReasonDialog` (ConfirmDialog + reason + counter) | hand-rolled | 10 | Phase 7 |
 
