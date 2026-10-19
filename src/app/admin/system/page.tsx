@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { CircleCheck, TriangleAlert } from 'lucide-react';
@@ -17,6 +18,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { ConfirmDialog } from '@/components/app/confirm-dialog';
 import { PageHeader, QueueSkeleton } from '@/components/app/page-shell';
 import { ErrorState } from '@/components/app/states';
 import { formatWhen } from '@/components/app/format';
@@ -74,6 +76,7 @@ interface Payload {
 export default function SystemPage() {
   const queryClient = useQueryClient();
   const canReplay = useCan('system.manage');
+  const [replaying, setReplaying] = useState<TroubledEvent | null>(null);
 
   const system = useQuery({
     queryKey: ['system-status'],
@@ -83,9 +86,11 @@ export default function SystemPage() {
   });
 
   const replay = useMutation({
-    mutationFn: (event: TroubledEvent) => api.post(`/api/v1/admin/system/events/${event.id}/replay`),
+    mutationFn: (event: TroubledEvent) =>
+      api.post(`/api/v1/admin/system/events/${event.id}/replay`),
     onSuccess: () => {
       toast.success('Queued again', { description: 'The worker will try it on its next pass.' });
+      setReplaying(null);
       void queryClient.invalidateQueries({ queryKey: ['system-status'] });
     },
     onError: (error) => toast.error('Could not replay it', { description: errorMessage(error) }),
@@ -218,7 +223,9 @@ export default function SystemPage() {
                             <p className="text-muted-foreground">{formatWhen(event.createdAt)}</p>
                           </TableCell>
                           <TableCell>
-                            <Badge variant={event.status === 'DEAD_LETTER' ? 'destructive' : 'secondary'}>
+                            <Badge
+                              variant={event.status === 'DEAD_LETTER' ? 'destructive' : 'secondary'}
+                            >
                               {event.status === 'DEAD_LETTER' ? 'Gave up' : 'Retrying'}
                             </Badge>
                           </TableCell>
@@ -232,7 +239,7 @@ export default function SystemPage() {
                                 variant="outline"
                                 size="sm"
                                 loading={replay.isPending && replay.variables?.id === event.id}
-                                onClick={() => replay.mutate(event)}
+                                onClick={() => setReplaying(event)}
                               >
                                 Replay
                               </Button>
@@ -276,7 +283,9 @@ export default function SystemPage() {
                           {!job.enabled ? (
                             <Badge variant="outline">Switched off</Badge>
                           ) : job.lastStatus === 'FAILED' ? (
-                            <span className="text-destructive-text">Failed{job.lastError ? `: ${job.lastError}` : ''}</span>
+                            <span className="text-destructive-text">
+                              Failed{job.lastError ? `: ${job.lastError}` : ''}
+                            </span>
                           ) : job.lastStatus === 'SUCCEEDED' ? (
                             'Succeeded'
                           ) : (
@@ -293,6 +302,28 @@ export default function SystemPage() {
           </>
         )}
       </div>
+
+      <ConfirmDialog
+        open={replaying !== null}
+        onOpenChange={(next) => !next && setReplaying(null)}
+        title="Replay this event"
+        object={
+          replaying
+            ? `${replaying.eventType} · ${replaying.aggregateType} · ${replaying.attempts} ${replaying.attempts === 1 ? 'attempt' : 'attempts'} so far`
+            : ''
+        }
+        consequence="It is queued again and the worker runs it on its next pass, including any text it sends. If the first attempt reached the person, they may receive it twice."
+        reversible={false}
+        confirmLabel="Replay event"
+        loading={replay.isPending}
+        onConfirm={() => replaying && replay.mutate(replaying)}
+      >
+        {replaying?.lastError ? (
+          <p className="text-sm text-muted-foreground [overflow-wrap:anywhere]">
+            It last failed with: {replaying.lastError}
+          </p>
+        ) : null}
+      </ConfirmDialog>
     </>
   );
 }
