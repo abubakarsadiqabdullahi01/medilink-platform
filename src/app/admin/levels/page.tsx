@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { TriangleAlert } from 'lucide-react';
 import { api, errorMessage } from '@/lib/ui/api';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -11,7 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { PageHeader, QueueSkeleton } from '@/components/app/page-shell';
+import { PageHeader, QueueSkeleton, ErrorState } from '@/components/app/page-shell';
 
 interface Level {
   id: string;
@@ -105,10 +104,7 @@ export default function LevelsPage() {
       {overview.isPending ? (
         <QueueSkeleton rows={3} />
       ) : overview.isError ? (
-        <Alert variant="destructive">
-          <TriangleAlert />
-          <AlertDescription>The levels could not be loaded.</AlertDescription>
-        </Alert>
+        <ErrorState message="The levels could not be loaded." onRetry={() => void overview.refetch()} retrying={overview.isFetching} />
       ) : (
         <div className="space-y-6">
           <Alert variant="info">

@@ -3,10 +3,9 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ArrowLeft, History, TriangleAlert } from 'lucide-react';
+import { ArrowLeft, History, } from 'lucide-react';
 import { api, errorMessage } from '@/lib/ui/api';
 import { useReference } from '@/lib/ui/reference';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
@@ -15,7 +14,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
-import { Detail, DetailGrid, PageHeader } from '@/components/app/page-shell';
+import { Detail, DetailGrid, PageHeader, ErrorState } from '@/components/app/page-shell';
 import { DocumentDialog } from '@/components/app/document-dialog';
 import { StaffManager } from '@/components/app/staff-manager';
 import { FACILITY_STAFF_ROLES } from '@/lib/ui/staff-roles';
@@ -391,11 +390,8 @@ export function FacilityDetail({ facility, onBack }: { facility: Facility; onBac
                 {history.isPending ? (
                   <Skeleton className="h-32 w-full" />
                 ) : history.isError ? (
-                  <Alert variant="destructive">
-                    <TriangleAlert />
-                    <AlertDescription>The history could not be loaded.</AlertDescription>
-                  </Alert>
-                ) : history.data.length === 0 ? (
+        <ErrorState message="The history could not be loaded." onRetry={() => void history.refetch()} retrying={history.isFetching} />
+      ) : history.data.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
                     Nothing recorded against this facility yet.
                   </p>

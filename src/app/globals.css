@@ -58,6 +58,31 @@
 
     --radius: 0.625rem;
 
+    /* Brand surfaces for the public pages: the deep teal of the hero and the
+       trust band, the deeper teal of the footer, the mint that reads on them,
+       and the pale tint that alternates with white. They were hex literals in
+       the landing page, which is how the manifest and the icon came to disagree
+       with the app about what Medilink's teal is. The public pages are light by
+       design and never take the dark theme, so these have no dark value. */
+    --brand-night: 186 77% 10%;
+    --brand-deeper: 178 78% 7%;
+    --brand-mint: 177 49% 66%;
+    --surface-tint: 168 24% 96%;
+
+    /* Elevation: two levels and nothing else. A card rests on the page; a
+       popover, menu or dialog is lifted above it. Anything between is a card
+       with a border. */
+    --shadow-card: 0 1px 2px 0 hsl(40 14% 12% / 0.06), 0 1px 3px 0 hsl(40 14% 12% / 0.08);
+    --shadow-raised: 0 4px 6px -1px hsl(40 14% 12% / 0.1), 0 10px 24px -4px hsl(40 14% 12% / 0.14);
+
+    /* Motion: how long, and with what curve. Inside a console nothing runs
+       longer than --duration-base (see motion.tsx); --duration-slow is for the
+       public pages only. Mirrored in src/lib/ui/motion-tokens.ts for Framer. */
+    --duration-fast: 120ms;
+    --duration-base: 180ms;
+    --duration-slow: 320ms;
+    --ease-out: cubic-bezier(0.2, 0, 0, 1);
+
     /* Chart series. Slots 1 and 2 of the validated categorical palette, in
        fixed order and never cycled. Both modes pass every check of
        scripts/validate_palette.js against their own surface — the dark values
@@ -126,6 +151,9 @@
     --sidebar-accent-foreground: 184 60% 82%;
     --sidebar-border: 200 12% 18%;
     --sidebar-ring: 184 62% 44%;
+
+    --shadow-card: 0 1px 2px 0 hsl(0 0% 0% / 0.4), 0 1px 3px 0 hsl(0 0% 0% / 0.3);
+    --shadow-raised: 0 4px 6px -1px hsl(0 0% 0% / 0.5), 0 10px 24px -4px hsl(0 0% 0% / 0.55);
   }
 }
 
@@ -145,6 +173,10 @@
 
   body {
     @apply bg-background text-foreground;
+    /* Plus Jakarta Sans sets its word space narrow, and headings here are also tracked in
+       slightly: together "A document to accept" read as "Adocument toaccept". Legibility is
+       the point of this product's type, so the space is opened back up a little. */
+    word-spacing: 0.08em;
     font-feature-settings:
       'rlig' 1,
       'calt' 1;
@@ -155,6 +187,29 @@
      trusts. */
   .tabular {
     font-variant-numeric: tabular-nums;
+  }
+}
+
+/* A section that arrives as it is scrolled to (components/app/reveal.tsx). Visible by default; the
+   component hides it only once the page is running and the section is below the fold. */
+@layer components {
+  .reveal {
+    transition:
+      opacity var(--duration-slow) var(--ease-out),
+      transform var(--duration-slow) var(--ease-out);
+  }
+  .reveal[data-reveal='hidden'] {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .reveal {
+      transition: none;
+    }
+    .reveal[data-reveal='hidden'] {
+      opacity: 1;
+      transform: none;
+    }
   }
 }
 

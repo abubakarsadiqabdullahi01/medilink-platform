@@ -1,16 +1,9 @@
 'use client';
 
-import {
-  CalendarCheck,
-  Inbox,
-  LayoutDashboard,
-  ReceiptText,
-  UserRound,
-  Wallet,
-} from 'lucide-react';
 import { usePhoto } from '@/lib/ui/practitioner';
 import { SessionProvider, type SessionState } from '@/lib/ui/session';
 import { ConsoleShell, type NavSection } from '@/components/app/console-shell';
+import { ICON } from '@/components/app/icons';
 
 /**
  * The practitioner's own view.
@@ -28,17 +21,17 @@ const SECTIONS: NavSection[] = [
   {
     heading: 'Today',
     items: [
-      { href: '/practitioner', label: 'Overview', icon: LayoutDashboard, permission: null },
+      { href: '/practitioner', label: 'Overview', icon: ICON.dashboard, permission: null },
       {
         href: '/practitioner/offers',
         label: 'Offers',
-        icon: Inbox,
+        icon: ICON.offer,
         permission: 'service_request.read',
       },
       {
         href: '/practitioner/shifts',
         label: 'My shifts',
-        icon: CalendarCheck,
+        icon: ICON.shift,
         permission: 'service_request.read',
       },
     ],
@@ -49,13 +42,13 @@ const SECTIONS: NavSection[] = [
       {
         href: '/practitioner/timesheets',
         label: 'Timesheets',
-        icon: ReceiptText,
+        icon: ICON.timesheet,
         permission: 'timesheet.submit',
       },
       {
         href: '/practitioner/earnings',
         label: 'Earnings',
-        icon: Wallet,
+        icon: ICON.earnings,
         permission: 'invoice.read',
       },
     ],
@@ -66,7 +59,7 @@ const SECTIONS: NavSection[] = [
       {
         href: '/practitioner/profile',
         label: 'My profile',
-        icon: UserRound,
+        icon: ICON.practitioner,
         permission: 'practitioner.profile.read',
       },
     ],

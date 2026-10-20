@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ArrowLeft, History, MessageSquareText, TriangleAlert, UserRound } from 'lucide-react';
+import { ArrowLeft, History, MessageSquareText, UserRound } from 'lucide-react';
 import { api, errorMessage } from '@/lib/ui/api';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -14,7 +14,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
-import { Detail, DetailGrid, PageHeader } from '@/components/app/page-shell';
+import { Detail, DetailGrid, PageHeader, ErrorState } from '@/components/app/page-shell';
 import { actionLabel, formatAgo, formatWhen } from '@/components/app/format';
 
 /**
@@ -285,11 +285,8 @@ export function SuggestionDetail({
                 {history.isPending ? (
                   <Skeleton className="h-32 w-full" />
                 ) : history.isError ? (
-                  <Alert variant="destructive">
-                    <TriangleAlert />
-                    <AlertDescription>The history could not be loaded.</AlertDescription>
-                  </Alert>
-                ) : history.data.length === 0 ? (
+        <ErrorState message="The history could not be loaded." onRetry={() => void history.refetch()} retrying={history.isFetching} />
+      ) : history.data.length === 0 ? (
                   <p className="text-sm text-muted-foreground">Nothing recorded yet.</p>
                 ) : (
                   <ol className="space-y-3">

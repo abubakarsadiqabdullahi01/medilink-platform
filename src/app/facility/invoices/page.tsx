@@ -1,10 +1,9 @@
 'use client';
 
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { ReceiptText, TriangleAlert } from 'lucide-react';
+import { ReceiptText, } from 'lucide-react';
 import { api } from '@/lib/ui/api';
 import { useFacilityId } from '@/lib/ui/facility';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import {
@@ -17,7 +16,7 @@ import {
 } from '@/components/ui/table';
 import { AmountFigure } from '@/components/app/amount-figure';
 import { StatusBadge } from '@/components/app/status-badge';
-import { EmptyState, PageHeader, QueueSkeleton } from '@/components/app/page-shell';
+import { EmptyState, PageHeader, QueueSkeleton, ErrorState } from '@/components/app/page-shell';
 import { formatDate, formatMinutes, formatNaira } from '@/components/app/format';
 
 interface InvoiceLine {
@@ -115,10 +114,7 @@ export default function FacilityInvoicesPage() {
       {invoices.isPending ? (
         <QueueSkeleton rows={2} />
       ) : invoices.isError ? (
-        <Alert variant="destructive">
-          <TriangleAlert />
-          <AlertDescription>Invoices could not be loaded.</AlertDescription>
-        </Alert>
+        <ErrorState message="Invoices could not be loaded." onRetry={() => void invoices.refetch()} retrying={invoices.isFetching} />
       ) : billed.length === 0 ? (
         <EmptyState
           icon={<ReceiptText />}

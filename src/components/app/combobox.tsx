@@ -122,9 +122,9 @@ export function Combobox({
                     )}
                   />
                   <span className="min-w-0">
-                    <span className="block truncate">{option.label}</span>
+                    <span className="block break-words">{option.label}</span>
                     {option.hint ? (
-                      <span className="block truncate text-xs text-muted-foreground">
+                      <span className="block break-words text-xs text-muted-foreground">
                         {option.hint}
                       </span>
                     ) : null}

@@ -3,7 +3,7 @@
 import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { FileUp, Gavel, TriangleAlert } from 'lucide-react';
+import { FileUp, Gavel, } from 'lucide-react';
 import { api, errorMessage } from '@/lib/ui/api';
 import { useFacilityId } from '@/lib/ui/facility';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -19,7 +19,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
-import { EmptyState, PageHeader, QueueSkeleton } from '@/components/app/page-shell';
+import { EmptyState, PageHeader, QueueSkeleton, ErrorState } from '@/components/app/page-shell';
 import { formatAgo, formatWhen } from '@/components/app/format';
 
 interface Case {
@@ -80,10 +80,7 @@ export default function FacilityDisputesPage() {
       {!facilityId || cases.isPending ? (
         <QueueSkeleton rows={2} />
       ) : cases.isError ? (
-        <Alert variant="destructive">
-          <TriangleAlert />
-          <AlertDescription>The disputes could not be loaded.</AlertDescription>
-        </Alert>
+        <ErrorState message="The disputes could not be loaded." onRetry={() => void cases.refetch()} retrying={cases.isFetching} />
       ) : rows.length === 0 ? (
         <EmptyState
           icon={<Gavel />}

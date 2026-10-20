@@ -1,11 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { CalendarCheck, TriangleAlert } from 'lucide-react';
+import { CalendarCheck, } from 'lucide-react';
 import { useQueue } from '@/lib/ui/queue';
 import { agenda, type AgendaRange } from '@/lib/ui/agenda';
 import { Button } from '@/components/ui/button';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -15,9 +14,9 @@ import {
   DetailGrid,
   EmptyState,
   PageHeader,
-  QueueSkeleton,
-} from '@/components/app/page-shell';
+  QueueSkeleton, ErrorState } from '@/components/app/page-shell';
 import { formatAgo, formatNaira, formatWhen } from '@/components/app/format';
+import { ShiftLifecycle } from '@/components/app/shift-lifecycle';
 import { CheckInPanel, type Attendance } from './check-in-panel';
 import { ExcusalPanel } from './excusal-panel';
 
@@ -57,6 +56,22 @@ function ShiftCard({ row }: { row: Assignment }) {
           <Detail label="Type">{humanise(row.shiftType)}</Detail>
           <Detail label="Rate">{formatNaira(row.hourlyRateKobo)}/hour</Detail>
         </DetailGrid>
+
+        {row.status === 'CONFIRMED' || row.status === 'COMPLETED' ? (
+          <ShiftLifecycle
+            viewer="practitioner"
+            compact
+            state={{
+              published: true,
+              offered: true,
+              accepted: false,
+              confirmed: true,
+              started: new Date(row.startsAt) <= new Date(),
+              completed: row.status === 'COMPLETED',
+              attendance: row.attendance?.status ?? null,
+            }}
+          />
+        ) : null}
 
         {row.status === 'CONFIRMED' ? (
           <>
@@ -166,10 +181,7 @@ export default function MyShiftsPage() {
       {queue.isPending ? (
         <QueueSkeleton />
       ) : queue.isError ? (
-        <Alert variant="destructive">
-          <TriangleAlert />
-          <AlertDescription>Your shifts could not be loaded.</AlertDescription>
-        </Alert>
+        <ErrorState message="Your shifts could not be loaded." onRetry={() => void queue.refetch()} retrying={queue.isFetching} />
       ) : rows.length === 0 ? (
         <EmptyState
           icon={<CalendarCheck />}

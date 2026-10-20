@@ -22,7 +22,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { AmountFigure } from '@/components/app/amount-figure';
 import { PayoutAccountPanel, type AccountState } from '@/components/app/payout-account-panel';
 import { StatusBadge } from '@/components/app/status-badge';
-import { Detail, DetailGrid, EmptyState, PageHeader, QueueSkeleton } from '@/components/app/page-shell';
+import { Detail, DetailGrid, EmptyState, PageHeader, QueueSkeleton, ErrorState } from '@/components/app/page-shell';
 import { useStepUp } from '@/components/app/step-up';
 import { formatDate, formatNaira, formatWhen } from '@/components/app/format';
 import { lagosDate } from '@/lib/lagos-date';
@@ -288,11 +288,8 @@ export default function PayoutsPage() {
         ) : results.isPending ? (
           <QueueSkeleton rows={2} />
         ) : results.isError ? (
-          <Alert variant="destructive">
-            <TriangleAlert />
-            <AlertDescription>The directory could not be searched.</AlertDescription>
-          </Alert>
-        ) : hits.length === 0 ? (
+        <ErrorState message="The directory could not be searched." onRetry={() => void results.refetch()} retrying={results.isFetching} />
+      ) : hits.length === 0 ? (
           <EmptyState
             icon={<HandCoins />}
             title="Nobody matches that"
@@ -502,10 +499,7 @@ export default function PayoutsPage() {
       {payouts.isPending ? (
         <QueueSkeleton rows={2} />
       ) : payouts.isError ? (
-        <Alert variant="destructive">
-          <TriangleAlert />
-          <AlertDescription>Their payouts could not be loaded.</AlertDescription>
-        </Alert>
+        <ErrorState message="Their payouts could not be loaded." onRetry={() => void payouts.refetch()} retrying={payouts.isFetching} />
       ) : payouts.data.payouts.length === 0 ? (
         <EmptyState icon={<HandCoins />} title="No payouts for this practitioner" />
       ) : (

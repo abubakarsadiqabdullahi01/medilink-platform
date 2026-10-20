@@ -98,8 +98,11 @@ export function SessionProvider({
   const { data, isPending, error, refetch, isFetching } = useQuery({
     queryKey: ['session'],
     queryFn: () => api.get<SessionState>('/api/v1/auth/session'),
-    // A refusal is an answer; a timeout or a 5xx is not, and is worth a try.
-    retry: (count, failure) => !(failure instanceof ApiError && failure.failure.status < 500) && count < 2,
+    // A 4xx is the server's considered answer and is not asked again; no answer at all (status 0) and
+    // a 5xx are.
+    retry: (count, failure) =>
+      !(failure instanceof ApiError && failure.failure.status >= 400 && failure.failure.status < 500) &&
+      count < 2,
     staleTime: 60_000,
     ...(initial ? { initialData: initial, initialDataUpdatedAt: Date.now() } : {}),
   });

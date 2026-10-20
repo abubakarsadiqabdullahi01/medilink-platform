@@ -33,8 +33,7 @@ import {
   DetailGrid,
   EmptyState,
   PageHeader,
-  QueueSkeleton,
-} from '@/components/app/page-shell';
+  QueueSkeleton, ErrorState } from '@/components/app/page-shell';
 import { formatMinutes, formatNaira, formatWhen } from '@/components/app/format';
 
 interface Assignment {
@@ -162,10 +161,7 @@ export default function MyTimesheetsPage() {
       {shifts.isPending ? (
         <QueueSkeleton />
       ) : shifts.isError ? (
-        <Alert variant="destructive">
-          <TriangleAlert />
-          <AlertDescription>Your timesheets could not be loaded.</AlertDescription>
-        </Alert>
+        <ErrorState message="Your timesheets could not be loaded." onRetry={() => void shifts.refetch()} retrying={shifts.isFetching} />
       ) : withSheets.length === 0 ? (
         <EmptyState
           icon={<ReceiptText />}

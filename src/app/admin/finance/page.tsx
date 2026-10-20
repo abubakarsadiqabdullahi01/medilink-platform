@@ -3,9 +3,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import dynamic from 'next/dynamic';
-import { Banknote, ChevronLeft, ChevronRight, Landmark, TriangleAlert, Wallet } from 'lucide-react';
+import { Banknote, ChevronLeft, ChevronRight, Landmark, Wallet } from 'lucide-react';
 import { api } from '@/lib/ui/api';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -26,7 +25,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { PageHeader } from '@/components/app/page-shell';
+import { PageHeader, ErrorState } from '@/components/app/page-shell';
 import { formatNaira } from '@/components/app/format';
 import { ReconciliationCard } from './reconciliation-card';
 
@@ -221,7 +220,7 @@ export default function FinancePage() {
                 Nothing invoiced yet.
               </p>
             ) : (
-              <SpendChart data={byMonth} height={260} yAxisWidth={72} legend={false} />
+              <SpendChart data={byMonth} height={260} yAxisWidth={80} legend={false} />
             )}
           </CardContent>
         </Card>
@@ -254,11 +253,8 @@ export default function FinancePage() {
         </CardHeader>
         <CardContent>
           {summary.isError || table.isError ? (
-            <Alert variant="destructive">
-              <TriangleAlert />
-              <AlertDescription>The invoices could not be loaded.</AlertDescription>
-            </Alert>
-          ) : table.isPending ? (
+        <ErrorState message="The invoices could not be loaded." onRetry={() => void table.refetch()} retrying={table.isFetching} />
+      ) : table.isPending ? (
             <div className="space-y-2">
               {Array.from({ length: 4 }).map((_, index) => (
                 <Skeleton key={index} className="h-9 w-full" />

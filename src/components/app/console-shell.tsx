@@ -3,28 +3,16 @@
 import Link from 'next/link';
 import { prefetch } from '@/lib/ui/api';
 import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
-  Activity,
-  Building2,
-  CalendarDays,
-  ClipboardList,
   Download,
-  FileCheck2,
-  FileClock,
-  Gavel,
-  LayoutDashboard,
   LogOut,
   type LucideIcon,
   Menu,
   MessageSquarePlus,
-  MessageSquareText,
   Moon,
-  ScrollText,
-  Stethoscope,
   Sun,
-  UserRound,
   X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -35,7 +23,19 @@ import { NotificationBell } from '@/components/app/notification-bell';
 import { TextSizeControl } from '@/components/app/text-size-control';
 import { api } from '@/lib/ui/api';
 import { useSession } from '@/lib/ui/session';
+import { activeHref, breadcrumbsFor } from '@/components/app/nav';
+import { NetworkBanner } from '@/components/app/network-banner';
+import { LogoMark } from '@/components/app/logo';
+import { hasChosenTheme, readTheme, saveTheme } from '@/lib/ui/theme';
 import { Button } from '@/components/ui/button';
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from '@/components/ui/breadcrumb';
 import { Separator } from '@/components/ui/separator';
 import {
   DropdownMenu,
@@ -66,21 +66,6 @@ export interface NavSection {
   heading: string;
   items: NavItem[];
 }
-
-export const ICONS = {
-  LayoutDashboard,
-  FileCheck2,
-  Building2,
-  Stethoscope,
-  Gavel,
-  FileClock,
-  MessageSquareText,
-  ScrollText,
-  CalendarDays,
-  ClipboardList,
-  Activity,
-  UserRound,
-};
 
 /**
  * The shell every console shares.
@@ -129,25 +114,31 @@ export function ConsoleShell({
   }
 
   /**
-   * The theme is remembered, and it belongs to the console rather than to the
-   * whole site.
+   * The theme belongs to the console rather than to the whole site (UXA-13).
    *
-   * It used to be component state only, so every reload threw the choice away.
-   * Restoring it from storage is half the fix; removing the class on unmount
-   * is the other half — the public pages are light by design, and a `dark`
-   * left on `<html>` followed somebody out of the console and rendered the
-   * landing page as white on white.
+   * The first paint is handled before React runs, by the script in the root layout, so a
+   * reload does not flash. This brings the toggle's state in line with it, before the
+   * browser paints, and keeps following the device while nobody has chosen. Removing the
+   * class on unmount matters: the public pages are light by design, and a `dark` left on
+   * `<html>` once followed somebody out of the console and rendered the landing page as
+   * white on white.
    */
-  useEffect(() => {
-    let stored = false;
-    try {
-      stored = window.localStorage.getItem('medilink:theme') === 'dark';
-    } catch {
-      // Storage can be blocked outright; the console still works without it.
-    }
-    setDark(stored);
-    document.documentElement.classList.toggle('dark', stored);
-    return () => document.documentElement.classList.remove('dark');
+  useLayoutEffect(() => {
+    const apply = (next: boolean) => {
+      setDark(next);
+      document.documentElement.classList.toggle('dark', next);
+    };
+    apply(readTheme() === 'dark');
+
+    const device = window.matchMedia?.('(prefers-color-scheme: dark)');
+    const follow = () => {
+      if (!hasChosenTheme()) apply(readTheme() === 'dark');
+    };
+    device?.addEventListener('change', follow);
+    return () => {
+      device?.removeEventListener('change', follow);
+      document.documentElement.classList.remove('dark');
+    };
   }, []);
 
   const openerRef = useRef<HTMLButtonElement>(null);
@@ -210,12 +201,17 @@ export function ConsoleShell({
     const next = !dark;
     setDark(next);
     document.documentElement.classList.toggle('dark', next);
-    try {
-      window.localStorage.setItem('medilink:theme', next ? 'dark' : 'light');
-    } catch {
-      // Private browsing: the toggle still works for this visit.
-    }
+    saveTheme(next ? 'dark' : 'light');
   }
+
+  const owner = activeHref(
+    pathname,
+    visible.flatMap((section) => section.items.map((item) => item.href)),
+  );
+  const trail = breadcrumbsFor(
+    pathname,
+    visible.flatMap((section) => section.items),
+  );
 
   const nav = (
     <nav className="space-y-6">
@@ -226,7 +222,7 @@ export function ConsoleShell({
           </p>
           <ul className="space-y-0.5">
             {section.items.map((item) => {
-              const active = pathname === item.href;
+              const active = owner === item.href;
               const Icon = item.icon;
               return (
                 <li key={item.href}>
@@ -239,14 +235,16 @@ export function ConsoleShell({
                     // a skeleton is hardest to read.
                     onMouseEnter={item.prefetch ? () => prefetch(item.prefetch!) : undefined}
                     onFocus={item.prefetch ? () => prefetch(item.prefetch!) : undefined}
+                    aria-current={pathname === item.href ? 'page' : undefined}
                     className={cn(
-                      'flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors',
+                      // 44px tall: the size of a thumb, which is what most people use this with.
+                      'flex min-h-11 items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors duration-fast',
                       active
                         ? 'bg-primary text-primary-foreground shadow-sm'
                         : 'text-foreground/80 hover:bg-accent hover:text-accent-foreground',
                     )}
                   >
-                    <Icon className="size-4 shrink-0" />
+                    <Icon className="size-5 shrink-0" aria-hidden="true" />
                     {item.label}
                   </Link>
                 </li>
@@ -269,11 +267,14 @@ export function ConsoleShell({
         Skip to main content
       </a>
       <aside className="sticky top-0 hidden h-dvh w-64 shrink-0 flex-col border-r bg-card lg:flex">
-        <div className="p-5">
-          <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-            Medilink
-          </p>
-          <p className="mt-0.5 font-semibold tracking-tight">{title}</p>
+        <div className="flex items-center gap-3 p-5">
+          <LogoMark className="size-9" />
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+              Medilink
+            </p>
+            <p className="mt-0.5 font-semibold tracking-tight">{title}</p>
+          </div>
         </div>
         <Separator />
         <div className="scrollbar-thin flex-1 overflow-y-auto p-3">{nav}</div>
@@ -287,7 +288,7 @@ export function ConsoleShell({
             role="dialog"
             aria-modal="true"
             aria-label={`${title} navigation`}
-            className="absolute left-0 top-0 h-full w-72 overflow-y-auto bg-card p-5 shadow-xl"
+            className="absolute left-0 top-0 h-full w-72 overflow-y-auto bg-card p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-raised"
           >
             <div className="mb-4 flex items-center justify-between">
               <p className="font-semibold tracking-tight">{title}</p>
@@ -306,7 +307,7 @@ export function ConsoleShell({
       ) : null}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-40 flex h-14 items-center gap-3 border-b bg-background/85 px-4 backdrop-blur sm:px-6">
+        <header className="sticky top-0 z-40 flex h-14 items-center gap-2 border-b bg-background/85 px-3 backdrop-blur sm:gap-3 sm:px-6">
           <Button
             ref={openerRef}
             variant="ghost"
@@ -324,13 +325,21 @@ export function ConsoleShell({
           <div className="ml-auto flex items-center gap-1">
             <NotificationBell />
             <TextSizeControl />
-            <Button variant="ghost" size="icon" onClick={toggleTheme} aria-label="Toggle theme">
+            {/* On a phone the theme lives in the account menu: with five controls in a 360px
+                header the console's own name was cut to three letters. */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="hidden sm:inline-flex"
+              onClick={toggleTheme}
+              aria-label={dark ? 'Switch to the light theme' : 'Switch to the dark theme'}
+            >
               {dark ? <Sun /> : <Moon />}
             </Button>
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent">
+                <button className="flex min-h-11 items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors duration-fast hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background">
                   <Avatar name={session.user.fullName} src={avatarSrc} size="sm" />
                   <span className="hidden sm:inline">{session.user.fullName}</span>
                 </button>
@@ -351,6 +360,10 @@ export function ConsoleShell({
                 ) : null}
                 {/* Everyone who can sign in may ask what is held about them, not
                     only practitioners (AUD-08). */}
+                <DropdownMenuItem className="sm:hidden" onSelect={toggleTheme}>
+                  {dark ? <Sun /> : <Moon />}
+                  {dark ? 'Light theme' : 'Dark theme'}
+                </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => void myData.download()}>
                   <Download />
                   Download my data
@@ -384,6 +397,30 @@ export function ConsoleShell({
           tabIndex={-1}
           className="min-w-0 flex-1 p-4 outline-none sm:p-6 lg:p-8"
         >
+          <NetworkBanner />
+          {trail.length > 0 ? (
+            <Breadcrumb className="mb-4">
+              <BreadcrumbList>
+                {trail.map((crumb, index) => (
+                  <Fragment key={`${crumb.label}-${index}`}>
+                    {index > 0 ? <BreadcrumbSeparator /> : null}
+                    <BreadcrumbItem>
+                      {crumb.href ? (
+                        <BreadcrumbLink asChild>
+                          {/* A 44px target, not a 20px line of text. */}
+                          <Link href={crumb.href} className="inline-flex min-h-11 items-center">
+                            {crumb.label}
+                          </Link>
+                        </BreadcrumbLink>
+                      ) : (
+                        <BreadcrumbPage>{crumb.label}</BreadcrumbPage>
+                      )}
+                    </BreadcrumbItem>
+                  </Fragment>
+                ))}
+              </BreadcrumbList>
+            </Breadcrumb>
+          ) : null}
           {children}
         </main>
       </div>

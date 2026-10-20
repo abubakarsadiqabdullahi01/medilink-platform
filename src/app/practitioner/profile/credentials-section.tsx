@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type ReactNode } from 'react';
-import { FileCheck2, TriangleAlert } from 'lucide-react';
+import { FileCheck2, } from 'lucide-react';
 import { api } from '@/lib/ui/api';
 import { useQueue, useQueueAction } from '@/lib/ui/queue';
 import { nameOf, useReference } from '@/lib/ui/reference';
@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/select';
 import { StatusBadge } from '@/components/app/status-badge';
 import { type UploadedDocument } from '@/components/app/document-upload';
-import { EmptyState, QueueSkeleton } from '@/components/app/page-shell';
+import { EmptyState, QueueSkeleton, ErrorState } from '@/components/app/page-shell';
 import {
   EvidenceFields,
   evidenceRule,
@@ -203,11 +203,8 @@ export function CredentialsSection({
         {queue.isPending ? (
           <QueueSkeleton rows={2} />
         ) : queue.isError ? (
-          <Alert variant="destructive">
-            <TriangleAlert />
-            <AlertDescription>These could not be loaded.</AlertDescription>
-          </Alert>
-        ) : queue.data.length === 0 ? (
+        <ErrorState message="These could not be loaded." onRetry={() => void queue.refetch()} retrying={queue.isFetching} />
+      ) : queue.data.length === 0 ? (
           <EmptyState
             compact
             icon={<FileCheck2 />}

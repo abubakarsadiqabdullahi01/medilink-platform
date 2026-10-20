@@ -4,7 +4,6 @@ import { useMemo } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowRight, CalendarPlus, ReceiptText, Users, type LucideIcon } from 'lucide-react';
 import { api } from '@/lib/ui/api';
 import { useFacility, useFacilityId } from '@/lib/ui/facility';
 import { useSession } from '@/lib/ui/session';
@@ -12,6 +11,10 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PageHeader } from '@/components/app/page-shell';
+import { NeedsBanner, StatTile } from '@/components/app/dashboard';
+import { ICON } from '@/components/app/icons';
+import { OnboardingChecklist } from './onboarding-checklist';
+import { ShiftsToFill, TodayOnTheFloor } from './home-lists';
 import { MyInvitations } from '@/components/app/my-invitations';
 import { FacilityAgreements } from './facility-agreements';
 
@@ -46,66 +49,6 @@ function weekLabel(isoDate: string): string {
 function monthLabel(key: string): string {
   const [year, month] = key.split('-').map(Number);
   return `${SHORT_MONTHS[(month ?? 1) - 1]} ${String(year).slice(-2)}`;
-}
-
-/**
- * One tile, so the three read as one row rather than as three decisions.
- *
- * A failed fetch says so. Rendering `?? 0` in that case is the worst of the
- * three states: "nothing is waiting on you" and "we could not find out" look
- * identical, and only one of them is safe to act on.
- */
-function Tile({
-  href,
-  label,
-  icon: Icon,
-  hint,
-  count,
-  isPending,
-  isError,
-}: {
-  href: string;
-  label: string;
-  icon: LucideIcon;
-  hint: string;
-  count: number;
-  isPending: boolean;
-  isError: boolean;
-}) {
-  return (
-    <Link href={href} className="group">
-      <Card className="h-full transition-all hover:border-primary/50 hover:shadow-md">
-        <CardContent className="pt-6">
-          <div className="flex items-start justify-between gap-3">
-            <span className="flex size-9 items-center justify-center rounded-md bg-accent text-accent-foreground">
-              <Icon className="size-4" />
-            </span>
-            <ArrowRight className="size-4 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
-          </div>
-
-          <p className="mt-4 text-sm font-medium">{label}</p>
-
-          {isPending ? (
-            <Skeleton className="mt-2 h-9 w-12" />
-          ) : isError ? (
-            <p className="mt-2 text-sm text-destructive-text">Could not load</p>
-          ) : (
-            <p
-              className={
-                count > 0
-                  ? 'tabular mt-1 text-3xl font-semibold'
-                  : 'tabular mt-1 text-3xl font-semibold text-muted-foreground'
-              }
-            >
-              {count}
-            </p>
-          )}
-
-          <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{hint}</p>
-        </CardContent>
-      </Card>
-    </Link>
-  );
 }
 
 export default function FacilityDashboard() {
@@ -161,7 +104,12 @@ export default function FacilityDashboard() {
       <MyInvitations />
 
       {unverified ? (
-        <Alert variant={facility.data?.status === 'PENDING' ? 'warning' : 'destructive'} className="mb-6">
+        <Alert
+          variant={facility.data?.status === 'PENDING' ? 'warning' : 'destructive'}
+          // A standing fact about the facility, not something that just happened.
+          live={false}
+          className="mb-6"
+        >
           <AlertDescription className="space-y-1">
             {facility.data?.status === 'PENDING' ? (
               <p>
@@ -196,6 +144,18 @@ export default function FacilityDashboard() {
 
       {facilityId ? <FacilityAgreements facilityId={facilityId} /> : null}
 
+      {/* What a new facility has to do first (UXF-16). Waits for the summary, so it never
+          flickers from "not done" to "done" on a facility that has long since finished. */}
+      {facilityId && can('service_request.read') && summary.data ? (
+        <OnboardingChecklist
+          facilityId={facilityId}
+          facility={facility.data}
+          hasShifted={(data?.published ?? 0) > 0 || (data?.fulfilment?.length ?? 0) > 0}
+          canSetRates={can('facility.write')}
+          canInviteStaff={can('role.grant')}
+        />
+      ) : null}
+
       {nothingGranted ? (
         <Card>
           <CardContent className="pt-6 text-sm text-muted-foreground">
@@ -204,44 +164,61 @@ export default function FacilityDashboard() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {can('service_request.read') ? (
-            <Tile
-              href="/facility/shifts"
-              label="Shifts published"
-              icon={CalendarPlus}
-              hint="Open and waiting to be filled."
-              count={data?.published ?? 0}
-              isPending={summary.isPending}
-              isError={summary.isError}
-            />
-          ) : null}
+        <div className="space-y-6">
+          {/* How today is, before any number: what needs this person. */}
+          <NeedsBanner
+            noun="timesheet"
+            count={data?.awaitingApproval ?? 0}
+            ready={can('timesheet.approve') && !summary.isPending && !summary.isError}
+          />
 
-          {can('attendance.record') ? (
-            <Tile
-              href="/facility/roster"
-              label="Confirmed on the roster"
-              icon={Users}
-              hint="Practitioners due on the floor."
-              count={data?.roster ?? 0}
-              isPending={summary.isPending}
-              isError={summary.isError}
-            />
-          ) : null}
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {can('timesheet.approve') ? (
+              <StatTile
+                href="/facility/timesheets"
+                label="Timesheets to approve"
+                icon={ICON.timesheet}
+                hint="Submitted hours. Nothing is settled until these are decided."
+                value={data?.awaitingApproval ?? 0}
+                stale={(data?.awaitingApproval ?? 0) > 0}
+                isPending={summary.isPending}
+                // A missing timesheet on a confirmed shift is expected and
+                // arrives as a per-row error; only a failed roster means the
+                // number itself is unknown.
+                isError={summary.isError}
+              />
+            ) : null}
 
-          {can('timesheet.approve') ? (
-            <Tile
-              href="/facility/timesheets"
-              label="Timesheets to approve"
-              icon={ReceiptText}
-              hint="Submitted hours. Nothing is settled until these are decided."
-              count={data?.awaitingApproval ?? 0}
-              isPending={summary.isPending}
-              // A missing timesheet on a confirmed shift is expected and
-              // arrives as a per-row error; only a failed roster means the
-              // number itself is unknown.
-              isError={summary.isError}
-            />
+            {can('service_request.read') ? (
+              <StatTile
+                href="/facility/shifts"
+                label="Shifts published"
+                icon={ICON.shift}
+                hint="Open and waiting to be filled."
+                value={data?.published ?? 0}
+                isPending={summary.isPending}
+                isError={summary.isError}
+              />
+            ) : null}
+
+            {can('attendance.record') ? (
+              <StatTile
+                href="/facility/roster"
+                label="Confirmed on the roster"
+                icon={ICON.roster}
+                hint="Practitioners due on the floor."
+                value={data?.roster ?? 0}
+                isPending={summary.isPending}
+                isError={summary.isError}
+              />
+            ) : null}
+          </div>
+
+          {facilityId && (can('service_request.read') || can('attendance.record')) ? (
+            <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
+              {can('service_request.read') ? <ShiftsToFill facilityId={facilityId} /> : null}
+              {can('attendance.record') ? <TodayOnTheFloor facilityId={facilityId} /> : null}
+            </div>
           ) : null}
         </div>
       )}
@@ -284,7 +261,7 @@ export default function FacilityDashboard() {
                     Nothing invoiced yet.
                   </p>
                 ) : (
-                  <SpendChart data={spend} height={240} yAxisWidth={64} legend />
+                  <SpendChart data={spend} height={240} yAxisWidth={72} legend />
                 )}
               </CardContent>
             </Card>

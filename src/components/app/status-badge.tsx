@@ -1,4 +1,5 @@
 import { Badge, type BadgeVariant } from '@/components/ui/badge';
+import { STATUS_ICON } from '@/components/app/icons';
 
 /**
  * One place that decides what colour a status is.
@@ -68,9 +69,20 @@ export function humanise(value: string): string {
   return value.charAt(0) + value.slice(1).toLowerCase().replace(/_/g, ' ');
 }
 
+/**
+ * The mark that goes with a variant, so a status does not depend on colour alone.
+ * Neutral variants have none: "draft" and "cancelled" are not something to warn of.
+ */
+function BadgeIcon({ variant }: { variant: BadgeVariant }) {
+  const Icon = variant in STATUS_ICON ? STATUS_ICON[variant as keyof typeof STATUS_ICON] : null;
+  return Icon ? <Icon className="size-3.5 shrink-0" aria-hidden="true" /> : null;
+}
+
 export function StatusBadge({ status, className }: { status: string; className?: string }) {
+  const variant = statusVariant(status);
   return (
-    <Badge variant={statusVariant(status)} className={className}>
+    <Badge variant={variant} className={className}>
+      <BadgeIcon variant={variant} />
       {humanise(status)}
     </Badge>
   );
@@ -90,8 +102,10 @@ const SEVERITY: Record<string, BadgeVariant> = {
 };
 
 export function SeverityBadge({ severity }: { severity: string }) {
+  const variant = SEVERITY[severity] ?? 'secondary';
   return (
-    <Badge variant={SEVERITY[severity] ?? 'secondary'} className="uppercase tracking-wide">
+    <Badge variant={variant} className="uppercase tracking-wide">
+      <BadgeIcon variant={variant} />
       {humanise(severity)}
     </Badge>
   );

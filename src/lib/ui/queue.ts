@@ -41,17 +41,44 @@ export function useQueueAction<TVariables>(options: {
   success: string | ((variables: TVariables) => string);
   /** Runs after the toast and the refetch, for a form that should reset itself. */
   onDone?: (variables: TVariables) => void;
+  /**
+   * Puts it back. Offered as an "Undo" on the success toast, for an action that can be reversed
+   * without harm: asking "are you sure?" first costs everybody a tap to protect against the few who
+   * slipped, while an undo costs only them.
+   */
+  undo?: (variables: TVariables) => Promise<unknown>;
 }) {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: options.run,
     onSuccess: (_data, variables) => {
+      const refresh = () => {
+        void queryClient.invalidateQueries({ queryKey: options.queueKey });
+        void queryClient.invalidateQueries({ queryKey: ['tile'] });
+      };
       toast.success(
         typeof options.success === 'function' ? options.success(variables) : options.success,
+        options.undo
+          ? {
+              action: {
+                label: 'Undo',
+                onClick: () => {
+                  void options
+                    .undo?.(variables)
+                    .then(() => {
+                      toast.success('Put back');
+                      refresh();
+                    })
+                    .catch((error: unknown) =>
+                      toast.error('Could not undo that', { description: errorMessage(error) }),
+                    );
+                },
+              },
+            }
+          : undefined,
       );
-      void queryClient.invalidateQueries({ queryKey: options.queueKey });
-      void queryClient.invalidateQueries({ queryKey: ['tile'] });
+      refresh();
       options.onDone?.(variables);
     },
     onError: (error) => {

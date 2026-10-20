@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { expiryOf, formatDate, parseNairaToKobo, recordLabel } from './format';
+import {
+  cleanMoneyInput,
+  expiryOf,
+  formatDate,
+  formatNaira,
+  groupMoneyInput,
+  parseNairaToKobo,
+  recordLabel,
+} from './format';
 
 describe('recordLabel', () => {
   it('turns the tables the audit trail actually writes into nouns', () => {
@@ -84,5 +92,47 @@ describe('parseNairaToKobo', () => {
     for (const bad of ['', 'abc', '-5', '1.234', '1.2.3', '12e3', '₦']) {
       expect(parseNairaToKobo(bad), bad).toBeNull();
     }
+  });
+});
+
+describe('formatNaira', () => {
+  it('prints whole naira without kobo', () => {
+    expect(formatNaira(1_050_000)).toBe('₦10,500');
+    expect(formatNaira(0)).toBe('₦0');
+    expect(formatNaira(500_000)).toBe('₦5,000');
+  });
+
+  it('keeps both digits whenever there are kobo, so a column of amounts still lines up', () => {
+    expect(formatNaira(1_050_050)).toBe('₦10,500.50');
+    expect(formatNaira(1_999)).toBe('₦19.99');
+    expect(formatNaira(7)).toBe('₦0.07');
+  });
+
+  it('says there is nothing, not zero, when there is no amount', () => {
+    expect(formatNaira(null)).toBe('—');
+    expect(formatNaira(undefined)).toBe('—');
+  });
+});
+
+describe('the amount box', () => {
+  it('cleans what was typed to digits and at most two decimals', () => {
+    expect(cleanMoneyInput('₦40,000')).toBe('40000');
+    expect(cleanMoneyInput('40,000.505')).toBe('40000.50');
+    expect(cleanMoneyInput('12.3.4')).toBe('12.34');
+    expect(cleanMoneyInput('abc')).toBe('');
+    expect(cleanMoneyInput('.5')).toBe('.5');
+  });
+
+  it('shows thousands separators when it is not being typed in', () => {
+    expect(groupMoneyInput('500000')).toBe('500,000');
+    expect(groupMoneyInput('1234567.5')).toBe('1,234,567.5');
+    expect(groupMoneyInput('999')).toBe('999');
+    expect(groupMoneyInput('')).toBe('');
+    expect(groupMoneyInput('.5')).toBe('.5');
+  });
+
+  it('reads back, through parseNairaToKobo, to the amount that was typed', () => {
+    expect(parseNairaToKobo(cleanMoneyInput('₦ 1,050.50'))).toBe(105_050);
+    expect(parseNairaToKobo(groupMoneyInput('500000'))).toBe(50_000_000);
   });
 });
