@@ -343,10 +343,13 @@ describe('confirming a registration', () => {
     });
     await signInAsOfficer();
 
+    // A year and more ahead of whenever this runs: a fixed date stops being in the future one day,
+    // and the route refuses an expiry in the past (it was 30 June 2027 here).
+    const expires = new Date(Date.now() + 400 * 86_400_000).toISOString().slice(0, 10);
     const done = await confirmRegistration({
       submissionId: submitted.id,
       registrationStatus: 'ACTIVE',
-      expiresAt: '2027-06-30',
+      expiresAt: expires,
     });
     expect(done.status).toBe(200);
     expect(done.body).toMatchObject({ outcome: 'CONFIRMED' });
@@ -361,7 +364,7 @@ describe('confirming a registration', () => {
       registrationStatus: 'ACTIVE',
       source: 'MANUAL',
     });
-    expect(registration.expiresAt?.toISOString().slice(0, 10)).toBe('2027-06-30');
+    expect(registration.expiresAt?.toISOString().slice(0, 10)).toBe(expires);
     expect((await rowOf(submitted.id)).status).toBe('VERIFIED');
   });
 
