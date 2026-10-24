@@ -61,7 +61,7 @@ By area:
 
 ## Changed since `9a93861`
 
-Commits after the merge changed the status of these gaps. They are marked in the tables below with the commit; the counts above include them. The last fourteen rows are the interface work: the design pass (`5f4ebab` to `88e164a`, merged as pull request 19) and the practitioner’s dispute screen (pull request 18, not yet merged); each was checked against the code, not taken from the commit message. The module-completion work (the M-cards in [Module-Completion-Plan.md](Module-Completion-Plan.md)) is recorded there and has not yet been carried into these tables.
+Commits after the merge changed the status of these gaps. They are marked in the tables below with the commit; the counts above include them. The last fourteen rows are the interface work: the design pass (`5f4ebab` to `88e164a`, merged as pull request 19) and the practitioner’s dispute screen (pull request 18, `f731d66`); each was checked against the code, not taken from the commit message. The module-completion work (the M-cards in [Module-Completion-Plan.md](Module-Completion-Plan.md)) is recorded there and has not yet been carried into these tables.
 
 | Gap | Pri | Was | Is | Commit |
 | --- | --- | --- | --- | --- |
@@ -91,7 +91,7 @@ Commits after the merge changed the status of these gaps. They are marked in the
 | UXF-14 | P1 | OPEN | PARTIAL | `7ad839c` |
 | UXF-16 | P1 | OPEN | CLOSED | `68dc136` |
 | UXO-07 | P1 | OPEN | CLOSED | `68dc136` |
-| UXP-09 | P1 | OPEN | CLOSED | PR #18 |
+| UXP-09 | P1 | OPEN | CLOSED | `f731d66` |
 | UXW-07 | P1 | OPEN | PARTIAL | `4e7c3de` |
 | CRE-12 | P2 | OPEN | CLOSED | `fadcda6` |
 | AUD-15 | P2 | OPEN | PARTIAL | `7170efb` |
@@ -543,7 +543,7 @@ Gap text is shortened; the full text and the evidence at `5c199c1` are in the Bl
 | UXP-06 | P1 | PARTIAL | A time-away block can be added but not removed, and a wrong one silently stops offers. | src/app/practitioner/profile/availability-section.tsx:67,145,496-505; commit 67639d8 — One-off slots, all-day and every-day shortcuts added. Away blocks still have no Remove button (route exists, no UI caller) and no warning they stop offers. |
 | UXP-07 | P1 | PARTIAL | The profile has no level, cadre or skills; years of experience is a self-declared number and there is one optional specialty. | src/app/practitioner/profile/profile-form.tsx:56-69; profile-summary.tsx:163-175; commit a1b0a48 — Officer-recorded level and registration category now show on profile. Form still has self-declared years, one optional specialty, no skills. |
 | UXP-08 | P1 | OPEN † | A confirmed shift cannot be withdrawn from. | src/app/api/v1/excusals/[id]/decide/route.ts:20; src/app/practitioner/shifts/excusal-panel.tsx:84-123 — No withdrawal from a confirmed shift; excusal is still post-shift and decided by a platform officer (sanction.apply, PLATFORM scope). |
-| UXP-09 | P1 | CLOSED | After a dispute is opened the practitioner has no screen showing its status, outcome notes or evidence, and cannot attach evidence or withdraw it. | PR #18 — `/practitioner/disputes` (from `GET /api/v1/disputes/mine`) shows status, the other side’s reply, the decision and what it turned on, and both sides’ evidence by side; the practitioner can reply, attach evidence and withdraw a case they raised. On the branch; not on `main` until #18 merges. |
+| UXP-09 | P1 | CLOSED | After a dispute is opened the practitioner has no screen showing its status, outcome notes or evidence, and cannot attach evidence or withdraw it. | `f731d66` — `/practitioner/disputes` (from `GET /api/v1/disputes/mine`) shows status, the other side’s reply, the decision and what it turned on, and both sides’ evidence by side; the practitioner can reply, attach evidence and withdraw a case they raised. |
 | UXP-10 | P1 | PARTIAL | Earnings shows three totals and a payout list only. | src/app/practitioner/earnings/page.tsx:114 (MyPayoutAccount), 40-52; commits dc0d277, 7fabcb1 — Payout bank-account screen and held/awaiting-payment hints added. Still no per-shift breakdown or statement; BIL-02 credit-at-invoicing noted only in part. The overview also has an “Owed to you” tile (`68dc136`). |
 | UXP-11 | P1 | OPEN | "Consent to be shown to hospitals" is a condition of creating the account (button disabled until ticked) while the page says it can be withdrawn. | src/app/(auth)/register/page.tsx:455-477 — Create-account button still disabled unless the hospital-sharing consent box is ticked, while the text says it can be withdrawn. |
 | UXP-12 | P2 | OPEN | The three-hour check-in window is enforced by the screen. | src/app/practitioner/shifts/check-in-panel.tsx:33,68;… — Window still screen-only; server presentCheckInToken checks no start window. QR payload still pasted, no scanner, camera still permitted in headers. |
