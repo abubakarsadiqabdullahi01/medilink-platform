@@ -61,6 +61,13 @@ const PUBLIC: [string, string][] = [
 
 for (const [path, name] of PUBLIC) {
   test(`${name} has no serious accessibility findings`, async ({ page }) => {
+    // The landing page fades its sections in as they are scrolled to, and a section below the fold is
+    // faded *out* a moment after hydration. Axe reads colour with opacity blended in, so a scan that
+    // lands inside that fade sees pale text on a pale ground (ratios of 1.02) and fails at random:
+    // on main's CI run for #23 it failed twice running, and 10 of 12 runs fail on a quiet machine.
+    // With reduced motion asked for, the page never hides or moves anything (components/app/reveal.tsx),
+    // so the scan reads the settled colours. That the sections do arrive is `landing-reveal.spec.ts`.
+    await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto(path);
     await expect(page.locator('main').first()).toBeVisible();
     await scan(page, name);
