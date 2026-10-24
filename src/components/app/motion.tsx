@@ -2,6 +2,7 @@
 
 import { LazyMotion, domAnimation, m, useReducedMotion } from 'framer-motion';
 import type { ReactNode } from 'react';
+import { DURATION, EASE_OUT } from '@/lib/ui/motion-tokens';
 
 /**
  * The console's two pieces of motion, and the restraint around them.
@@ -50,7 +51,7 @@ export function ScreenTransition({
       key={screenKey}
       initial={still ? false : { opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: still ? 0 : 0.18, ease: 'easeOut' }}
+      transition={{ duration: still ? 0 : DURATION.base, ease: EASE_OUT }}
     >
       {children}
     </m.div>
@@ -76,9 +77,9 @@ export function RowTransition({ children, index }: { children: ReactNode; index:
       initial={still ? false : { opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{
-        duration: still ? 0 : 0.16,
+        duration: still ? 0 : DURATION.base,
         delay: still ? 0 : Math.min(index, MAX_STAGGERED_ROWS) * STAGGER_SECONDS,
-        ease: 'easeOut',
+        ease: EASE_OUT,
       }}
     >
       {children}

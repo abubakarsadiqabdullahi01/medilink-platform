@@ -12,13 +12,11 @@ import {
   CircleAlert,
   CircleCheck,
   Search,
-  TriangleAlert,
   UserRound,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { api, errorMessage } from '@/lib/ui/api';
 import { useReference } from '@/lib/ui/reference';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -33,7 +31,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
-import { Detail, DetailGrid, EmptyState, PageHeader } from '@/components/app/page-shell';
+import { Detail, DetailGrid, EmptyState, PageHeader, ErrorState } from '@/components/app/page-shell';
 import { formatAgo, formatWhen } from '@/components/app/format';
 import { CredentialsTab } from './credentials-tab';
 import { EvidenceReview } from './evidence-review';
@@ -473,11 +471,8 @@ function Practitioners() {
                   {eligibility.isPending ? (
                     <Skeleton className="h-16 w-full" />
                   ) : eligibility.isError ? (
-                    <Alert variant="destructive">
-                      <TriangleAlert />
-                      <AlertDescription>Their eligibility could not be loaded.</AlertDescription>
-                    </Alert>
-                  ) : eligibility.data?.eligible ? (
+        <ErrorState message="Their eligibility could not be loaded." onRetry={() => void eligibility.refetch()} retrying={eligibility.isFetching} />
+      ) : eligibility.data?.eligible ? (
                     <p className="flex items-center gap-2 text-sm">
                       <CircleCheck className="size-4 text-success" aria-hidden="true" />
                       Yes — everything the platform requires is in place.
@@ -520,13 +515,8 @@ function Practitioners() {
                   {verification.isPending ? (
                     <Skeleton className="h-24 w-full" />
                   ) : verification.isError ? (
-                    <Alert variant="destructive">
-                      <TriangleAlert />
-                      <AlertDescription>
-                        Their verification record could not be loaded.
-                      </AlertDescription>
-                    </Alert>
-                  ) : (
+        <ErrorState message="Their verification record could not be loaded." onRetry={() => void verification.refetch()} retrying={verification.isFetching} />
+      ) : (
                     <>
                       <div>
                         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -853,10 +843,7 @@ function Practitioners() {
           ))}
         </div>
       ) : directory.isError ? (
-        <Alert variant="destructive">
-          <TriangleAlert />
-          <AlertDescription>The directory could not be loaded.</AlertDescription>
-        </Alert>
+        <ErrorState message="The directory could not be loaded." onRetry={() => void directory.refetch()} retrying={directory.isFetching} />
       ) : rows.length === 0 ? (
         <EmptyState
           icon={<UserRound />}
@@ -892,11 +879,11 @@ function Practitioners() {
                   <Avatar entry={row} />
 
                   <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium">{row.fullName}</p>
-                    <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
+                    <p className="break-words font-medium">{row.fullName}</p>
+                    <p className="mt-0.5 break-words font-mono text-xs text-muted-foreground">
                       {row.phone}
                     </p>
-                    <p className="mt-1 truncate text-xs text-muted-foreground">
+                    <p className="mt-1 break-words text-xs text-muted-foreground">
                       {categoryName(row.professionalCategoryId) ?? 'No profile yet'}
                       {row.yearsOfExperience !== null ? ` · ${row.yearsOfExperience} years` : ''}
                     </p>

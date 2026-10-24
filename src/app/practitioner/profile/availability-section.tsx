@@ -21,7 +21,7 @@ import {
 } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
-import { EmptyState, QueueSkeleton } from '@/components/app/page-shell';
+import { EmptyState, QueueSkeleton, ErrorState } from '@/components/app/page-shell';
 import { formatWhen } from '@/components/app/format';
 import {
   allDay,
@@ -188,10 +188,23 @@ export function AvailabilitySection() {
     }
   }
 
-  const removeSlot = useQueueAction<{ id: string }>({
+  const removeSlot = useQueueAction<Slot>({
     queueKey,
     run: ({ id }) => api.del(`/api/v1/availability/slots/${id}`),
     success: 'Removed',
+    // Taking a slot out is easily put back, so it is not asked about; it is undone from the toast.
+    undo: (slot) =>
+      api.post(
+        '/api/v1/availability/slots',
+        slot.kind === 'ONE_OFF'
+          ? { kind: 'ONE_OFF', startsAt: slot.startsAt, endsAt: slot.endsAt }
+          : {
+              kind: slot.kind,
+              dayOfWeek: slot.dayOfWeek,
+              startMinute: slot.startMinute,
+              endMinute: slot.endMinute,
+            },
+      ),
   });
 
   const removeBlock = useQueueAction<{ id: string }>({
@@ -321,11 +334,8 @@ export function AvailabilitySection() {
           {calendar.isPending ? (
             <QueueSkeleton rows={2} />
           ) : calendar.isError ? (
-            <Alert variant="destructive">
-              <TriangleAlert />
-              <AlertDescription>Your availability could not be loaded.</AlertDescription>
-            </Alert>
-          ) : slots.length === 0 ? (
+        <ErrorState message="Your availability could not be loaded." onRetry={() => void calendar.refetch()} retrying={calendar.isFetching} />
+      ) : slots.length === 0 ? (
             <EmptyState
               compact
               icon={<CalendarDays />}
@@ -357,7 +367,7 @@ export function AvailabilitySection() {
                       variant="ghost"
                       size="sm"
                       className="text-destructive-text hover:bg-destructive/10 hover:text-destructive-text"
-                      onClick={() => removeSlot.mutate({ id: slot.id })}
+                      onClick={() => removeSlot.mutate(slot)}
                     >
                       <Trash2 />
                       Remove
@@ -487,7 +497,7 @@ export function AvailabilitySection() {
                       variant="ghost"
                       size="sm"
                       className="text-destructive-text hover:bg-destructive/10 hover:text-destructive-text"
-                      onClick={() => removeSlot.mutate({ id: slot.id })}
+                      onClick={() => removeSlot.mutate(slot)}
                     >
                       <Trash2 />
                       Remove

@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ArrowLeft, FileText, Gavel, History, Paperclip, TriangleAlert } from 'lucide-react';
+import { ArrowLeft, FileText, Gavel, History, Paperclip, } from 'lucide-react';
 import { api, errorMessage } from '@/lib/ui/api';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -21,7 +21,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
-import { Detail, DetailGrid, PageHeader } from '@/components/app/page-shell';
+import { Detail, DetailGrid, PageHeader, ErrorState } from '@/components/app/page-shell';
 import { DocumentDialog } from '@/components/app/document-dialog';
 import { actionLabel, formatAgo, formatWhen } from '@/components/app/format';
 import {
@@ -432,11 +432,8 @@ export function DisputeDetail({ dispute, onBack }: { dispute: Dispute; onBack: (
                 {evidence.isPending ? (
                   <Skeleton className="h-32 w-full" />
                 ) : evidence.isError ? (
-                  <Alert variant="destructive">
-                    <TriangleAlert />
-                    <AlertDescription>The evidence could not be loaded.</AlertDescription>
-                  </Alert>
-                ) : evidence.data.length === 0 ? (
+        <ErrorState message="The evidence could not be loaded." onRetry={() => void evidence.refetch()} retrying={evidence.isFetching} />
+      ) : evidence.data.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
                     Neither side has attached anything. The case has to be decided on the written
                     reason alone — say so in your finding.
@@ -463,7 +460,7 @@ export function DisputeDetail({ dispute, onBack }: { dispute: Dispute; onBack: (
                                 ? 'The practitioner'
                                 : 'The facility'}
                             </Badge>
-                            <span className="truncate text-sm font-medium">
+                            <span className="break-words text-sm font-medium">
                               {item.attachedByName}
                             </span>
                           </div>
@@ -514,11 +511,8 @@ export function DisputeDetail({ dispute, onBack }: { dispute: Dispute; onBack: (
                 {history.isPending ? (
                   <Skeleton className="h-32 w-full" />
                 ) : history.isError ? (
-                  <Alert variant="destructive">
-                    <TriangleAlert />
-                    <AlertDescription>The history could not be loaded.</AlertDescription>
-                  </Alert>
-                ) : history.data.length === 0 ? (
+        <ErrorState message="The history could not be loaded." onRetry={() => void history.refetch()} retrying={history.isFetching} />
+      ) : history.data.length === 0 ? (
                   <p className="text-sm text-muted-foreground">Nothing recorded yet.</p>
                 ) : (
                   <ol className="space-y-3">

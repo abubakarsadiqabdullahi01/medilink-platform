@@ -2,14 +2,14 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Gavel, TriangleAlert } from 'lucide-react';
+import { Gavel } from 'lucide-react';
 import { api } from '@/lib/ui/api';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
-import { EmptyState, PageHeader, QueueSkeleton } from '@/components/app/page-shell';
+import { EmptyState, PageHeader, QueueSkeleton, ErrorState } from '@/components/app/page-shell';
 import { PartyCaseDialog, type PartyCase } from '@/components/app/dispute-case';
 import { formatAgo, formatWhen } from '@/components/app/format';
 
@@ -56,10 +56,7 @@ export default function PractitionerDisputesPage() {
       {cases.isPending ? (
         <QueueSkeleton rows={2} />
       ) : cases.isError ? (
-        <Alert variant="destructive">
-          <TriangleAlert />
-          <AlertDescription>Your disputes could not be loaded.</AlertDescription>
-        </Alert>
+        <ErrorState message="Your disputes could not be loaded." onRetry={() => void cases.refetch()} retrying={cases.isFetching} />
       ) : rows.length === 0 ? (
         <EmptyState
           icon={<Gavel />}

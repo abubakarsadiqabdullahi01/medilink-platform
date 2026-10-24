@@ -18,11 +18,27 @@ const alertVariants = cva(
   },
 );
 
+/**
+ * A notice is announced to a screen reader only when it is news (UXA-07).
+ *
+ * Every alert used to carry `role="alert"`, so a banner that was simply part of the page —
+ * "this account is not attached to a facility yet", "your licence is under review" — was
+ * read out again each time the page opened. Now a failure (`destructive`), which appears
+ * because something went wrong, is announced; the rest sit in the page for the reader to
+ * come to. `live` overrides either way: a destructive notice that is a standing fact (a
+ * rejected facility) passes `live={false}`, and a warning that appears in answer to an
+ * action passes `live`.
+ */
 const Alert = React.forwardRef<
   HTMLDivElement,
-  React.HTMLAttributes<HTMLDivElement> & VariantProps<typeof alertVariants>
->(({ className, variant, ...props }, ref) => (
-  <div ref={ref} role="alert" className={cn(alertVariants({ variant }), className)} {...props} />
+  React.HTMLAttributes<HTMLDivElement> & VariantProps<typeof alertVariants> & { live?: boolean }
+>(({ className, variant, live, role, ...props }, ref) => (
+  <div
+    ref={ref}
+    role={role ?? ((live ?? variant === 'destructive') ? 'alert' : undefined)}
+    className={cn(alertVariants({ variant }), className)}
+    {...props}
+  />
 ));
 Alert.displayName = 'Alert';
 

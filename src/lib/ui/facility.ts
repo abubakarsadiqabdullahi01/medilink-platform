@@ -11,6 +11,8 @@ export interface FacilitySummary {
   status: string;
   /** Compliance's note on a rejection, which the owner is owed. */
   reviewNotes?: string | null;
+  /** Set once a licence has been uploaded. The API returns it with the rest of the record. */
+  licenceObjectKey?: string | null;
 }
 
 /**

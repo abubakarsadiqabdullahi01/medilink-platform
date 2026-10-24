@@ -1,23 +1,12 @@
 'use client';
 
-import {
-  Building2,
-  CalendarPlus,
-  FileText,
-  Gavel,
-  LayoutDashboard,
-  Percent,
-  ReceiptText,
-  Stethoscope,
-  Users,
-  UsersRound,
-} from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { buttonVariants } from '@/components/ui/button';
 import { SessionProvider, useScopeIds, useSession, type SessionState } from '@/lib/ui/session';
 import { ConsoleShell, type NavSection } from '@/components/app/console-shell';
+import { ICON } from '@/components/app/icons';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { MyInvitations } from '@/components/app/my-invitations';
 import { FacilitySwitcher } from './facility-switcher';
@@ -33,7 +22,7 @@ import { FacilitySwitcher } from './facility-switcher';
 const SECTIONS: NavSection[] = [
   {
     heading: 'Overview',
-    items: [{ href: '/facility', label: 'Dashboard', icon: LayoutDashboard, permission: null }],
+    items: [{ href: '/facility', label: 'Dashboard', icon: ICON.dashboard, permission: null }],
   },
   {
     heading: 'Staffing',
@@ -41,13 +30,13 @@ const SECTIONS: NavSection[] = [
       {
         href: '/facility/shifts',
         label: 'Shifts',
-        icon: CalendarPlus,
+        icon: ICON.shift,
         permission: 'service_request.read',
       },
       {
         href: '/facility/roster',
         label: 'Roster',
-        icon: Users,
+        icon: ICON.roster,
         permission: 'attendance.record',
       },
     ],
@@ -58,31 +47,31 @@ const SECTIONS: NavSection[] = [
       {
         href: '/facility/timesheets',
         label: 'Timesheets',
-        icon: ReceiptText,
+        icon: ICON.timesheet,
         permission: 'timesheet.approve',
       },
       {
         href: '/facility/invoices',
         label: 'Invoices',
-        icon: FileText,
+        icon: ICON.invoice,
         permission: 'invoice.read',
       },
       {
         href: '/facility/disputes',
         label: 'Disputes',
-        icon: Gavel,
+        icon: ICON.dispute,
         permission: 'dispute.manage',
       },
       {
         href: '/facility/rates',
         label: 'Rates and allowances',
-        icon: Percent,
+        icon: ICON.rate,
         permission: 'facility.write',
       },
       {
         href: '/facility/incidents',
         label: 'Report an incident',
-        icon: Stethoscope,
+        icon: ICON.incident,
         permission: 'incident.report',
       },
     ],
@@ -90,8 +79,8 @@ const SECTIONS: NavSection[] = [
   {
     heading: 'Your facility',
     items: [
-      { href: '/facility/profile', label: 'Facility profile', icon: Building2, permission: 'facility.read' },
-      { href: '/facility/staff', label: 'Staff', icon: UsersRound, permission: 'role.grant' },
+      { href: '/facility/profile', label: 'Facility profile', icon: ICON.facility, permission: 'facility.read' },
+      { href: '/facility/staff', label: 'Staff', icon: ICON.staff, permission: 'role.grant' },
     ],
   },
 ];

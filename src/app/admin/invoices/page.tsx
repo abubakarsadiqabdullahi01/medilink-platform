@@ -8,6 +8,7 @@ import { api, errorMessage } from '@/lib/ui/api';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { MoneyInput } from '@/components/app/money-input';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
@@ -30,7 +31,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { Combobox } from '@/components/app/combobox';
 import { StatusBadge } from '@/components/app/status-badge';
-import { EmptyState, PageHeader, QueueSkeleton } from '@/components/app/page-shell';
+import { EmptyState, PageHeader, QueueSkeleton, ErrorState } from '@/components/app/page-shell';
 import { useStepUp } from '@/components/app/step-up';
 import { formatDate, formatMinutes, formatNaira, parseNairaToKobo } from '@/components/app/format';
 
@@ -286,11 +287,10 @@ export default function InvoicesPage() {
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label htmlFor="pay-amount">Amount received (₦)</Label>
-                <Input
+                <MoneyInput
                   id="pay-amount"
-                  inputMode="decimal"
                   value={payment.amount}
-                  onChange={(event) => setPayment({ ...payment, amount: event.target.value })}
+                  onValueChange={(amount) => setPayment({ ...payment, amount })}
                 />
               </div>
               <div className="space-y-1.5">
@@ -411,10 +411,7 @@ export default function InvoicesPage() {
       ) : invoices.isPending ? (
         <QueueSkeleton rows={2} />
       ) : invoices.isError ? (
-        <Alert variant="destructive">
-          <TriangleAlert />
-          <AlertDescription>Invoices could not be loaded.</AlertDescription>
-        </Alert>
+        <ErrorState message="Invoices could not be loaded." onRetry={() => void invoices.refetch()} retrying={invoices.isFetching} />
       ) : invoiceRows.length === 0 ? (
         <EmptyState icon={<ReceiptText />} title="Nothing billed yet" />
       ) : (

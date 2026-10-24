@@ -35,14 +35,46 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const response = await fetch(path, {
-    method,
-    credentials: 'same-origin',
-    headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-    cache: 'no-store',
+/**
+ * What to say when the request never got an answer: no signal, a dropped connection, a timeout.
+ *
+ * `fetch` rejects with a bare `TypeError: Failed to fetch` in every one of those cases, which used to
+ * reach the screen as "Something went wrong" — no help to somebody deciding whether to wait, retry
+ * or walk to where there is signal. Reading is safe to say plainly. For a change, the honest answer
+ * is that it may or may not have arrived (the connection can drop after the server has done it), so
+ * the message says to look before doing it again, which is what stops a payment or a shift being
+ * recorded twice.
+ */
+function unreachable(method: string): ApiError {
+  const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+  const reading = method === 'GET';
+  return new ApiError({
+    code: 'network_unreachable',
+    message: offline
+      ? reading
+        ? 'You are offline, so this could not be loaded.'
+        : 'You are offline, so nothing was sent. Try again when you are back.'
+      : reading
+        ? 'Could not reach Medilink. Check your connection and try again.'
+        : 'Could not reach Medilink. Check your connection, and look before you try again: it may or may not have gone through.',
+    // Not an HTTP status; 0 is how the browser reports "no response", and it is retried like a 5xx.
+    status: 0,
   });
+}
+
+async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      method,
+      credentials: 'same-origin',
+      headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      cache: 'no-store',
+    });
+  } catch {
+    throw unreachable(method);
+  }
 
   const text = await response.text();
   let parsed: unknown = {};

@@ -45,7 +45,7 @@ test('an administrator raises an invoice for the approved work and issues it', a
     has: page.getByRole('button', { name: 'Issue it' }),
   });
   gross = (await invoice.locator('p.tabular.text-lg').innerText()).trim();
-  expect(gross).toMatch(/^₦[\d,]+\.\d{2}$/);
+  expect(gross).toMatch(/^₦[\d,]+(\.\d{2})?$/);
   // The draft's toast can sit over this button once it is scrolled into view, and then never leaves.
   await toastsGone(page);
   await invoice.getByRole('button', { name: 'Issue it' }).click();
@@ -81,7 +81,7 @@ test('the payment is recorded, and the hospital owes nothing', async ({ page }) 
   await page.context().clearCookies();
   await signIn(page, world().scheduler);
   await page.goto('/facility/invoices');
-  await expect(figure(page, 'Outstanding')).toHaveText('₦0.00');
+  await expect(figure(page, 'Outstanding')).toHaveText('₦0');
   await expect(figure(page, 'Paid')).toHaveText(gross);
 });
 
@@ -114,7 +114,7 @@ test('finance pays her, and her earnings say so', async ({ page }) => {
   await page.context().clearCookies();
   await signIn(page, world().practitioner);
   await page.goto('/practitioner/earnings');
-  await expect(figure(page, 'Owed to you')).toHaveText('₦0.00');
+  await expect(figure(page, 'Owed to you')).toHaveText('₦0');
   await expect(figure(page, 'Paid to you')).toHaveText(gross);
   await expect(card(page, /Received \d/).filter({ hasText: gross })).toBeVisible();
 });

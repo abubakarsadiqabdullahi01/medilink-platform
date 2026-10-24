@@ -9,7 +9,6 @@ import {
   ChevronRight,
   Search,
   Send,
-  TriangleAlert,
   Users,
 } from 'lucide-react';
 import { api } from '@/lib/ui/api';
@@ -17,7 +16,6 @@ import { useFacilityId } from '@/lib/ui/facility';
 import { useQueueAction } from '@/lib/ui/queue';
 import { nameOf, useReference } from '@/lib/ui/reference';
 import { useSession } from '@/lib/ui/session';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -50,7 +48,7 @@ import {
 } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
-import { EmptyState, PageHeader } from '@/components/app/page-shell';
+import { EmptyState, PageHeader, ErrorState } from '@/components/app/page-shell';
 import { formatNaira, formatWhen } from '@/components/app/format';
 import { NewShiftDialog } from './new-shift-dialog';
 
@@ -306,13 +304,11 @@ export default function ShiftsPage() {
           </div>
         </Card>
       ) : queue.isError ? (
-        <Alert variant="destructive">
-          <TriangleAlert />
-          <AlertDescription>These shifts could not be loaded.</AlertDescription>
-        </Alert>
+        <ErrorState message="These shifts could not be loaded." onRetry={() => void queue.refetch()} retrying={queue.isFetching} />
       ) : rows.length === 0 ? (
         <EmptyState
           icon={<CalendarPlus />}
+          illustration={filtered ? undefined : 'shifts'}
           title={filtered ? 'Nothing matches that' : `No ${status.toLowerCase()} shifts`}
           description={
             filtered

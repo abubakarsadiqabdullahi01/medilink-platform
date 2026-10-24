@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { TriangleAlert } from 'lucide-react';
 import { api, errorMessage } from '@/lib/ui/api';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -19,7 +18,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { PageHeader, QueueSkeleton } from '@/components/app/page-shell';
+import { PageHeader, QueueSkeleton, ErrorState } from '@/components/app/page-shell';
 import { formatDate } from '@/components/app/format';
 
 interface Version {
@@ -113,11 +112,8 @@ export default function AgreementsPage() {
         {versions.isPending ? (
           <QueueSkeleton rows={3} />
         ) : versions.isError ? (
-          <Alert variant="destructive">
-            <TriangleAlert />
-            <AlertDescription>The agreements could not be loaded.</AlertDescription>
-          </Alert>
-        ) : (
+        <ErrorState message="The agreements could not be loaded." onRetry={() => void versions.refetch()} retrying={versions.isFetching} />
+      ) : (
           <div className="grid gap-4 lg:grid-cols-3">
             {KINDS.map((type) => {
               const rows = versions.data.filter((row) => row.kind === type.value);

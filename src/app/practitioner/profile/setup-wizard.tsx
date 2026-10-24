@@ -342,6 +342,16 @@ function Stepper({
   );
 }
 
+/**
+ * The row of Back / Next, kept in reach on a phone.
+ *
+ * The steps are long and the button that moves on is at the end of them, so a thumb scrolls past a
+ * screen of fields to find it. On a phone the bar sticks to the bottom of the screen while its card
+ * is in view; from `lg` up the page is short enough that it simply sits at the end.
+ */
+const ACTION_BAR =
+  'sticky bottom-0 z-10 -mx-6 -mb-6 flex flex-wrap items-center justify-between gap-3 rounded-b-xl border-t bg-card px-6 py-4 lg:static lg:mx-0 lg:mb-0 lg:rounded-none lg:bg-transparent lg:px-0 lg:pb-0 lg:pt-5';
+
 function StepNav({
   onBack,
   onNext,
@@ -354,7 +364,7 @@ function StepNav({
   note?: string;
 }) {
   return (
-    <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t pt-5">
+    <div className={cn(ACTION_BAR, 'mt-6')}>
       <div>
         {onBack ? (
           <Button variant="outline" onClick={onBack}>
@@ -558,7 +568,7 @@ function ReviewStep({
           ))}
         </ul>
 
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-5">
+        <div className={ACTION_BAR}>
           <Button variant="outline" onClick={onBack}>
             <ArrowLeft />
             Back

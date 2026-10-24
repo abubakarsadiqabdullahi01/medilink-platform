@@ -12,6 +12,9 @@ import { useZodForm } from '@/lib/ui/form';
 import { consoleFor, type SessionState } from '@/lib/ui/session';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { TextSizeControl } from '@/components/app/text-size-control';
+import { Logo } from '@/components/app/logo';
+import { AuthPanel } from '@/components/app/auth-panel';
+import { FieldError } from '@/components/app/field-error';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -83,20 +86,6 @@ const passwordSchema = z
     path: ['confirm'],
   });
 
-/**
- * One field's problem, under that field.
- *
- * `role="alert"` so a screen reader hears it when it appears rather than only
- * if the person happens to navigate back over the input.
- */
-function FieldError({ message }: { message?: string }) {
-  if (!message) return null;
-  return (
-    <p role="alert" className="text-xs text-destructive-text">
-      {message}
-    </p>
-  );
-}
 
 function RegisterForm() {
   const router = useRouter();
@@ -204,12 +193,11 @@ function RegisterForm() {
 
   return (
     <main className="relative grid min-h-dvh lg:grid-cols-2">
-      <TextSizeControl className="absolute right-3 top-3 z-10" />
+      {/* Over the form's half, not over the teal panel beside it, where its dark text cannot be read. */}
+      <TextSizeControl className="absolute right-3 top-3 z-10 lg:right-[calc(50%+0.75rem)]" />
       <div className="flex items-center justify-center px-6 py-12">
         <div className="w-full max-w-sm">
-          <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-            Medilink
-          </p>
+          <Logo className="mb-8" />
           <h1 className="mt-1 text-2xl font-semibold tracking-tight">
             {forFacility
               ? "Register your facility's account"
@@ -505,7 +493,7 @@ function RegisterForm() {
       {/* What they are actually signing up to, said before they do it rather
           than discovered afterwards — a practitioner's eligibility card, or a
           facility's verification queue. */}
-      <div className="hidden bg-primary p-12 text-primary-foreground lg:flex lg:flex-col lg:justify-center">
+      <AuthPanel>
         {forStaff ? <Building2 className="size-10 opacity-90" /> : <BadgeCheck className="size-10 opacity-90" />}
         <p className="mt-6 max-w-md text-2xl font-semibold leading-snug tracking-tight">
           {forFacility
@@ -514,13 +502,13 @@ function RegisterForm() {
               ? 'An account is the start. Access comes from the person who manages it where you work.'
               : 'An account is the start. Verification is what gets you offered work.'}
         </p>
-        <div className="mt-8 space-y-4 text-sm leading-relaxed text-primary-foreground/85">
+        <div className="mt-8 space-y-4 text-sm leading-relaxed text-primary-foreground/90">
           {forStaff && !forFacility ? (
             <>
               <Card className="border-white/15 bg-white/10 text-primary-foreground shadow-none">
                 <CardHeader className="p-4">
                   <CardTitle className="text-sm">Your own sign-in, never a shared one</CardTitle>
-                  <CardDescription className="text-primary-foreground/75">
+                  <CardDescription className="text-primary-foreground/90">
                     Everything you do is recorded against your name, so nobody else can act as you
                     and nobody has to share a password.
                   </CardDescription>
@@ -529,7 +517,7 @@ function RegisterForm() {
               <Card className="border-white/15 bg-white/10 text-primary-foreground shadow-none">
                 <CardHeader className="p-4">
                   <CardTitle className="text-sm">Access is given, not chosen</CardTitle>
-                  <CardDescription className="text-primary-foreground/75">
+                  <CardDescription className="text-primary-foreground/90">
                     Once your account exists, your hospital&rsquo;s owner adds you from their Staff
                     page using your phone number. Until then the console tells you what to do next.
                   </CardDescription>
@@ -541,7 +529,7 @@ function RegisterForm() {
               <Card className="border-white/15 bg-white/10 text-primary-foreground shadow-none">
                 <CardHeader className="p-4">
                   <CardTitle className="text-sm">Your facility is checked against its registration</CardTitle>
-                  <CardDescription className="text-primary-foreground/75">
+                  <CardDescription className="text-primary-foreground/90">
                     You can set it up and add colleagues straight away — it just cannot offer a
                     shift to anybody until compliance has confirmed it is real.
                   </CardDescription>
@@ -550,7 +538,7 @@ function RegisterForm() {
               <Card className="border-white/15 bg-white/10 text-primary-foreground shadow-none">
                 <CardHeader className="p-4">
                   <CardTitle className="text-sm">This account is yours, not the facility&rsquo;s</CardTitle>
-                  <CardDescription className="text-primary-foreground/75">
+                  <CardDescription className="text-primary-foreground/90">
                     You can grant access to colleagues once the facility exists, so this is not the
                     only login it will ever have.
                   </CardDescription>
@@ -562,7 +550,7 @@ function RegisterForm() {
               <Card className="border-white/15 bg-white/10 text-primary-foreground shadow-none">
                 <CardHeader className="p-4">
                   <CardTitle className="text-sm">You will be asked for your credentials</CardTitle>
-                  <CardDescription className="text-primary-foreground/75">
+                  <CardDescription className="text-primary-foreground/90">
                     Your registration and credentials are reviewed before you can be matched to a
                     shift. Until then your profile says exactly what is outstanding.
                   </CardDescription>
@@ -571,7 +559,7 @@ function RegisterForm() {
               <Card className="border-white/15 bg-white/10 text-primary-foreground shadow-none">
                 <CardHeader className="p-4">
                   <CardTitle className="text-sm">Nothing is hidden from you</CardTitle>
-                  <CardDescription className="text-primary-foreground/75">
+                  <CardDescription className="text-primary-foreground/90">
                     If you are not eligible, the reasons are listed by name. No one has to ring
                     support to find out why.
                   </CardDescription>
@@ -580,7 +568,7 @@ function RegisterForm() {
             </>
           )}
         </div>
-      </div>
+      </AuthPanel>
     </main>
   );
 }

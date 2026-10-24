@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, ScrollText, TriangleAlert, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ScrollText, X } from 'lucide-react';
 import { api } from '@/lib/ui/api';
 import { keys, timing } from '@/lib/ui/query-keys';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -27,7 +27,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { EmptyState, PageHeader } from '@/components/app/page-shell';
+import { EmptyState, PageHeader, ErrorState } from '@/components/app/page-shell';
 import { actionLabel, formatWhen, recordLabel, shortId } from '@/components/app/format';
 import { AUDIT_AREA_LABELS, AUDIT_AREA_VALUES } from '@/modules/audit-compliance/domain/audit-areas';
 
@@ -233,10 +233,7 @@ export default function AuditPage() {
           </div>
         </Card>
       ) : queue.isError ? (
-        <Alert variant="destructive">
-          <TriangleAlert />
-          <AlertDescription>The trail could not be loaded.</AlertDescription>
-        </Alert>
+        <ErrorState message="The trail could not be loaded." onRetry={() => void queue.refetch()} retrying={queue.isFetching} />
       ) : rows.length === 0 ? (
         <EmptyState
           icon={<ScrollText />}
@@ -245,7 +242,7 @@ export default function AuditPage() {
         />
       ) : (
         <Card>
-          <Table>
+          <Table stickyHeader>
             <TableHeader>
               <TableRow>
                 <TableHead className="w-[170px]">When</TableHead>
@@ -302,7 +299,7 @@ export default function AuditPage() {
                         account since erased; the uuid stays rather than the
                         row losing its answer. */}
                     {row.actorName ? (
-                      <span className="truncate">{row.actorName}</span>
+                      <span className="break-words">{row.actorName}</span>
                     ) : row.actorId ? (
                       <span className="font-mono" title="This account no longer exists">
                         {shortId(row.actorId)}

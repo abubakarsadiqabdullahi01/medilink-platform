@@ -1,14 +1,14 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { TriangleAlert, Wallet } from 'lucide-react';
+import { Wallet } from 'lucide-react';
 import { api } from '@/lib/ui/api';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Card, CardContent } from '@/components/ui/card';
 import { AmountFigure } from '@/components/app/amount-figure';
 import { MyPayoutAccount } from '@/components/app/my-payout-account';
 import { StatusBadge } from '@/components/app/status-badge';
-import { EmptyState, PageHeader, QueueSkeleton } from '@/components/app/page-shell';
+import { EmptyState, PageHeader, QueueSkeleton, ErrorState } from '@/components/app/page-shell';
 import { formatDate, formatNaira } from '@/components/app/format';
 
 interface Payout {
@@ -118,10 +118,7 @@ export default function EarningsPage() {
       {earnings.isPending ? (
         <QueueSkeleton rows={2} />
       ) : earnings.isError ? (
-        <Alert variant="destructive">
-          <TriangleAlert />
-          <AlertDescription>Your earnings could not be loaded.</AlertDescription>
-        </Alert>
+        <ErrorState message="Your earnings could not be loaded." onRetry={() => void earnings.refetch()} retrying={earnings.isFetching} />
       ) : payouts.length === 0 ? (
         <EmptyState
           icon={<Wallet />}

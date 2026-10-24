@@ -35,7 +35,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
-import { PageHeader, QueueSkeleton } from '@/components/app/page-shell';
+import { PageHeader, QueueSkeleton, ErrorState } from '@/components/app/page-shell';
 import { formatDate } from '@/components/app/format';
 
 type SourceList = 'MDCN_QUACK_LIST' | 'MDCN_SANCTIONS' | 'INTERNAL';
@@ -336,11 +336,8 @@ export default function SanctionsPage() {
             {list.isPending ? (
               <QueueSkeleton rows={3} />
             ) : list.isError ? (
-              <Alert variant="destructive">
-                <TriangleAlert />
-                <AlertDescription>The list could not be loaded.</AlertDescription>
-              </Alert>
-            ) : list.data.entries.length === 0 ? (
+        <ErrorState message="The list could not be loaded." onRetry={() => void list.refetch()} retrying={list.isFetching} />
+      ) : list.data.entries.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 {applied ? 'Nobody on the list matches that.' : 'Nobody is on the list.'}
               </p>

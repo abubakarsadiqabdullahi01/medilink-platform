@@ -2,9 +2,8 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, Search, Stethoscope, TriangleAlert } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Search, Stethoscope, } from 'lucide-react';
 import { api } from '@/lib/ui/api';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -18,7 +17,7 @@ import {
 } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { SeverityBadge, StatusBadge, humanise } from '@/components/app/status-badge';
-import { EmptyState, PageHeader } from '@/components/app/page-shell';
+import { EmptyState, PageHeader, ErrorState } from '@/components/app/page-shell';
 import { ScreenTransition } from '@/components/app/motion';
 import { formatAgo } from '@/components/app/format';
 import { IncidentDetail, type Incident } from './incident-detail';
@@ -235,13 +234,11 @@ export default function IncidentsPage() {
           ))}
         </div>
       ) : queue.isError ? (
-        <Alert variant="destructive">
-          <TriangleAlert />
-          <AlertDescription>This queue could not be loaded.</AlertDescription>
-        </Alert>
+        <ErrorState message="This queue could not be loaded." onRetry={() => void queue.refetch()} retrying={queue.isFetching} />
       ) : rows.length === 0 ? (
         <EmptyState
           icon={<Stethoscope />}
+          illustration={filtered ? undefined : 'all-clear'}
           title={filtered ? 'Nothing matches that' : 'Nothing open'}
           description={
             filtered
