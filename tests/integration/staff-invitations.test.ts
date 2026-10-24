@@ -475,7 +475,9 @@ describe('how many may be sent', () => {
         actorId: owner.id,
         now: NOW,
       });
-      await cancelStaffInvitation({ invitationId: invitation.id, facilityId, actorId: owner.id });
+      // At the test's own time, as above: by the real clock an invitation sent on the 17th is
+      // a week old on the 24th and can no longer be cancelled.
+      await cancelStaffInvitation({ invitationId: invitation.id, facilityId, actorId: owner.id, now: NOW });
     }
 
     await expect(
