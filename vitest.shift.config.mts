@@ -1,0 +1,13 @@
+import { defineConfig } from 'vitest/config';
+import react from '@vitejs/plugin-react';
+import { fileURLToPath } from 'node:url';
+
+export default defineConfig({
+  plugins: [react()],
+  test: {
+    environment: 'jsdom',
+    include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'tests/unit/**/*.test.ts'],
+    setupFiles: ['tests/setup.ts', 'tests/clock-shift.setup.ts'],
+  },
+  resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
+});
