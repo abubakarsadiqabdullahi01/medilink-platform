@@ -51,6 +51,12 @@ const SECTIONS: NavSection[] = [
         icon: ICON.earnings,
         permission: 'invoice.read',
       },
+      {
+        href: '/practitioner/disputes',
+        label: 'Disputes',
+        icon: ICON.dispute,
+        permission: 'dispute.manage',
+      },
     ],
   },
   {

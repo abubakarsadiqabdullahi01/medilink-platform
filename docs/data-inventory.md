@@ -187,7 +187,7 @@ A scheduled job (`retention.purge_sweep`, daily) deletes only what no obligation
 ### Disputes
 
 - **Tables:** `disputes.disputes`, `disputes.dispute_evidence`
-- **Holds:** What was disputed, by whom, the evidence each side gave and the decision.
+- **Holds:** What was disputed, by whom, the evidence each side gave, the other side’s one written reply and the date it was asked for, and the decision with the reason it turned on.
 - **Purpose:** To settle a disagreement about a shift or its pay.
 - **Proposed basis:** Contract, and the legitimate interest of both parties in a fair decision.
 - **Owner:** Operations

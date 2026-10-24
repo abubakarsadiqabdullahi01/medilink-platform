@@ -1657,6 +1657,18 @@ model Dispute {
 
   withdrawnAt DateTime? @map("withdrawn_at")
 
+  // M14-03. By when the other side is asked to reply, set when the case is opened. It marks the
+  // case for the officers and tells the other side what is expected of them; it locks nothing,
+  // and a reply that is late is still read.
+  respondBy DateTime @map("respond_by")
+  // The other side's one written reply, in the app. Written once, as evidence is.
+  responseNote String?   @map("response_note")
+  respondedAt  DateTime? @map("responded_at")
+  respondedBy  String?   @map("responded_by") @db.Uuid
+  // What the decision turned on, beside the notes: the short form, which can be counted.
+  // Null on a case decided before reasons were recorded.
+  decisionReason DisputeDecisionReason? @map("decision_reason")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -1707,6 +1719,20 @@ enum DisputeOutcome {
   UPHELD
   // The complaint was not made out: the record returns to where it was.
   DISMISSED
+
+  @@schema("disputes")
+}
+
+// What a decision turned on. Which are open depends on the outcome (the domain holds that list);
+// none of them decides a case because somebody was silent.
+enum DisputeDecisionReason {
+  RECORD_WAS_WRONG
+  AGREEMENT_NOT_KEPT
+  COMPLAINT_NOT_MADE_OUT
+  RECORD_CONFIRMED
+  NOT_ENOUGH_TO_DECIDE
+  NOT_FOR_MEDILINK
+  OTHER
 
   @@schema("disputes")
 }

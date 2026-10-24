@@ -25,6 +25,7 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
           disputeId: input.id,
           actorId: session.userId,
           outcome: input.outcome,
+          decisionReason: input.decisionReason,
           notes: input.notes,
         }),
     },

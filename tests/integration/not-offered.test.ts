@@ -7,7 +7,7 @@ vi.mock('next/headers', async () => {
 
 import { prisma } from '@/lib/db';
 import { ROLE_PERMISSIONS } from '@/lib/authz/permissions';
-import { addSlot } from '@/modules/availability/application/availability';
+import { addBlock, addSlot } from '@/modules/availability/application/availability';
 import { availabilityForWindow } from '@/modules/availability/application/availability';
 import { recordConsent } from '@/modules/audit-compliance/application/consent';
 import { createProfile } from '@/modules/practitioners/application/profile';
@@ -124,6 +124,63 @@ describe('an approved practitioner', () => {
 
       expect((await getNotOfferedView(person.id)).alsoStopsOffers).toEqual(['no_availability']);
       expect(await availabilityVerdict(person.id, world)).not.toBe('available');
+    });
+
+    it('is told it is their time away, not that they said nothing, when all they offered lies in it', async () => {
+      const world = await buildBookingWorld();
+      const person = await eligiblePractitioner(world);
+      await addSlot({ userId: person.id, kind: 'RECURRING_WEEKLY', dayOfWeek: 1, startMinute: 480, endMinute: 960 });
+      await addBlock({ userId: person.id, startsAt: SOON(-1), endsAt: SOON(120), reason: 'On leave' });
+
+      const view = await getNotOfferedView(person.id);
+
+      expect(view.alsoStopsOffers).toEqual(['time_away']);
+      expect(headline(view)).toBe('approved_but_not_offered');
+      expect(reasonLines(view)[0]).toMatchObject({ code: 'time_away', owner: 'you' });
+      // The matcher agrees for the shift the world published, and the rule still thinks them eligible.
+      expect(await availabilityVerdict(person.id, world)).toBe('blocked');
+      expect((await getEligibility(person.id)).eligible).toBe(true);
+    });
+
+    it('is told the same of a free window that lies wholly inside time away', async () => {
+      const world = await buildBookingWorld();
+      const person = await eligiblePractitioner(world);
+      await addSlot({ userId: person.id, kind: 'ONE_OFF', startsAt: SOON(3), endsAt: new Date(SOON(3).getTime() + 8 * 3_600_000) });
+      await addBlock({ userId: person.id, startsAt: SOON(1), endsAt: SOON(10), reason: 'Exams' });
+
+      expect((await getNotOfferedView(person.id)).alsoStopsOffers).toEqual(['time_away']);
+    });
+
+    it('is not told it when some of what they offered survives their time away', async () => {
+      const world = await buildBookingWorld();
+      const person = await eligiblePractitioner(world);
+      // Every Monday to Sunday, so any week away leaves days after it.
+      for (const dayOfWeek of [0, 1, 2, 3, 4, 5, 6]) {
+        await addSlot({ userId: person.id, kind: 'RECURRING_WEEKLY', dayOfWeek, startMinute: 0, endMinute: 1440 });
+      }
+      await addBlock({ userId: person.id, startsAt: SOON(-1), endsAt: SOON(14), reason: 'Annual leave' });
+
+      expect((await getNotOfferedView(person.id)).alsoStopsOffers).toEqual([]);
+    });
+
+    it('is not told it for time away that is already over', async () => {
+      const world = await buildBookingWorld();
+      const person = await eligiblePractitioner(world);
+      await addSlot({ userId: person.id, kind: 'RECURRING_WEEKLY', dayOfWeek: 1, startMinute: 480, endMinute: 960 });
+      await addBlock({ userId: person.id, startsAt: SOON(-20), endsAt: SOON(-10), reason: 'Last month' });
+
+      expect((await getNotOfferedView(person.id)).alsoStopsOffers).toEqual([]);
+    });
+
+    it('says they have said nothing, not that they are away, when all they entered is over', async () => {
+      const world = await buildBookingWorld();
+      const person = await eligiblePractitioner(world);
+      await prisma.availabilitySlot.create({
+        data: { userId: person.id, kind: 'ONE_OFF', startsAt: SOON(-10), endsAt: new Date(SOON(-10).getTime() + 8 * 3_600_000) },
+      });
+      await addBlock({ userId: person.id, startsAt: SOON(-1), endsAt: SOON(30), reason: 'Away' });
+
+      expect((await getNotOfferedView(person.id)).alsoStopsOffers).toEqual(['no_availability']);
     });
 
     it('is not told they have said nothing when they have said when, only not for this shift', async () => {

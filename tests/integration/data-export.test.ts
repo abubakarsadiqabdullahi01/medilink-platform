@@ -9,7 +9,7 @@ vi.mock('next/headers', async () => {
 
 import { prisma } from '@/lib/db';
 import { issueSession } from '@/modules/auth/application/session-service';
-import { raiseDispute, withdrawDispute } from '@/modules/disputes/application/dispute';
+import { raiseDispute, respondToDispute, withdrawDispute } from '@/modules/disputes/application/dispute';
 import { recordConsent } from '@/modules/audit-compliance/application/consent';
 import { exportSubjectData } from '@/modules/audit-compliance/application/data-export';
 import { raiseRequest } from '@/modules/audit-compliance/application/data-subject';
@@ -203,6 +203,9 @@ async function plant(): Promise<Planted> {
   await prisma.disputeEvidence.create({
     data: { disputeId: hospital.id, objectKey: 'evidence/KEY-SECRET-hospital.jpg', attachedBy: world.reviewerId, note: 'MARK-HOSPITAL-EVIDENCE-NOTE' },
   });
+  // The practitioner answers the hospital's case, in words of their own. It is part of a case both
+  // sides read, so it is not marked as the practitioner's private data (MARK-A-).
+  await respondToDispute({ disputeId: hospital.id, actorId: practitioner.id, text: 'MARK-CASE-REPLY: I stayed until the night staff arrived.' });
 
   // One report by the practitioner, one by the hospital that names the practitioner.
   await prisma.clinicalIncident.create({
@@ -386,6 +389,23 @@ describe('what the export holds', () => {
     expect(theirs.evidence[0]).toMatchObject({ attachedBy: 'someone else' });
   });
 
+  it('keeps what the person wrote in reply to a dispute, and when it was asked for, without who replied as an id', async () => {
+    const { world } = await plant();
+    const data = await exportSubjectData(world.practitionerId);
+
+    const theirs = data.disputes.find((dispute) => dispute.reason === 'MARK-HOSPITAL-DISPUTE-REASON')!;
+    const own = data.disputes.find((dispute) => dispute.reason === 'MARK-A-DISPUTE-REASON')!;
+    expect(theirs.responseNote).toContain('MARK-CASE-REPLY');
+    expect(theirs.respondedByYou).toBe(true);
+    expect(theirs.respondedAt).toBeInstanceOf(Date);
+    expect(theirs.respondBy).toBeInstanceOf(Date);
+    // A case nobody has replied to says so, and carries the reason a decision turned on once it has one.
+    expect(own.respondedByYou).toBeNull();
+    expect(own).toHaveProperty('decisionReason', null);
+    for (const row of data.disputes) expect(row).not.toHaveProperty('respondedBy');
+    expect(JSON.stringify(data.disputes)).not.toContain(world.reviewerId);
+  });
+
   it('returns the incident the person reported, and not the one that names them', async () => {
     const { world } = await plant();
     const data = await exportSubjectData(world.practitionerId);
@@ -479,6 +499,10 @@ describe('what the export keeps out', () => {
     expect(data.disputes.map((dispute) => dispute.reason)).toEqual(['MARK-HOSPITAL-DISPUTE-REASON']);
     expect(data.disputes[0]!.raisedByYou).toBe(true);
     expect(data.disputes[0]!.evidence[0]).toMatchObject({ attachedBy: 'you', note: 'MARK-HOSPITAL-EVIDENCE-NOTE' });
+    // And what the practitioner answered on it, as the practitioner's own export holds the hospital's
+    // words: whoever is party to a case holds the case, both sides' words, and nobody's identity.
+    expect(data.disputes[0]!.responseNote).toContain('MARK-CASE-REPLY');
+    expect(data.disputes[0]!.respondedByYou).toBe(false);
     // Their own report, in their words, with the practitioner it names left unnamed.
     expect(data.incidentsYouReported).toHaveLength(1);
     expect(data.incidentsYouReported[0]).toMatchObject({ summary: 'MARK-INCIDENT-NAMING-A', namedAPractitioner: true });

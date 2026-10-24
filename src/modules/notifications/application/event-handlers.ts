@@ -1,6 +1,6 @@
 import { prisma } from '@/lib/db';
 import { logger } from '@/lib/logger';
-import { watWindow } from '@/lib/wat';
+import { watMoment, watWindow } from '@/lib/wat';
 import { usersHoldingPlatformPermission } from '@/modules/auth/application/grants';
 import { alreadyNotified, ngn } from './handlers';
 import { notify, requireDelivered, type NotifyOutcome } from './notify';
@@ -361,11 +361,16 @@ export async function notifyDisputeOpened(payload: Record<string, unknown>): Pro
   const otherSide =
     raisedParty === 'FACILITY' ? practitionerId : facts.facility.representativeUserId;
 
+  // By when they are asked to reply, when the event says. An older event has no date and the text
+  // goes without it, as it always did.
+  const respondBy = new Date(text(payload.respondBy));
+  const replyBy = Number.isNaN(respondBy.getTime()) ? '' : ` Reply by ${watMoment(respondBy)}.`;
+
   const messages: Tell[] = [
     {
       userId: otherSide,
       kind: 'dispute.opened',
-      body: `A dispute was opened about the shift on ${facts.when}. Open Medilink to see it.`,
+      body: `A dispute was opened about the shift on ${facts.when}. Open Medilink to see it.${replyBy}`,
       relatedType: 'disputes.disputes',
       relatedId: disputeId,
     },

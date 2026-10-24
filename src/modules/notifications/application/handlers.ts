@@ -221,6 +221,7 @@ export async function notifyIncidentReported(payload: Record<string, unknown>): 
  * "tells the other side somebody is looking" and that both sides read the
  * outcome. (Opening one is `notifyDisputeOpened` in event-handlers.ts.)
  *
+ *   responded     the side that opened it, that there is a reply
  *   under review  both sides
  *   resolved      both sides, with the outcome and a pointer to the reasons
  *   withdrawn     the other side
@@ -228,7 +229,11 @@ export async function notifyIncidentReported(payload: Record<string, unknown>): 
  * What was argued is never in a text: not the reason somebody gave, not the
  * officer's notes. The parties read those in the app, signed in.
  */
-type DisputeStage = 'dispute.under_review' | 'dispute.resolved' | 'dispute.withdrawn';
+type DisputeStage =
+  | 'dispute.responded'
+  | 'dispute.under_review'
+  | 'dispute.resolved'
+  | 'dispute.withdrawn';
 
 export async function notifyDisputeStage(
   kind: DisputeStage,
@@ -265,8 +270,13 @@ export async function notifyDisputeStage(
 
   const facilitySide = facility.representativeUserId;
   const otherThanRaiser = raisedBy === 'FACILITY' ? [practitionerId] : [facilitySide];
+  const raiser = raisedBy === 'FACILITY' ? [facilitySide] : [practitionerId];
 
   const wording: Record<DisputeStage, { to: string[]; body: string }> = {
+    'dispute.responded': {
+      to: raiser,
+      body: `The other side has replied to the dispute over ${shift}. Open Medilink to read it. Medilink.`,
+    },
     'dispute.under_review': {
       to: [practitionerId, facilitySide],
       body: `The dispute over ${shift} is now being reviewed by Medilink. Medilink.`,

@@ -140,6 +140,29 @@ their own shift and winning.
 
 All ten carry `dispute.manage`.
 
+## Later: the other side's reply and the reason for a decision (M14-03)
+
+This stage is as it was written; these are the changes since, so the rest of this page is read
+with them in mind.
+
+- **A case asks the other side for one written reply**, by `respondBy` (seven days from opening, a
+  constant in `domain/dispute.ts`). The date is a marker, not a lock: a reply can still be written
+  after it, and the officer can decide before or after it. A reply is written once, is audited
+  with its text, and tells the person who raised the case there is one, not what it says.
+  `POST /api/v1/disputes/:id/respond`, `SELF` or `FACILITY`.
+- **The officers' queue is ordered by what can be decided** — replied to or past its date, then
+  being worked, then still inside its reply window, then closed, oldest first — and takes a
+  `stage` filter.
+- **A decision names what it turned on**, from a short list that belongs to the outcome
+  (`DECISION_REASONS`), beside the notes. A case decided before this has no reason and says so.
+- **A party never sees who, as a person,** raised, replied to or decided a case, who attached a
+  piece of evidence, or where the file is kept (`partyCaseView`, `EVIDENCE_FIELDS`). The officer
+  sees all of it.
+- **The practitioner has a screen**, `/practitioner/disputes`, fed by `GET /api/v1/disputes/mine`
+  (`SELF`), and reads one case with `GET /api/v1/disputes/:id?as=self`.
+
+The seven days and the reasons are engineering defaults, not an approved policy.
+
 ## Not in this stage
 
 - **Any adjustment to money.** Modules 11 and 12 do not exist, and upholding a

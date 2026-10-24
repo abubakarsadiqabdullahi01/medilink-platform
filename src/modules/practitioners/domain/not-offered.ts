@@ -16,7 +16,7 @@ import type { EligibilityBlocker } from './eligibility';
  */
 
 /** Reasons that keep an approved practitioner from being offered work. */
-export type ExtraReason = 'consent_withdrawn' | 'no_availability';
+export type ExtraReason = 'consent_withdrawn' | 'no_availability' | 'time_away';
 
 export type NotOfferedReason = EligibilityBlocker | ExtraReason;
 
@@ -97,6 +97,14 @@ export const REASON_GUIDE: Record<NotOfferedReason, ReasonGuide> = {
     says: 'You have not said when you can work, so there is nothing to match a shift against.',
     href: '/practitioner/profile?tab=availability',
     action: 'Say when you can work',
+  },
+  // Told apart from the one above because the remedy is different: they have said when, and the
+  // time they marked as away covers all of it. Away always wins (domain/offered).
+  time_away: {
+    owner: 'you',
+    says: 'Everything you have offered falls in time you marked as away, so there is nothing to match a shift against until you are back. Nothing else is wrong.',
+    href: '/practitioner/profile?tab=availability',
+    action: 'See your time away',
   },
 };
 

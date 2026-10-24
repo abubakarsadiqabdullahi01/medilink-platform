@@ -435,6 +435,7 @@ describe('telling people what happens to a case', () => {
       disputeId: dispute.id,
       actorId: world.officerId,
       outcome: 'UPHELD',
+      decisionReason: 'RECORD_WAS_WRONG',
       notes: 'The ward log shows the practitioner stayed until the night staff arrived.',
     });
 
@@ -479,6 +480,7 @@ describe('resolving a case', () => {
       disputeId: dispute.id,
       actorId: world.officerId,
       outcome: 'DISMISSED',
+      decisionReason: 'RECORD_CONFIRMED',
       notes: 'The ward diary shows the handover finished at four, as recorded.',
     });
 
@@ -510,6 +512,7 @@ describe('resolving a case', () => {
       disputeId: dispute.id,
       actorId: world.officerId,
       outcome: 'DISMISSED',
+      decisionReason: 'RECORD_CONFIRMED',
       notes: 'The ward log does record a break, and the practitioner signed it.',
     });
 
@@ -526,6 +529,7 @@ describe('resolving a case', () => {
       disputeId: dispute.id,
       actorId: world.officerId,
       outcome: 'UPHELD',
+      decisionReason: 'RECORD_WAS_WRONG',
       notes: 'Ward diary confirms the practitioner stayed for the handover.',
     });
 
@@ -551,6 +555,7 @@ describe('resolving a case', () => {
       disputeId: dispute.id,
       actorId: world.officerId,
       outcome: 'UPHELD',
+      decisionReason: 'RECORD_WAS_WRONG',
       notes: 'Ward diary confirms the practitioner stayed for the handover.',
     });
     await reviewTimesheet({
@@ -581,6 +586,7 @@ describe('resolving a case', () => {
         disputeId: dispute.id,
         actorId: world.officerId,
         outcome: null,
+        decisionReason: null,
         notes: 'Closing this without deciding which way it went.',
       }),
     ).rejects.toThrow(/outcome_missing/);
@@ -597,6 +603,7 @@ describe('resolving a case', () => {
         disputeId: dispute.id,
         actorId: world.officerId,
         outcome: 'DISMISSED',
+        decisionReason: 'RECORD_CONFIRMED',
         notes: 'no',
       }),
     ).rejects.toThrow(/notes_missing/);
@@ -609,6 +616,7 @@ describe('resolving a case', () => {
       disputeId: dispute.id,
       actorId: world.officerId,
       outcome: 'DISMISSED',
+      decisionReason: 'RECORD_CONFIRMED',
       notes: 'The ward diary shows the handover finished at four, as recorded.',
     });
 
@@ -617,6 +625,7 @@ describe('resolving a case', () => {
         disputeId: dispute.id,
         actorId: world.officerId,
         outcome: 'UPHELD',
+        decisionReason: 'RECORD_WAS_WRONG',
         notes: 'Changing the finding after the fact.',
       }),
     ).rejects.toThrow(/not_open/);
@@ -633,6 +642,7 @@ describe('resolving a case', () => {
       disputeId: dispute.id,
       actorId: world.officerId,
       outcome: 'DISMISSED',
+      decisionReason: 'RECORD_CONFIRMED',
       notes: 'The ward diary shows the handover finished at four, as recorded.',
     });
     expect(resolved.status).toBe('RESOLVED');
@@ -648,6 +658,7 @@ describe('resolving a case', () => {
       disputeId: dispute.id,
       actorId: world.officerId,
       outcome: 'DISMISSED',
+      decisionReason: 'RECORD_CONFIRMED',
       notes: 'The ward diary shows the handover finished at four, as recorded.',
     });
 
@@ -704,6 +715,7 @@ describe('withdrawing, and disputing again', () => {
       disputeId: first.id,
       actorId: world.officerId,
       outcome: 'DISMISSED',
+      decisionReason: 'RECORD_CONFIRMED',
       notes: 'Nothing was produced to support the claim at the time.',
     });
 
@@ -727,6 +739,7 @@ describe('withdrawing, and disputing again', () => {
       disputeId: dispute.id,
       actorId: world.officerId,
       outcome: 'DISMISSED',
+      decisionReason: 'RECORD_CONFIRMED',
       notes: 'The ward diary shows the handover finished at four, as recorded.',
     });
 
@@ -742,6 +755,7 @@ describe('withdrawing, and disputing again', () => {
       disputeId: dispute.id,
       actorId: world.officerId,
       outcome: 'UPHELD',
+      decisionReason: 'RECORD_WAS_WRONG',
       notes: 'Ward diary confirms the practitioner stayed for the handover.',
     });
 

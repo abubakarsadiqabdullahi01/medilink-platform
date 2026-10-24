@@ -12,13 +12,21 @@ import {
   openDispute,
 } from '@/modules/attendance/application/attendance';
 import {
+  compareForQueue,
   openBlockers,
+  partyCaseView,
   partyFor,
   resolveBlockers,
+  respondBlockers,
+  responseDeadline,
+  responseOverdue,
+  stageOf,
   withdrawBlockers,
+  type DecisionReasonValue,
   type DisputeCategoryValue,
   type DisputeOutcomeValue,
   type DisputePartyValue,
+  type DisputeStage,
   type DisputeStatusValue,
 } from '../domain/dispute';
 
@@ -67,6 +75,13 @@ export const DisputeErrors = {
       `This dispute cannot be withdrawn: ${blockers.join(', ')}.`,
       409,
     ),
+
+  cannotRespond: (blockers: string[]) =>
+    new HttpError(
+      'dispute_cannot_respond',
+      `This dispute cannot be replied to: ${blockers.join(', ')}.`,
+      409,
+    ),
 };
 
 export interface DisputeView {
@@ -80,12 +95,30 @@ export interface DisputeView {
   reason: string;
   status: DisputeStatusValue;
   outcome: DisputeOutcomeValue | null;
+  /** What the decision turned on, beside the notes; null on a case decided before reasons were kept. */
+  decisionReason: DecisionReasonValue | null;
   resolvedBy: string | null;
   resolvedAt: Date | null;
   resolutionNotes: string | null;
   withdrawnAt: Date | null;
+  /** By when the other side is asked to reply. A marker: it locks nothing. */
+  respondBy: Date;
+  /** The other side's one written reply, and when it was written and by whom. */
+  responseNote: string | null;
+  respondedAt: Date | null;
+  respondedBy: string | null;
+  /** Where it stands for whoever is deciding it, and whether the other side has run out of time. */
+  stage: DisputeStage;
+  responseOverdue: boolean;
   createdAt: Date;
 }
+
+/**
+ * The case as one of its two sides reads it: the same, without who raised it, replied to it or
+ * decided it as people. They are told which side did each (`raisedParty`), and the officer who
+ * decided it is not for them to find.
+ */
+export type PartyDisputeView = ReturnType<typeof partyCaseView<DisputeView>>;
 
 interface DisputeRow {
   id: string;
@@ -96,14 +129,25 @@ interface DisputeRow {
   reason: string;
   status: string;
   outcome: string | null;
+  decisionReason: string | null;
   resolvedBy: string | null;
   resolvedAt: Date | null;
   resolutionNotes: string | null;
   withdrawnAt: Date | null;
+  respondBy: Date;
+  responseNote: string | null;
+  respondedAt: Date | null;
+  respondedBy: string | null;
   createdAt: Date;
 }
 
-function toView(row: DisputeRow, userId: string, facilityId: string): DisputeView {
+function toView(row: DisputeRow, userId: string, facilityId: string, now: Date = new Date()): DisputeView {
+  const standing = {
+    status: row.status as DisputeStatusValue,
+    respondBy: row.respondBy,
+    respondedAt: row.respondedAt,
+    now,
+  };
   return {
     id: row.id,
     assignmentId: row.assignmentId,
@@ -115,10 +159,17 @@ function toView(row: DisputeRow, userId: string, facilityId: string): DisputeVie
     reason: row.reason,
     status: row.status as DisputeStatusValue,
     outcome: row.outcome as DisputeOutcomeValue | null,
+    decisionReason: row.decisionReason as DecisionReasonValue | null,
     resolvedBy: row.resolvedBy,
     resolvedAt: row.resolvedAt,
     resolutionNotes: row.resolutionNotes,
     withdrawnAt: row.withdrawnAt,
+    respondBy: row.respondBy,
+    responseNote: row.responseNote,
+    respondedAt: row.respondedAt,
+    respondedBy: row.respondedBy,
+    stage: stageOf(standing),
+    responseOverdue: responseOverdue(standing),
     createdAt: row.createdAt,
   };
 }
@@ -200,7 +251,7 @@ export interface RaiseDisputeParams {
  * An operations officer adjudicates disputes, and deliberately cannot open
  * one — a case nobody involved wanted is not a dispute, it is an audit.
  */
-export async function raiseDispute(input: RaiseDisputeParams): Promise<DisputeView> {
+export async function raiseDispute(input: RaiseDisputeParams): Promise<PartyDisputeView> {
   const assignment = await getAssignment(input.assignmentId);
   if (!assignment) throw DisputeErrors.assignmentNotFound();
 
@@ -244,6 +295,9 @@ export async function raiseDispute(input: RaiseDisputeParams): Promise<DisputeVi
     });
     if (stillNone > 0) throw DisputeErrors.cannotOpen(['already_open']);
 
+    // Both set from one instant, so the date the other side is asked to reply by is exactly
+    // the response window after the case was opened.
+    const openedAt = new Date();
     const row = await tx.dispute.create({
       data: {
         assignmentId: input.assignmentId,
@@ -251,6 +305,8 @@ export async function raiseDispute(input: RaiseDisputeParams): Promise<DisputeVi
         raisedParty: party as DisputePartyValue,
         category: input.category,
         reason: input.reason,
+        createdAt: openedAt,
+        respondBy: responseDeadline(openedAt),
       },
     });
 
@@ -276,6 +332,8 @@ export async function raiseDispute(input: RaiseDisputeParams): Promise<DisputeVi
         facilityId: assignment.facilityId,
         raisedParty: row.raisedParty,
         category: row.category,
+        // So the text the other side is sent can say by when they are asked to reply.
+        respondBy: row.respondBy.toISOString(),
       },
     });
 
@@ -292,7 +350,7 @@ export async function raiseDispute(input: RaiseDisputeParams): Promise<DisputeVi
     reason: input.reason,
   });
 
-  return toView(created, assignment.userId, assignment.facilityId);
+  return partyCaseView(toView(created, assignment.userId, assignment.facilityId));
 }
 
 /**
@@ -345,6 +403,8 @@ export interface ResolveDisputeParams {
   actorId: string;
   /** Required. "Resolved" with no outcome tells the loser nothing. */
   outcome: DisputeOutcomeValue | null;
+  /** Required, and one that belongs to the outcome: the short form of the notes, which can be counted. */
+  decisionReason: DecisionReasonValue | null;
   notes: string;
 }
 
@@ -364,11 +424,13 @@ export async function resolveDispute(input: ResolveDisputeParams): Promise<Dispu
   const blockers = resolveBlockers({
     status: row.status as DisputeStatusValue,
     outcome: input.outcome,
+    decisionReason: input.decisionReason ?? null,
     notes: input.notes ?? '',
   });
   if (blockers.length > 0) throw DisputeErrors.cannotResolve(blockers);
 
   const outcome = input.outcome as DisputeOutcomeValue;
+  const decisionReason = input.decisionReason as DecisionReasonValue;
   const now = new Date();
 
   const updated = await prisma.$transaction(async (tx: Tx) => {
@@ -377,6 +439,7 @@ export async function resolveDispute(input: ResolveDisputeParams): Promise<Dispu
       data: {
         status: 'RESOLVED',
         outcome,
+        decisionReason,
         resolvedBy: input.actorId,
         resolvedAt: now,
         resolutionNotes: input.notes,
@@ -395,7 +458,7 @@ export async function resolveDispute(input: ResolveDisputeParams): Promise<Dispu
       scopeId: assignment.facilityId,
       reason: input.notes,
       before: { status: row.status, outcome: row.outcome },
-      after: { status: next.status, outcome: next.outcome },
+      after: { status: next.status, outcome: next.outcome, decisionReason: next.decisionReason },
     });
 
     await publishEvent(tx, {
@@ -430,7 +493,7 @@ export async function resolveDispute(input: ResolveDisputeParams): Promise<Dispu
 export async function withdrawDispute(input: {
   disputeId: string;
   actorId: string;
-}): Promise<DisputeView> {
+}): Promise<PartyDisputeView> {
   const { row, assignment } = await loadCase(input.disputeId);
 
   // Somebody with no part in the case gets "not found", not a refusal that confirms
@@ -482,7 +545,84 @@ export async function withdrawDispute(input: {
     reason: 'Dispute withdrawn by the party that raised it.',
   });
 
-  return toView(updated, assignment.userId, assignment.facilityId);
+  return partyCaseView(toView(updated, assignment.userId, assignment.facilityId));
+}
+
+/**
+ * The other side answers a case in words, once.
+ *
+ * A reply is the side that did not raise the case, while the case is live, written once as
+ * evidence is: a reply that could be reworded after an officer has read it is not a record of
+ * what was said. A late reply is read like any other, and a missing one decides nothing; the
+ * date is for the other side to know what is expected and for the queue to know which cases are
+ * ready to be decided.
+ *
+ * The one who raised it is told there is a reply, never what it says: the text is for the app.
+ * Two replies arriving together have one winner, held by the conditional write and not by the
+ * check before it.
+ */
+export async function respondToDispute(input: {
+  disputeId: string;
+  actorId: string;
+  text: string;
+}): Promise<PartyDisputeView> {
+  const { row, assignment } = await loadCase(input.disputeId);
+
+  // Somebody with no part in the case gets "not found", not a refusal that confirms it exists.
+  const side = await sideOnCase(input.actorId, assignment);
+  if (side === null) throw DisputeErrors.notFound();
+
+  const check = {
+    status: row.status as DisputeStatusValue,
+    raisedParty: row.raisedParty as DisputePartyValue,
+    responderParty: side === 'ADJUDICATOR' ? null : side,
+    alreadyResponded: row.respondedAt !== null,
+    text: input.text ?? '',
+  };
+  const blockers = respondBlockers(check);
+  if (blockers.length > 0) throw DisputeErrors.cannotRespond(blockers);
+
+  const now = new Date();
+  const updated = await prisma.$transaction(async (tx: Tx) => {
+    const applied = await tx.dispute.updateMany({
+      where: { id: row.id, respondedAt: null, status: { in: LIVE } },
+      data: { responseNote: input.text.trim(), respondedAt: now, respondedBy: input.actorId },
+    });
+    if (applied.count !== 1) {
+      // Somebody got there first, or the case was decided in between: say which.
+      const current = await tx.dispute.findUniqueOrThrow({ where: { id: row.id } });
+      const reasons = respondBlockers({
+        ...check,
+        status: current.status as DisputeStatusValue,
+        alreadyResponded: current.respondedAt !== null,
+      });
+      throw DisputeErrors.cannotRespond(reasons.length > 0 ? reasons : ['already_responded']);
+    }
+
+    const next = await tx.dispute.findUniqueOrThrow({ where: { id: row.id } });
+
+    await recordAudit(tx, {
+      action: 'dispute.responded',
+      entityType: 'disputes.disputes',
+      entityId: row.id,
+      actorId: input.actorId,
+      scopeType: 'FACILITY',
+      scopeId: assignment.facilityId,
+      reason: input.text.trim(),
+      after: { respondedLate: now.getTime() > row.respondBy.getTime() },
+    });
+
+    await publishEvent(tx, {
+      eventType: EVENTS.DisputeResponded,
+      aggregateType: 'disputes.disputes',
+      aggregateId: row.id,
+      payload: eventPayload(next, assignment),
+    });
+
+    return next;
+  });
+
+  return partyCaseView(toView(updated, assignment.userId, assignment.facilityId));
 }
 
 export async function getDispute(disputeId: string): Promise<DisputeView> {
@@ -513,23 +653,31 @@ export async function assignmentsUnderDispute(assignmentIds: string[]): Promise<
  * is whatever the caller declared, so a practitioner naming their own SELF
  * scope with somebody else's assignment id passed the guard and was handed
  * that person's complaint.
+ *
+ * A party reads each case without who raised it, replied to it or decided it; the adjudicator
+ * reads it whole.
  */
 export async function listDisputesFor(
   assignmentId: string,
   viewerId: string,
-): Promise<DisputeView[]> {
+): Promise<Array<DisputeView | PartyDisputeView>> {
   const assignment = await getAssignment(assignmentId);
   if (!assignment) throw DisputeErrors.assignmentNotFound();
-  if ((await sideOnCase(viewerId, assignment)) === null) throw DisputeErrors.assignmentNotFound();
+  const side = await sideOnCase(viewerId, assignment);
+  if (side === null) throw DisputeErrors.assignmentNotFound();
 
   const rows = await prisma.dispute.findMany({
     where: { assignmentId },
     orderBy: { createdAt: 'asc' },
   });
-  return rows.map((row) => toView(row, assignment.userId, assignment.facilityId));
+  const now = new Date();
+  return rows.map((row) => {
+    const view = toView(row, assignment.userId, assignment.facilityId, now);
+    return side === 'ADJUDICATOR' ? view : partyCaseView(view);
+  });
 }
 
-/** The adjudicator's queue: everything live, oldest first. */
+/** The adjudicator's queue: everything live, what can be decided now first. */
 export interface DisputeQueueRow extends DisputeView {
   practitionerName: string;
   facilityName: string;
@@ -551,6 +699,10 @@ export interface DisputeQueuePage {
   nextCursor: string | null;
 }
 
+/** Live cases are few; this is a ceiling for the day there are not, not a page size. */
+const QUEUE_CEILING = 500;
+const CLOSED: DisputeStatusValue[] = ['RESOLVED', 'WITHDRAWN'];
+
 /**
  * The adjudicator's queue, named, searchable and paged — and reaching every
  * status, not only the live ones.
@@ -561,18 +713,31 @@ export interface DisputeQueuePage {
  * the live set — the same gap step 7.7's queue had before `listUnhonoured`
  * closed it, for the same reason: "what did we decide about that one" needs
  * an answer that survives the case leaving the open queue.
+ *
+ * **What can be decided comes first** (M14-03): cases whose other side has replied or run out of
+ * time, then those an officer is working, then those still waiting on the other side; oldest
+ * first within each. That order depends on the clock, so it is worked out here and not by the
+ * database, over the live cases, which are few. Closed cases keep the database's order and its
+ * cursor: there are many of those and they are looked up, not worked through.
  */
 export async function listDisputes(
   filter: {
     status?: DisputeStatusValue;
+    stage?: DisputeStage;
     search?: string;
     limit?: number;
     cursor?: string;
   } = {},
 ): Promise<DisputeQueuePage> {
   const limit = filter.limit ?? 50;
+  const closed =
+    filter.stage === 'closed' || (filter.status !== undefined && CLOSED.includes(filter.status));
   const where: Prisma.DisputeWhereInput = {
-    status: filter.status ?? { in: LIVE },
+    status: closed
+      ? filter.status && CLOSED.includes(filter.status)
+        ? filter.status
+        : { in: CLOSED }
+      : (filter.status ?? { in: LIVE }),
   };
 
   if (filter.search) {
@@ -585,46 +750,74 @@ export async function listDisputes(
     };
   }
 
-  const rows = await prisma.dispute.findMany({
-    where,
-    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-    take: limit + 1,
-    ...(filter.cursor ? { cursor: { id: filter.cursor }, skip: 1 } : {}),
-    include: {
-      assignment: {
-        select: {
-          userId: true,
-          facilityId: true,
-          startsAt: true,
-          user: { select: { fullName: true } },
-          serviceRequest: { select: { facility: { select: { name: true } } } },
-        },
+  const include = {
+    assignment: {
+      select: {
+        userId: true,
+        facilityId: true,
+        startsAt: true,
+        user: { select: { fullName: true } },
+        serviceRequest: { select: { facility: { select: { name: true } } } },
       },
     },
-  });
+  } satisfies Prisma.DisputeInclude;
 
-  const page = rows.slice(0, limit);
-  const disputes = page.map((row) => ({
-    ...toView(row, row.assignment.userId, row.assignment.facilityId),
+  const named = (row: Prisma.DisputeGetPayload<{ include: typeof include }>, now: Date): DisputeQueueRow => ({
+    ...toView(row, row.assignment.userId, row.assignment.facilityId, now),
     practitionerName: row.assignment.user.fullName,
     facilityName: row.assignment.serviceRequest.facility.name,
     shiftStartsAt: row.assignment.startsAt,
-  }));
+  });
 
+  const now = new Date();
+
+  if (closed) {
+    const rows = await prisma.dispute.findMany({
+      where,
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      take: limit + 1,
+      ...(filter.cursor ? { cursor: { id: filter.cursor }, skip: 1 } : {}),
+      include,
+    });
+    const page = rows.slice(0, limit);
+    return {
+      disputes: page.map((row) => named(row, now)),
+      nextCursor: rows.length > limit ? (page[page.length - 1]?.id ?? null) : null,
+    };
+  }
+
+  const rows = await prisma.dispute.findMany({
+    where,
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    take: QUEUE_CEILING,
+    include,
+  });
+  const ordered = rows
+    .map((row) => named(row, now))
+    .filter((row) => !filter.stage || row.stage === filter.stage)
+    .sort(compareForQueue);
+
+  // A cursor that is no longer in the list (the case moved on, or was decided) ends the paging
+  // rather than starting it again from the top, which would repeat what the reader has seen.
+  const after = filter.cursor ? ordered.findIndex((row) => row.id === filter.cursor) : -1;
+  if (filter.cursor && after === -1) return { disputes: [], nextCursor: null };
+  const start = after + 1;
+  const page = ordered.slice(start, start + limit);
   return {
-    disputes,
-    nextCursor: rows.length > limit ? (page[page.length - 1]?.id ?? null) : null,
+    disputes: page,
+    nextCursor: start + limit < ordered.length ? (page[page.length - 1]?.id ?? null) : null,
   };
 }
 
-
 /** A case as the facility it is over sees it in a list. */
-export interface FacilityDisputeRow extends DisputeView {
+export type FacilityDisputeRow = PartyDisputeView & {
   practitionerName: string;
   shiftStartsAt: Date;
   /** Whether it was the facility's side that raised it. */
   raisedByFacility: boolean;
-}
+  /** The practitioner raised it, nobody at the facility has replied, and it is still live. */
+  youMustReply: boolean;
+};
 
 /**
  * Every case over this facility's own shifts, newest first, every status: a case
@@ -649,25 +842,79 @@ export async function listDisputesForFacility(
     },
   });
 
-  return rows.map((row) => ({
-    ...toView(row, row.assignment.userId, row.assignment.facilityId),
-    practitionerName: row.assignment.user.fullName,
-    shiftStartsAt: row.assignment.startsAt,
-    raisedByFacility: row.raisedParty === 'FACILITY',
-  }));
+  const now = new Date();
+  return rows.map((row) => {
+    const view = toView(row, row.assignment.userId, row.assignment.facilityId, now);
+    return {
+      ...partyCaseView(view),
+      practitionerName: row.assignment.user.fullName,
+      shiftStartsAt: row.assignment.startsAt,
+      raisedByFacility: row.raisedParty === 'FACILITY',
+      youMustReply: LIVE.includes(view.status) && row.raisedParty === 'PRACTITIONER' && row.respondedAt === null,
+    };
+  });
+}
+
+/** A case as the practitioner it is over sees it in a list. */
+export type PractitionerDisputeRow = PartyDisputeView & {
+  facilityName: string;
+  shiftStartsAt: Date;
+  /** Whether the practitioner's own side raised it. */
+  raisedByYou: boolean;
+  /** The facility raised it, the practitioner has not replied, and it is still live. */
+  youMustReply: boolean;
+};
+
+/**
+ * Every case over this practitioner's own shifts, whoever raised it, newest first.
+ *
+ * Their own, by the shift's assignee and nothing they type: a practitioner has no way to name
+ * somebody else's. This is the screen the texts have been pointing at ("open Medilink to read
+ * the reasons"); there was none on this side.
+ */
+export async function listDisputesForPractitioner(userId: string): Promise<PractitionerDisputeRow[]> {
+  const rows = await prisma.dispute.findMany({
+    where: { assignment: { userId } },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    take: 200,
+    include: {
+      assignment: {
+        select: {
+          userId: true,
+          facilityId: true,
+          startsAt: true,
+          serviceRequest: { select: { facility: { select: { name: true } } } },
+        },
+      },
+    },
+  });
+
+  const now = new Date();
+  return rows.map((row) => {
+    const view = toView(row, row.assignment.userId, row.assignment.facilityId, now);
+    return {
+      ...partyCaseView(view),
+      facilityName: row.assignment.serviceRequest.facility.name,
+      shiftStartsAt: row.assignment.startsAt,
+      raisedByYou: row.raisedParty === 'PRACTITIONER',
+      youMustReply: LIVE.includes(view.status) && row.raisedParty === 'FACILITY' && row.respondedAt === null,
+    };
+  });
 }
 
 /**
  * One case, for somebody who is a party to it or the adjudicator, and for nobody
  * else: a stranger gets "not found", the answer an id that does not exist would
- * get. Also says which side the viewer is on.
+ * get. Also says which side the viewer is on, and gives a party the case without
+ * who acted on it.
  */
 export async function getCaseForParty(
   disputeId: string,
   viewerId: string,
-): Promise<{ dispute: DisputeView; side: CaseSide }> {
+): Promise<{ dispute: DisputeView | PartyDisputeView; side: CaseSide }> {
   const { row, assignment } = await loadCase(disputeId);
   const side = await sideOnCase(viewerId, assignment);
   if (side === null) throw DisputeErrors.notFound();
-  return { dispute: toView(row, assignment.userId, assignment.facilityId), side };
+  const view = toView(row, assignment.userId, assignment.facilityId);
+  return { dispute: side === 'ADJUDICATOR' ? view : partyCaseView(view), side };
 }

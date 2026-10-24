@@ -9,7 +9,8 @@ import { world } from './support/world';
  *
  * The ward's network was down, so the facility records the shift by hand.
  * The worker prices it; the nurse submits; the facility approves; the nurse
- * disputes the hours; an administrator takes the case and decides it.
+ * disputes the hours; the facility's owner writes the reply the case asks of it;
+ * an administrator takes the case and decides it, saying what it turned on.
  *
  * The timesheet appears through the outbox worker (ShiftCompleted), which the
  * page cannot be told about, so that one step reloads until it is there.
@@ -93,6 +94,44 @@ test('the nurse disputes the approved hours', async ({ page }) => {
   await expectToast(page, 'Dispute opened');
 });
 
+test('the nurse finds the case on their own screen, with nothing yet to reply to', async ({ page }) => {
+  await signIn(page, world().practitioner);
+  await page.goto('/practitioner/disputes');
+
+  const row = card(page, world().facility.name).filter({ hasText: shiftLabel() });
+  await expect(row.getByText('raised', { exact: false })).toContainText('by you');
+  // She raised it, so the reply is the facility's to write, not hers.
+  await expect(page.getByText(/waiting for your reply/)).toBeHidden();
+  await row.getByRole('button', { name: 'Open' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByTestId('dispute-reply')).toContainText('is asked to reply by');
+  await expect(dialog.getByLabel('Your side of it')).toBeHidden();
+});
+
+test('the facility owner is asked for a reply, and writes it', async ({ page }) => {
+  await signIn(page, world().owner);
+  await page.goto('/facility/disputes');
+
+  await expect(page.getByText(/waiting for your reply/)).toBeVisible();
+  const row = card(page, world().practitioner.fullName).filter({ hasText: shiftLabel() });
+  await expect(row.getByText(/Reply by/)).toBeVisible();
+  await row.getByRole('button', { name: 'Open' }).click();
+
+  const dialog = page.getByRole('dialog');
+  const send = dialog.getByRole('button', { name: 'Send reply' });
+  await dialog.getByLabel('Your side of it').fill('Too short.');
+  await expect(send).toBeDisabled();
+  await dialog
+    .getByLabel('Your side of it')
+    .fill('Handover was at the scheduled time; the ward sister signed the log at the end of shift.');
+  await send.click();
+
+  await expectToast(page, 'Reply sent');
+  // Written once: the form is gone and the words are on the case.
+  await expect(dialog.getByTestId('dispute-reply')).toContainText('the ward sister signed the log');
+  await expect(dialog.getByLabel('Your side of it')).toBeHidden();
+});
+
 test('an administrator takes the case and decides it', async ({ page }) => {
   await signIn(page, world().admin);
   await page.goto('/admin/disputes');
@@ -105,13 +144,20 @@ test('an administrator takes the case and decides it', async ({ page }) => {
     .filter({ hasText: shiftLabel() })
     .click();
 
+  // The facility's reply is in front of the officer, beside the nurse's own account.
+  await expect(page.getByTestId('dispute-reply')).toContainText('the ward sister signed the log');
+
   await page.getByRole('button', { name: 'Start reviewing' }).click();
   await expectToast(page, 'Marked as under review');
 
   await page
     .getByLabel(/Your finding/)
     .fill('The ward paper log shows handover at the scheduled time; the approved hours stand.');
-  await page.getByRole('button', { name: 'Dismiss', exact: true }).click();
+  // No decision without what it turned on, and only the reasons that belong to the outcome.
+  const dismiss = page.getByRole('button', { name: 'Dismiss', exact: true });
+  await expect(dismiss).toBeDisabled();
+  await choose(page, 'Reason to dismiss', /The record of the shift was checked/);
+  await dismiss.click();
   await expectToast(page, 'Dismissed');
 
   // The decision reaches the facility's side too: the shift is out of dispute.

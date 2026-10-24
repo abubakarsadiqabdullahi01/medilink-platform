@@ -243,6 +243,114 @@ describe('what the matcher will see', () => {
   });
 });
 
+const HOUR = 60 * 60 * 1000;
+const DAY = 24 * HOUR;
+const inDays = (days: number) => new Date(Date.now() + days * DAY);
+
+/** Every day of the week, all day: a pattern that is always somewhere in the coming days. */
+async function everyDay(userId?: string) {
+  for (const dayOfWeek of [0, 1, 2, 3, 4, 5, 6]) {
+    await callAddSlot({ kind: 'RECURRING_WEEKLY', dayOfWeek, startMinute: 0, endMinute: 1440 });
+  }
+  return userId;
+}
+
+interface DiaryBody {
+  slots: { id: string; kind: string; standing: string }[];
+  blocks: { id: string }[];
+  effective: {
+    next: { startsAt: string; endsAt: string; openEnded: boolean } | null;
+    lookaheadDays: number;
+    hasUsableSlots: boolean;
+  };
+}
+const diary = async () => (await callGet({ scopeType: 'SELF' })).body as unknown as DiaryBody;
+
+describe('what a practitioner is told about their own diary (M05-02)', () => {
+  it('says where each thing they entered stands, and when they can next be matched', async () => {
+    await practitioner();
+    await everyDay();
+    await callAddSlot({ kind: 'ONE_OFF', startsAt: inDays(3).toISOString(), endsAt: new Date(inDays(3).getTime() + 8 * HOUR).toISOString() });
+
+    const body = await diary();
+
+    expect(body.slots.map((slot) => slot.standing)).toEqual(Array(8).fill('open'));
+    expect(body.effective.hasUsableSlots).toBe(true);
+    expect(body.effective.lookaheadDays).toBe(90);
+    // Offered every day, so the next stretch begins now or within a day.
+    expect(new Date(body.effective.next!.startsAt).getTime()).toBeLessThan(Date.now() + DAY);
+    // And it does not end: it runs to the edge of what was looked at, which must not be read as a date.
+    expect(body.effective.next!.openEnded).toBe(true);
+  });
+
+  it('is the same answer the matcher gives: the stretch it names is one the matcher finds them free for', async () => {
+    const user = await practitioner();
+    await callAddSlot({ kind: 'ONE_OFF', startsAt: inDays(3).toISOString(), endsAt: new Date(inDays(3).getTime() + 8 * HOUR).toISOString() });
+
+    const { next } = (await diary()).effective;
+    // A night somebody said they are free is a stretch with an end, and says so.
+    expect(next!.openEnded).toBe(false);
+    const start = new Date(next!.startsAt);
+    const hour = { startsAt: start, endsAt: new Date(start.getTime() + HOUR) };
+    const wholeStretch = { startsAt: start, endsAt: new Date(next!.endsAt) };
+    const pastIt = { startsAt: start, endsAt: new Date(new Date(next!.endsAt).getTime() + HOUR) };
+
+    expect((await availabilityForWindow(user.id, hour)).available).toBe(true);
+    expect((await availabilityForWindow(user.id, wholeStretch)).available).toBe(true);
+    // One hour more than it names is not offered, so the stretch is exactly as long as they offered.
+    expect((await availabilityForWindow(user.id, pastIt)).available).toBe(false);
+  });
+
+  it('says a free window inside their time away does nothing, and the matcher agrees', async () => {
+    const user = await practitioner();
+    const free = { startsAt: inDays(3), endsAt: new Date(inDays(3).getTime() + 8 * HOUR) };
+    await callAddSlot({ kind: 'ONE_OFF', startsAt: free.startsAt.toISOString(), endsAt: free.endsAt.toISOString() });
+    await callAddBlock({ startsAt: inDays(1).toISOString(), endsAt: inDays(10).toISOString(), reason: 'Exams' });
+
+    const body = await diary();
+
+    expect(body.slots[0]!.standing).toBe('all_away');
+    expect(body.effective.next).toBeNull();
+    // Still entered, so they have said when; it is the time away that covers it.
+    expect(body.effective.hasUsableSlots).toBe(true);
+    expect(await availabilityForWindow(user.id, free)).toMatchObject({ available: false, reason: 'blocked' });
+  });
+
+  it('puts the next stretch after their time away, and brings it back when the time away is withdrawn', async () => {
+    await practitioner();
+    await everyDay();
+    const awayUntil = inDays(5);
+    const away = await callAddBlock({ startsAt: inDays(-1).toISOString(), endsAt: awayUntil.toISOString(), reason: 'Annual leave' });
+
+    const during = await diary();
+    expect(new Date(during.effective.next!.startsAt).getTime()).toBeGreaterThanOrEqual(awayUntil.getTime());
+    // A pattern that survives time away is still open; only what is wholly covered is not.
+    expect(during.slots.every((slot) => slot.standing === 'open')).toBe(true);
+
+    await callRemove(deleteBlock, '/api/v1/availability/blocks', away.body.id as string);
+
+    const after = await diary();
+    expect(new Date(after.effective.next!.startsAt).getTime()).toBeLessThan(Date.now() + DAY);
+  });
+
+  it('calls a window that is over, and a pattern that has ended, finished, and has nothing usable', async () => {
+    await practitioner();
+    await callAddSlot({ kind: 'ONE_OFF', startsAt: inDays(-10).toISOString(), endsAt: new Date(inDays(-10).getTime() + 8 * HOUR).toISOString() });
+    await callAddSlot({ kind: 'RECURRING_WEEKLY', dayOfWeek: 1, startMinute: 480, endMinute: 960, effectiveUntil: inDays(-3).toISOString() });
+
+    const body = await diary();
+
+    expect(body.slots.map((slot) => slot.standing).sort()).toEqual(['finished', 'finished']);
+    expect(body.effective).toMatchObject({ next: null, hasUsableSlots: false });
+  });
+
+  it('answers an empty diary with nothing usable rather than failing', async () => {
+    await practitioner();
+
+    expect(await diary()).toMatchObject({ slots: [], blocks: [], effective: { next: null, hasUsableSlots: false } });
+  });
+});
+
 describe('authorisation', () => {
   it('refuses an unauthenticated caller', async () => {
     expect((await callGet({ scopeType: 'SELF' })).status).toBe(401);

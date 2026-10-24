@@ -102,6 +102,48 @@ describe('recurring slots and the WAT offset', () => {
   });
 });
 
+describe('when a pattern is in force', () => {
+  /**
+   * An occurrence of a weekly slot belongs to the day it starts, and the pattern's bounds are
+   * compared with when that occurrence starts. So a pattern in force from Tuesday does not offer
+   * Monday night, though Monday night runs into Tuesday morning; and one in force until Tuesday
+   * still offers the last Monday night whole.
+   */
+  const MONDAY_NIGHT = { dayOfWeek: 1, startMinute: 20 * 60, endMinute: 6 * 60 }; // 19:00Z to 05:00Z
+  const aroundMondayNight = {
+    startsAt: new Date('2026-09-14T19:00:00Z'),
+    endsAt: new Date('2026-09-15T05:00:00Z'),
+  };
+  const TUESDAY_MIDNIGHT = new Date('2026-09-14T23:00:00Z'); // 00:00 Tuesday WAT
+
+  it('does not offer a night that began before the pattern did, though it ends after', () => {
+    const fromTuesday = recurring({ ...MONDAY_NIGHT, effectiveFrom: TUESDAY_MIDNIGHT });
+    expect(slotWindows(fromTuesday, aroundMondayNight)).toEqual([]);
+    expect(availabilityFor([fromTuesday], [], aroundMondayNight).reason).toBe('not_offered');
+  });
+
+  it('offers the whole of the last night of a pattern that ends on Tuesday', () => {
+    const untilTuesday = recurring({ ...MONDAY_NIGHT, effectiveUntil: TUESDAY_MIDNIGHT });
+    expect(slotWindows(untilTuesday, aroundMondayNight)).toHaveLength(1);
+    expect(availabilityFor([untilTuesday], [], aroundMondayNight).available).toBe(true);
+  });
+
+  it('offers an occurrence that starts at the very instant the pattern begins', () => {
+    const exactly = recurring({ effectiveFrom: MONDAY_07Z });
+    expect(slotWindows(exactly, { startsAt: MONDAY_07Z, endsAt: MONDAY_17Z })).toHaveLength(1);
+  });
+
+  it('does not offer one that starts a moment before the pattern begins', () => {
+    const justAfter = recurring({ effectiveFrom: new Date(MONDAY_07Z.getTime() + 1) });
+    expect(slotWindows(justAfter, { startsAt: MONDAY_07Z, endsAt: MONDAY_17Z })).toEqual([]);
+  });
+
+  it('does not offer one that starts at the very instant the pattern ends', () => {
+    const endsAsItStarts = recurring({ effectiveUntil: MONDAY_07Z });
+    expect(slotWindows(endsAsItStarts, { startsAt: MONDAY_07Z, endsAt: MONDAY_17Z })).toEqual([]);
+  });
+});
+
 describe('mergeWindows', () => {
   it('joins windows that only touch', () => {
     // Two adjacent slots cover a shift spanning both; a merge that joined

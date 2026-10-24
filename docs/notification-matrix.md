@@ -36,7 +36,8 @@ It answers “why was nobody told?” for each thing the platform does. A test h
 | `staff.invited` | A facility invites somebody to work for it. Not if the invitation was answered, cancelled or ran out before the worker ran. | The number a facility invited, which may belong to nobody registered yet | Once per invitation; a redelivered event sends nothing more. A text the gateway refused is retried until it goes. | The facility’s name and the role, in fixed words: nothing the facility typed, no link and no number. The one message not kept in an inbox, since the number may have no account; the invitation records whether it went. | `staff.invited` |
 | `staff.invitation_accepted` | The person invited accepts, and the role is given. | The person who sent the invitation | Once per invitation. | The facility’s name and the role. Never who accepted: the Staff page shows who joined. | `staff.invitation_answered` |
 | `staff.invitation_declined` | The person invited declines. | The person who sent the invitation | Once per invitation. | The facility’s name and the role. Never who declined. | `staff.invitation_answered` |
-| `dispute.opened` | A dispute is opened over a shift. | The other side of the case, and everyone who holds `dispute.manage` across the platform. Not the person who opened it. | Once per person per case. | The shift’s window. Never the reason argued. | `dispute.opened` |
+| `dispute.opened` | A dispute is opened over a shift. | The other side of the case, and everyone who holds `dispute.manage` across the platform. Not the person who opened it. | Once per person per case. | The shift’s window, and to the other side the date they are asked to reply by. Never the reason argued. | `dispute.opened` |
+| `dispute.responded` | The other side writes its reply. | The side that opened the case. Not the side that replied. | Once per case: a reply is written once. | The shift. Never what the reply says. | `dispute.responded` |
 | `dispute.under_review` | An officer starts reviewing it. | Both sides of the case | Once per person per case. | The shift. Not what was argued or the officer’s notes. | `dispute.under_review` |
 | `dispute.resolved` | An officer decides it. | Both sides of the case | Once per person per case. | The outcome, and a pointer to the reasons, which are in the app. | `dispute.resolved` |
 | `dispute.withdrawn` | The person who opened it withdraws it. | The other side of the case | Once per case. | The shift. Not why. | `dispute.withdrawn` |
@@ -93,6 +94,7 @@ It answers “why was nobody told?” for each thing the platform does. A test h
 | `dispute.under_review` | `dispute.under_review` |  |
 | `dispute.resolved` | `dispute.resolved` |  |
 | `dispute.withdrawn` | `dispute.withdrawn` |  |
+| `dispute.responded` | `dispute.responded` |  |
 | `clinical_incident.reported` | `incident.severe` |  |
 | `suggestion.answered` | `suggestion.answered` |  |
 

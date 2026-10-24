@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { DISPUTE_REASON_MAX_LENGTH, DISPUTE_REASON_MIN_LENGTH } from '../domain/dispute';
+import {
+  DECISION_REASONS,
+  DISPUTE_REASON_MAX_LENGTH,
+  DISPUTE_REASON_MIN_LENGTH,
+  type DecisionReasonValue,
+} from '../domain/dispute';
 
 const uuid = z.string().uuid();
 const reason = z.string().trim().min(DISPUTE_REASON_MIN_LENGTH).max(DISPUTE_REASON_MAX_LENGTH);
@@ -46,14 +51,39 @@ export const evidenceUrlSchema = z.object({
   facilityId: uuid.optional(),
 });
 
+/** Every reason there is, once; which are open under which outcome is the domain's to say. */
+const ALL_DECISION_REASONS = [
+  ...new Set([...DECISION_REASONS.UPHELD, ...DECISION_REASONS.DISMISSED]),
+] as [DecisionReasonValue, ...DecisionReasonValue[]];
+
 export const resolveDisputeSchema = z.object({
   id: uuid,
   // No default and no optional: a resolution with no outcome tells the loser
   // nothing they can act on, and the domain refuses it too.
   outcome: z.enum(['UPHELD', 'DISMISSED']),
+  // Required beside the notes: the short form of why, which can be counted. That it belongs
+  // to the outcome is checked by the domain, which holds the list.
+  decisionReason: z.enum(ALL_DECISION_REASONS),
   notes: reason,
 });
 export type ResolveDisputeInput = z.infer<typeof resolveDisputeSchema>;
+
+/**
+ * The other side's reply. Practitioners omit `facilityId` and act at SELF; a facility member
+ * names the facility they act for. Words, as raising a case needs words.
+ */
+export const respondDisputeSchema = z.object({
+  id: uuid,
+  facilityId: uuid.optional(),
+  response: reason,
+});
+export type RespondDisputeInput = z.infer<typeof respondDisputeSchema>;
+
+/**
+ * Reading one case. A facility member names the facility they act for; a practitioner says
+ * `as=self` to read it as themselves; with neither it is the adjudicator's read, at PLATFORM.
+ */
+export const caseReadSchema = partyDisputeIdSchema.extend({ as: z.literal('self').optional() });
 
 export const evidenceUploadUrlSchema = z.object({
   id: uuid,
@@ -79,6 +109,8 @@ export const disputeQueueSchema = z.object({
    */
   facilityId: uuid.optional(),
   status: z.enum(['OPEN', 'UNDER_REVIEW', 'RESOLVED', 'WITHDRAWN']).optional(),
+  /** Where a case stands for whoever is deciding it. */
+  stage: z.enum(['waiting_for_response', 'ready_to_decide', 'under_review', 'closed']).optional(),
   /** Matches the practitioner's name or the facility's. */
   search: z.string().trim().max(120).optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),

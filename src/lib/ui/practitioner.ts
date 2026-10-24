@@ -123,7 +123,7 @@ export function usePractitionerSetup() {
   const availability = useQuery({
     queryKey: ['availability'],
     queryFn: () =>
-      api.get<{ slots: unknown[]; blocks: unknown[] }>('/api/v1/availability?scopeType=SELF'),
+      api.get<{ slots: { standing?: string }[]; blocks: unknown[] }>('/api/v1/availability?scopeType=SELF'),
   });
   const submissions = useQuery({
     queryKey: ['my-credentials'],
@@ -138,7 +138,10 @@ export function usePractitionerSetup() {
   const reference = useReference();
   const blockers = eligibility.data?.blockers ?? [];
   const hasProfile = Boolean(profile.data);
-  const hasAvailability = (availability.data?.slots.length ?? 0) > 0;
+  // Said when they can work: something they entered is still in play. A window already over, or a
+  // pattern that has ended, is not saying anything now. The server reads this from the same model
+  // the matcher does.
+  const hasAvailability = (availability.data?.slots ?? []).some((slot) => slot.standing !== 'finished');
   const documentsDone =
     hasProfile &&
     eligibility.isSuccess &&

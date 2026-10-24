@@ -34,6 +34,7 @@ for (const [path, heading] of [
   ['/practitioner/shifts', 'My shifts'],
   ['/practitioner/timesheets', 'Timesheets'],
   ['/practitioner/earnings', 'Earnings'],
+  ['/practitioner/disputes', 'Disputes'],
   // Four tabs and a wizard in one page: the likeliest thing here to push the
   // page sideways, so each way in is checked.
   ['/practitioner/profile', /^(My profile|Set up your profile)$/],

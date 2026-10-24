@@ -1,6 +1,7 @@
 import { handleGuardedRequest } from '@/lib/http/guarded-handler';
 import { availabilityQuerySchema } from '@/modules/availability/presentation/schemas';
 import { getAvailability } from '@/modules/availability/application/availability';
+import { LOOKAHEAD_DAYS } from '@/modules/availability/domain/offered';
 
 /**
  * GET /api/v1/availability — the slots a practitioner offers and the periods
@@ -21,7 +22,14 @@ export async function GET(request: Request) {
     }),
     action: async ({ input, session }) => {
       const userId = input.scopeType === 'SELF' ? session.userId : input.scopeId;
-      if (!userId) return { userId: null, slots: [], blocks: [] };
+      if (!userId) {
+        return {
+          userId: null,
+          slots: [],
+          blocks: [],
+          effective: { next: null, lookaheadDays: LOOKAHEAD_DAYS, hasUsableSlots: false },
+        };
+      }
       return getAvailability(userId);
     },
   });

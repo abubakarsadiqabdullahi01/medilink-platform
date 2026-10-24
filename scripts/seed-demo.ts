@@ -140,6 +140,7 @@ import {
   resolveDispute,
   withdrawDispute,
 } from '../src/modules/disputes/application/dispute';
+import { DISPUTE_RESPONSE_DAYS } from '../src/modules/disputes/domain/dispute';
 import {
   attachEvidence,
   requestEvidenceUploadUrl,
@@ -2759,14 +2760,14 @@ async function main(): Promise<void> {
     }
     if (spec.then === 'upheld') {
       await resolveDispute({
-        disputeId: dispute.id, actorId: ops.id, outcome: 'UPHELD',
+        disputeId: dispute.id, actorId: ops.id, outcome: 'UPHELD', decisionReason: 'RECORD_WAS_WRONG',
         notes: 'The theatre log and the ward handover sheet both show the practitioner stayed ninety minutes past the scheduled end. The facility has agreed to pay the difference on the next invoice.',
       });
       closedAt = notAfterNow(addDays(raisedAt, 2));
     }
     if (spec.then === 'dismissed') {
       await resolveDispute({
-        disputeId: dispute.id, actorId: ops.id, outcome: 'DISMISSED',
+        disputeId: dispute.id, actorId: ops.id, outcome: 'DISMISSED', decisionReason: 'COMPLAINT_NOT_MADE_OUT',
         notes: 'Neither the published shift nor the facility’s rate card includes a transport allowance, and the offer accepted showed none. Dismissed.',
       });
       closedAt = notAfterNow(addDays(raisedAt, 3));
@@ -2779,6 +2780,8 @@ async function main(): Promise<void> {
       where: { id: dispute.id },
       data: {
         createdAt: raisedAt,
+        // The reply is asked for by the same window it would have been had it been raised then.
+        respondBy: addDays(raisedAt, DISPUTE_RESPONSE_DAYS),
         ...(spec.then === 'withdrawn' ? { withdrawnAt: closedAt } : closedAt ? { resolvedAt: closedAt } : {}),
       },
     });

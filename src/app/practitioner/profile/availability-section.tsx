@@ -2,10 +2,12 @@
 
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { CalendarCheck, CalendarDays, CalendarOff, Moon, Sun, Trash2, } from 'lucide-react';
+import { CalendarCheck, CalendarDays, CalendarOff, Moon, Sun, Trash2, TriangleAlert } from 'lucide-react';
 import { api } from '@/lib/ui/api';
 import { useQuery } from '@tanstack/react-query';
 import { useQueueAction } from '@/lib/ui/queue';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -38,6 +40,25 @@ interface Slot {
   endMinute: number | null;
   startsAt: string | null;
   endsAt: string | null;
+  /** Whether it is doing anything today, from the same model the matcher uses. */
+  standing?: 'open' | 'part_away' | 'all_away' | 'starts_later' | 'finished';
+}
+
+interface Effective {
+  next: { startsAt: string; endsAt: string; openEnded?: boolean } | null;
+  lookaheadDays: number;
+  hasUsableSlots: boolean;
+}
+
+/** What a thing they entered is doing, when it is not simply working. */
+function StandingBadge({ standing, kind }: { standing: Slot['standing']; kind: string }) {
+  if (standing === 'all_away') return <Badge variant="warning">Not used: you are away then</Badge>;
+  if (standing === 'part_away') return <Badge variant="warning">Partly in your time away</Badge>;
+  if (standing === 'starts_later') return <Badge variant="info">Starts later</Badge>;
+  if (standing === 'finished') {
+    return <Badge variant="secondary">{kind === 'ONE_OFF' ? 'Over' : 'Ended'}</Badge>;
+  }
+  return null;
 }
 
 interface Block {
@@ -92,8 +113,11 @@ export function AvailabilitySection() {
   const calendar = useQuery({
     queryKey: queueKey,
     queryFn: () =>
-      api.get<{ slots: Slot[]; blocks: Block[] }>('/api/v1/availability?scopeType=SELF'),
+      api.get<{ slots: Slot[]; blocks: Block[]; effective?: Effective }>(
+        '/api/v1/availability?scopeType=SELF',
+      ),
   });
+  const effective = calendar.data?.effective;
   const allSlots = calendar.data?.slots ?? [];
   const slots = allSlots.filter((slot) => slot.kind !== 'ONE_OFF');
   // Ones already over are history, not something to offer: left in the record,
@@ -107,7 +131,9 @@ export function AvailabilitySection() {
   const ordered = [...slots].sort(
     (a, b) => weekday(a) - weekday(b) || (a.startMinute ?? 0) - (b.startMinute ?? 0),
   );
-  const blocks = calendar.data?.blocks ?? [];
+  // Time away that is already over is history, as a past free window is: kept in the record, out
+  // of the list.
+  const blocks = (calendar.data?.blocks ?? []).filter((block) => new Date(block.endsAt) > new Date());
 
   const [dayOfWeek, setDayOfWeek] = useState('1');
   const [startTime, setStartTime] = useState('08:00');
@@ -181,6 +207,12 @@ export function AvailabilitySection() {
       ),
   });
 
+  const removeBlock = useQueueAction<{ id: string }>({
+    queueKey,
+    run: ({ id }) => api.del(`/api/v1/availability/blocks/${id}`),
+    success: 'Time away removed',
+  });
+
   const addBlock = useQueueAction<void>({
     queueKey,
     run: () =>
@@ -194,6 +226,38 @@ export function AvailabilitySection() {
 
   return (
     <>
+      {/* What the matcher will actually do with all of this, said first: the next time they can be
+          offered a shift, or why they cannot be. Away always wins over what they offer. */}
+      {effective ? (
+        effective.next ? (
+          <Alert variant="info" className="mb-5">
+            <CalendarCheck />
+            <AlertDescription>
+              <strong>You can next be offered a shift</strong> from {formatWhen(effective.next.startsAt)}
+              {effective.next.openEnded ? ' onwards' : ` to ${formatWhen(effective.next.endsAt)}`}. Time
+              you mark as away always wins over what you offer: a shift that touches it is never
+              offered to you.
+            </AlertDescription>
+          </Alert>
+        ) : effective.hasUsableSlots ? (
+          <Alert variant="warning" className="mb-5">
+            <CalendarOff />
+            <AlertDescription>
+              <strong>Everything you offer falls in time you marked as away</strong>, so you will not be
+              offered shifts. Remove or shorten your time away on the Away tab to be matched again.
+            </AlertDescription>
+          </Alert>
+        ) : (
+          <Alert variant="warning" className="mb-5">
+            <TriangleAlert />
+            <AlertDescription>
+              <strong>Nothing you have entered is still in play</strong>, so you will not be offered
+              shifts. Add a weekly pattern, or a date you are free.
+            </AlertDescription>
+          </Alert>
+        )
+      ) : null}
+
       <Tabs defaultValue="pattern">
         <TabsList>
           <TabsTrigger value="pattern">Weekly pattern</TabsTrigger>
@@ -297,6 +361,7 @@ export function AvailabilitySection() {
                             : `${clock(slot.startMinute)} – ${clock(slot.endMinute)}`
                           : `${formatWhen(slot.startsAt)} – ${formatWhen(slot.endsAt)}`}
                       </span>
+                      <StandingBadge standing={slot.standing} kind={slot.kind} />
                     </div>
                     <Button
                       variant="ghost"
@@ -412,7 +477,7 @@ export function AvailabilitySection() {
               compact
               icon={<CalendarCheck />}
               title="No dates marked as free"
-              description="Dates you add here are offered on top of your weekly pattern."
+              description="Dates you add here are offered on top of your weekly pattern, unless you are away then."
             />
           ) : (
             <Card>
@@ -422,8 +487,11 @@ export function AvailabilitySection() {
                     key={slot.id}
                     className="flex flex-wrap items-center justify-between gap-3 px-5 py-3"
                   >
-                    <span className="tabular text-sm">
-                      {formatWhen(slot.startsAt)} – {formatWhen(slot.endsAt)}
+                    <span className="flex flex-wrap items-center gap-3">
+                      <span className="tabular text-sm">
+                        {formatWhen(slot.startsAt)} – {formatWhen(slot.endsAt)}
+                      </span>
+                      <StandingBadge standing={slot.standing} kind={slot.kind} />
                     </span>
                     <Button
                       variant="ghost"
@@ -450,6 +518,10 @@ export function AvailabilitySection() {
               <CardTitle className="text-sm">Block out some dates</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
+              <p className="text-xs text-muted-foreground">
+                Time away always wins. A shift that touches it is never offered to you, even on a
+                day you have marked as free.
+              </p>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label htmlFor="block-from">From</Label>
@@ -504,11 +576,23 @@ export function AvailabilitySection() {
             <div className="space-y-2">
               {blocks.map((block) => (
                 <Card key={block.id}>
-                  <CardContent className="py-3">
-                    <p className="text-sm">
-                      {formatWhen(block.startsAt)} – {formatWhen(block.endsAt)}
-                    </p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">{block.reason}</p>
+                  <CardContent className="flex flex-wrap items-center justify-between gap-3 py-3">
+                    <div className="min-w-0">
+                      <p className="text-sm">
+                        {formatWhen(block.startsAt)} – {formatWhen(block.endsAt)}
+                      </p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">{block.reason}</p>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-destructive-text hover:bg-destructive/10 hover:text-destructive-text"
+                      loading={removeBlock.isPending && removeBlock.variables?.id === block.id}
+                      onClick={() => removeBlock.mutate({ id: block.id })}
+                    >
+                      <Trash2 />
+                      Remove
+                    </Button>
                   </CardContent>
                 </Card>
               ))}

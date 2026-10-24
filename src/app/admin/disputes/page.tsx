@@ -10,6 +10,13 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { StatusBadge, humanise } from '@/components/app/status-badge';
 import { EmptyState, PageHeader, QueueSkeleton, ErrorState } from '@/components/app/page-shell';
 import { formatAgo, formatWhen } from '@/components/app/format';
@@ -28,6 +35,14 @@ const STATUSES = [
   ['WITHDRAWN', 'Withdrawn'],
 ] as const;
 
+// Where a case stands for whoever decides it. Only the two open ones are worth filtering on:
+// the other two are the tabs.
+const STAGES = [
+  ['any', 'Any'],
+  ['ready_to_decide', 'Ready to decide'],
+  ['waiting_for_response', 'Waiting for the other side'],
+] as const;
+
 const PAGE_SIZE = 20;
 
 /**
@@ -40,11 +55,16 @@ const PAGE_SIZE = 20;
  *
  * A row is now a summary and a click, and deciding happens on its own screen
  * with the attachments in front of it.
+ *
+ * The open tab is ordered by what can be decided: cases whose other side has replied or whose
+ * reply-by date has gone come first, oldest first, and cases still inside their reply window
+ * come after. That is the server's order, not this screen's.
  */
 export default function DisputesPage() {
   const [status, setStatus] = useState<string>('OPEN');
   const [search, setSearch] = useState('');
   const [applied, setApplied] = useState('');
+  const [stage, setStage] = useState<string>('any');
   const [selected, setSelected] = useState<Dispute | null>(null);
 
   const [cursors, setCursors] = useState<(string | null)[]>([null]);
@@ -56,12 +76,15 @@ export default function DisputesPage() {
     setPageIndex(0);
   }
 
-  const queueKey = ['disputes', status, applied];
+  // Waiting and ready are both OPEN cases; on any other tab the filter means nothing.
+  const stageFilter = status === 'OPEN' && stage !== 'any' ? stage : '';
+  const queueKey = ['disputes', status, stageFilter, applied];
   const queue = useQuery({
     queryKey: [...queueKey, cursor],
     queryFn: () => {
       const parts = [
         `status=${status}`,
+        stageFilter ? `stage=${stageFilter}` : '',
         `limit=${PAGE_SIZE}`,
         applied ? `search=${encodeURIComponent(applied)}` : '',
         cursor ? `cursor=${cursor}` : '',
@@ -127,6 +150,30 @@ export default function DisputesPage() {
                 placeholder="Ngozi, or Ibadan University Hospital"
               />
             </div>
+
+            {status === 'OPEN' ? (
+              <div className="w-[240px] space-y-1.5">
+                <Label htmlFor="dispute-stage">Where it stands</Label>
+                <Select
+                  value={stage}
+                  onValueChange={(value) => {
+                    setStage(value);
+                    startOver();
+                  }}
+                >
+                  <SelectTrigger id="dispute-stage">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {STAGES.map(([value, label]) => (
+                      <SelectItem key={value} value={value}>
+                        {label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
 
             <Button type="submit" loading={queue.isFetching}>
               <Search />
@@ -201,6 +248,15 @@ export default function DisputesPage() {
                         {row.raisedParty === 'PRACTITIONER' ? 'Practitioner' : 'Facility'}
                       </Badge>
                       <Badge variant="secondary">{humanise(row.category)}</Badge>
+                      {row.status === 'OPEN' ? (
+                        row.stage === 'ready_to_decide' ? (
+                          <Badge variant="success">Ready to decide</Badge>
+                        ) : (
+                          <Badge variant="secondary">
+                            {row.responseOverdue ? 'Reply overdue' : `Reply by ${formatWhen(row.respondBy)}`}
+                          </Badge>
+                        )
+                      ) : null}
                       {open ? (
                         <span className="text-xs text-muted-foreground">
                           {formatAgo(row.createdAt)}
