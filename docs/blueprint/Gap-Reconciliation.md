@@ -22,9 +22,9 @@ The Blueprint’s gap register holds **410 gaps**: 119 P0, 225 P1, 66 P2. Since 
 | Priority | Total | Closed | Partial | Open | Not yet reviewed |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | P0 | 119 | 87 | 18 | 14 | 0 |
-| P1 | 225 | 16 | 61 | 148 | 0 |
-| P2 | 66 | 1 | 7 | 58 | 0 |
-| **All** | **410** | **104** | **86** | **220** | **0** |
+| P1 | 225 | 22 | 65 | 138 | 0 |
+| P2 | 66 | 4 | 8 | 54 | 0 |
+| **All** | **410** | **113** | **91** | **206** | **0** |
 
 By area:
 
@@ -50,18 +50,18 @@ By area:
 | Suggestions (`SUG`) | 0 | 2 | 6 | 8 | 2 | 1 | 5 |
 | Reference data (`CFG`) | 4 | 8 | 3 | 15 | 0 | 6 | 9 |
 | Platform and operations (`PLT`) | 5 | 11 | 5 | 21 | 1 | 8 | 12 |
-| Practitioner console (`UXP`) | 4 | 7 | 2 | 13 | 3 | 3 | 7 |
-| Facility console (`UXF`) | 7 | 9 | 0 | 16 | 8 | 1 | 7 |
-| Operations console (`UXO`) | 4 | 10 | 0 | 14 | 4 | 3 | 7 |
-| Public site (`UXW`) | 6 | 4 | 1 | 11 | 4 | 2 | 5 |
-| Accessibility and low bandwidth (`UXA`) | 6 | 7 | 4 | 17 | 6 | 1 | 10 |
+| Practitioner console (`UXP`) | 4 | 7 | 2 | 13 | 4 | 3 | 6 |
+| Facility console (`UXF`) | 7 | 9 | 0 | 16 | 9 | 2 | 5 |
+| Operations console (`UXO`) | 4 | 10 | 0 | 14 | 5 | 3 | 6 |
+| Public site (`UXW`) | 6 | 4 | 1 | 11 | 4 | 4 | 3 |
+| Accessibility and low bandwidth (`UXA`) | 6 | 7 | 4 | 17 | 12 | 3 | 2 |
 | Quality and delivery (`QAL`) | 3 | 8 | 1 | 12 | 1 | 2 | 9 |
 
-**Reading the numbers.** About three quarters of the P1 and P2 gaps (206 of 291) are still open, which is what one would expect: Phase 0 went after the pilot blockers. Of the 16 P1 gaps that closed, seven were closed by a P0 fix to the same root cause (the roster’s cancel action, the in-app inbox, the shift type derived from the hours, the roster’s contact window, the payout account reuse check), three by later work on suggestions (SUG-01, SUG-02, UXO-11), four by the retry-safety work after that (TIM-04, TIM-07, TIM-08, ATT-06) and two by the audit work (AUD-13, AUD-06). 1 P2 gaps closed.
+**Reading the numbers.** About three quarters of the P1 and P2 gaps (192 of 291) are still open, which is what one would expect: Phase 0 went after the pilot blockers. Of the 22 P1 gaps that closed, seven were closed by a P0 fix to the same root cause (the roster’s cancel action, the in-app inbox, the shift type derived from the hours, the roster’s contact window, the payout account reuse check), three by later work on suggestions (SUG-01, SUG-02, UXO-11), four by the retry-safety work after that (TIM-04, TIM-07, TIM-08, ATT-06) two by the audit work (AUD-13, AUD-06), and six by the interface work: five by the design pass (UXA-05, UXA-07, UXA-10, UXF-16, UXO-07) and one by the practitioner’s dispute screen (UXP-09). 4 P2 gaps closed: CRE-12, and UXA-13, UXA-14 and UXA-15 from the design pass.
 
 ## Changed since `9a93861`
 
-Four commits on this branch after the merge changed the status of these gaps. They are marked in the tables below with the commit; the counts above include them.
+Commits after the merge changed the status of these gaps. They are marked in the tables below with the commit; the counts above include them. The last fourteen rows are the interface work: the design pass (`5f4ebab` to `88e164a`, merged as pull request 19) and the practitioner’s dispute screen (pull request 18, not yet merged); each was checked against the code, not taken from the commit message. The module-completion work (the M-cards in [Module-Completion-Plan.md](Module-Completion-Plan.md)) is recorded there and has not yet been carried into these tables.
 
 | Gap | Pri | Was | Is | Commit |
 | --- | --- | --- | --- | --- |
@@ -83,8 +83,22 @@ Four commits on this branch after the merge changed the status of these gaps. Th
 | SUG-01 | P1 | OPEN | CLOSED | `cdabc54` |
 | SUG-02 | P1 | OPEN | CLOSED | `cdabc54` |
 | UXO-11 | P1 | OPEN | CLOSED | `cdabc54` |
+| UXA-05 | P1 | OPEN | CLOSED | `1fc8abb` |
+| UXA-07 | P1 | OPEN | CLOSED | `5f4ebab` |
+| UXA-09 | P1 | OPEN | PARTIAL | `4973845` |
+| UXA-10 | P1 | OPEN | CLOSED | `4973845` |
+| UXA-16 | P1 | OPEN | PARTIAL | `dfc8fae` |
+| UXF-14 | P1 | OPEN | PARTIAL | `7ad839c` |
+| UXF-16 | P1 | OPEN | CLOSED | `68dc136` |
+| UXO-07 | P1 | OPEN | CLOSED | `68dc136` |
+| UXP-09 | P1 | OPEN | CLOSED | PR #18 |
+| UXW-07 | P1 | OPEN | PARTIAL | `4e7c3de` |
 | CRE-12 | P2 | OPEN | CLOSED | `fadcda6` |
 | AUD-15 | P2 | OPEN | PARTIAL | `7170efb` |
+| UXW-11 | P2 | OPEN | PARTIAL | `4e7c3de`, `63e3cba` |
+| UXA-13 | P2 | OPEN | CLOSED | `5f4ebab` |
+| UXA-14 | P2 | OPEN | CLOSED | `d091453` |
+| UXA-15 | P2 | OPEN | CLOSED | `1fc8abb` |
 
 ## By area
 
@@ -529,8 +543,8 @@ Gap text is shortened; the full text and the evidence at `5c199c1` are in the Bl
 | UXP-06 | P1 | PARTIAL | A time-away block can be added but not removed, and a wrong one silently stops offers. | src/app/practitioner/profile/availability-section.tsx:67,145,496-505; commit 67639d8 — One-off slots, all-day and every-day shortcuts added. Away blocks still have no Remove button (route exists, no UI caller) and no warning they stop offers. |
 | UXP-07 | P1 | PARTIAL | The profile has no level, cadre or skills; years of experience is a self-declared number and there is one optional specialty. | src/app/practitioner/profile/profile-form.tsx:56-69; profile-summary.tsx:163-175; commit a1b0a48 — Officer-recorded level and registration category now show on profile. Form still has self-declared years, one optional specialty, no skills. |
 | UXP-08 | P1 | OPEN † | A confirmed shift cannot be withdrawn from. | src/app/api/v1/excusals/[id]/decide/route.ts:20; src/app/practitioner/shifts/excusal-panel.tsx:84-123 — No withdrawal from a confirmed shift; excusal is still post-shift and decided by a platform officer (sanction.apply, PLATFORM scope). |
-| UXP-09 | P1 | OPEN | After a dispute is opened the practitioner has no screen showing its status, outcome notes or evidence, and cannot attach evidence or withdraw it. | src/app/practitioner/timesheets/page.tsx:117-124; no dispute screen under src/app/practitioner — Practitioner still has no dispute status, outcome, evidence or withdraw screen. Facility got one (773e6ef); practitioner side did not. |
-| UXP-10 | P1 | PARTIAL | Earnings shows three totals and a payout list only. | src/app/practitioner/earnings/page.tsx:114 (MyPayoutAccount), 40-52; commits dc0d277, 7fabcb1 — Payout bank-account screen and held/awaiting-payment hints added. Still no per-shift breakdown or statement; BIL-02 credit-at-invoicing noted only in part. |
+| UXP-09 | P1 | CLOSED | After a dispute is opened the practitioner has no screen showing its status, outcome notes or evidence, and cannot attach evidence or withdraw it. | PR #18 — `/practitioner/disputes` (from `GET /api/v1/disputes/mine`) shows status, the other side’s reply, the decision and what it turned on, and both sides’ evidence by side; the practitioner can reply, attach evidence and withdraw a case they raised. On the branch; not on `main` until #18 merges. |
+| UXP-10 | P1 | PARTIAL | Earnings shows three totals and a payout list only. | src/app/practitioner/earnings/page.tsx:114 (MyPayoutAccount), 40-52; commits dc0d277, 7fabcb1 — Payout bank-account screen and held/awaiting-payment hints added. Still no per-shift breakdown or statement; BIL-02 credit-at-invoicing noted only in part. The overview also has an “Owed to you” tile (`68dc136`). |
 | UXP-11 | P1 | OPEN | "Consent to be shown to hospitals" is a condition of creating the account (button disabled until ticked) while the page says it can be withdrawn. | src/app/(auth)/register/page.tsx:455-477 — Create-account button still disabled unless the hospital-sharing consent box is ticked, while the text says it can be withdrawn. |
 | UXP-12 | P2 | OPEN | The three-hour check-in window is enforced by the screen. | src/app/practitioner/shifts/check-in-panel.tsx:33,68;… — Window still screen-only; server presentCheckInToken checks no start window. QR payload still pasted, no scanner, camera still permitted in headers. |
 | UXP-13 | P2 | OPEN | The lapsed-offer warning says "The sweep will withdraw it shortly", but the sweep withdraws offers only when the shift starts. | src/app/practitioner/offers/page.tsx:219-224; src/modules/service-requests/application/expiry.ts:26-48 — Lapsed-offer warning still says the sweep will withdraw it shortly; expiry sweep still withdraws offers only when the shift starts. |
@@ -552,9 +566,9 @@ Gap text is shortened; the full text and the evidence at `5c199c1` are in the Bl
 | UXF-11 | P1 | CLOSED | No screen to release or cancel a confirmed practitioner; the cancel route is called by no screen. | src/app/facility/roster/page.tsx:112-116,299-311,361-396; commit a1a6bb4 — Roster now has a Cancel booking action with reason that calls assignments/:id/cancel and tells the practitioner. |
 | UXF-12 | P1 | PARTIAL | The owner holds dispute.manage but there is no facility dispute screen, so a facility cannot answer or open a dispute. | src/app/facility/console-layout.tsx:70-73; src/app/facility/disputes/page.tsx:191-198,286-316; commit 773e6ef — Facility Disputes screen reads cases, adds evidence, withdraws its own. No screen lets a facility open a dispute or write a separate response. |
 | UXF-13 | P1 | OPEN | Invoices are read-only. | src/app/facility/invoices/page.tsx:63-120 (unchanged); src/app/admin/invoices/page.tsx — Facility invoices still read-only: no pay control, download, funding step or finance role. Operations gained void and bank-reference payment. |
-| UXF-14 | P1 | OPEN | Staff are added by looking up any account by phone number rather than by an invitation the invitee accepts, and only two roles can be granted (no… | src/components/app/staff-manager.tsx:122; src/app/facility/staff/page.tsx:13-24;… — Still a phone lookup of any account, no invitation, only two roles. Lookup now refused for an unverified facility (dc2c499). |
+| UXF-14 | P1 | PARTIAL | Staff are added by looking up any account by phone number rather than by an invitation the invitee accepts, and only two roles can be granted (no… | `7ad839c` — A facility invites by phone number and the person accepts or declines (M04-06, second part); only `facility_administrator` and `facility_owner` can be invited. What remains: the direct route that grants a role to any registered person without asking them is still open (a decision), and no other role can be invited. |
 | UXF-15 | P1 | OPEN | The reason text beside each ranking factor is clipped to seven rem, so the hand review the spec requires for the first fifty engagements cannot read… | src/app/facility/shifts/[id]/page.tsx:403 — Factor reason text still sits in a w-28 truncate span, clipped to seven rem; only a hover title shows the rest. |
-| UXF-16 | P1 | OPEN | No onboarding checklist. | src/app/facility/page.tsx:159-185 — Dashboard still shows only a verification banner; no checklist of add licence, add staff, set rates, publish. |
+| UXF-16 | P1 | CLOSED | No onboarding checklist. | `68dc136` — A hideable onboarding checklist on the facility dashboard (licence, verified, rates, first shift). |
 
 ### Operations console (`UXO`)
 
@@ -566,7 +580,7 @@ Gap text is shortened; the full text and the evidence at `5c199c1` are in the Bl
 | UXO-04 | P0 | CLOSED | A data request can be closed as "Answered" with a typed note while the erasure itself is only an assessment; nothing in the product erases or… | `a720baa` |
 | UXO-05 | P1 | PARTIAL | No screen edits the reference lists (categories, specialties, credential types, requirements, facility types, holidays) or the rate floors. | src/app/admin/console-layout.tsx:140-155; src/app/admin/rate-floors/page.tsx; levels/page.tsx;… — Screens for pay floors, cadre levels, registration categories and holidays added. Categories, specialties, credential types, requirements, facility types still… |
 | UXO-06 | P1 | OPEN † | Case views have no URLs. | src/app/admin/disputes/page.tsx:49,80-83 — Dispute (and other case) detail still opens from component state; no URL, no Back. Only practitioners deep-link with ?user=. |
-| UXO-07 | P1 | OPEN | "Waiting for approval" practitioners are the pilot's main work item, yet the dashboard has no tile for them and no age. | src/app/admin/page.tsx:61-110; src/modules/audit-compliance/application/platform-summary.ts:27-34 — Dashboard queues and tiles are credentials, facilities, incidents, disputes, unhonoured, suggestions. No tile or age for practitioners waiting approval. |
+| UXO-07 | P1 | CLOSED | "Waiting for approval" practitioners are the pilot's main work item, yet the dashboard has no tile for them and no age. | `68dc136` — The operations dashboard’s first tile counts practitioners waiting for approval and shows the oldest wait; it is counted into the headline. |
 | UXO-08 | P1 | OPEN † | None of the spec's first-month signals are shown: fill rate against the 70% gate for a second state, time from publish to confirmed, time from… | src/modules/audit-compliance/application/platform-summary.ts:35-43 — No fill-rate gate, publish-to-confirmed, approval-to-paid, verification turnaround or repeat-use signal anywhere in src; summary file untouched. |
 | UXO-09 | P1 | PARTIAL | Disputes: the evidence tab is view-only, there is no facility response, no target resolution time or escalation, and no "amount at stake". | src/app/admin/disputes/dispute-detail.tsx:323-403; src/app/facility/disputes/page.tsx:191-316 — Facility can now add evidence from its own screen. Operator evidence tab still view-only; no target time, escalation or amount at stake. |
 | UXO-10 | P1 | OPEN † | Closing an incident with a suspension notifies nobody, there is no direct suspend, and "refer to the regulator" records no regulator or reference. | src/app/admin/incidents/incident-detail.tsx:60-67; src/modules/clinical-incidents/application/incident.ts:205 — Closing with suspension still notifies nobody (only the reported event is handled); no direct suspend; regulator referral records no regulator or reference. |
@@ -585,11 +599,11 @@ Gap text is shortened; the full text and the evidence at `5c199c1` are in the Bl
 | UXW-04 | P0 | CLOSED | No public Terms of use or Privacy notice, and the sign-up form links to neither and records no acceptance. Terms are shown only inside consoles after… | `ede2f62` |
 | UXW-05 | P0 | CLOSED | The login page tells visitors "Locally, seed-demo.ts creates every demo account… See docs/interfaces.md." | `8f1c972` |
 | UXW-06 | P0 | OPEN | No pricing page and no statement anywhere that using Medilink is free during launch. | Needs something from outside engineering: A commercial statement |
-| UXW-07 | P1 | OPEN | No menu on a phone. | src/app/page.tsx:164,184 — Anchor nav still hidden below lg and Sign in hidden below sm; no phone menu. Only Create account shows in the header. |
+| UXW-07 | P1 | PARTIAL | No menu on a phone. | `4e7c3de` — Sign in is visible on a phone beside Sign up. What remains: the anchor menu is still hidden below `lg`, and there is no phone menu. |
 | UXW-08 | P1 | PARTIAL | Landing copy overstates in one place: practitioners are promised "offers with their terms in full", but the offer card omits cancellation terms and… | src/app/practitioner/offers/page.tsx:195-215; src/app/page.tsx:39,113; commit 9af9aff — Offer card now shows cancellation terms, ward notes, address. Premiums and total pay still absent; landing copy and top comment unchanged. |
 | UXW-09 | P1 | OPEN | The landing page names no regulator (MDCN, NMCN, PCN, MLSCN, RRBN), shows no real counts of verified practitioners or facilities, and says nothing… | src/app/page.tsx:118-141 — Landing page still names no regulator, shows no real counts and says nothing of Gombe; no mention of MDCN, NMCN, PCN, MLSCN or RRBN. |
 | UXW-10 | P1 | OPEN | The public page loads the signed-in app's providers (React Query, motion, toaster) because they sit in the root layout; on a slow phone that is… | src/app/layout.tsx:23; src/lib/ui/providers.tsx:56-60 — Root layout still wraps every page, including the landing page, in Providers (React Query, motion, toaster). |
-| UXW-11 | P2 | OPEN | No sitemap, robots file, social-share image or "Share on WhatsApp" link. | src/app (no sitemap, robots, opengraph-image files; git ls-files) — No sitemap, robots file, share image or Share on WhatsApp link. WhatsApp appears only as a support contact line. |
+| UXW-11 | P2 | PARTIAL | No sitemap, robots file, social-share image or "Share on WhatsApp" link. | `4e7c3de`, `63e3cba` — `sitemap.ts`, `robots.ts` and a share image (`public/og.jpg`) exist. What remains: no “Share on WhatsApp” link. |
 
 ### Accessibility and low bandwidth (`UXA`)
 
@@ -601,16 +615,16 @@ Gap text is shortened; the full text and the evidence at `5c199c1` are in the Bl
 | UXA-04 | P0 | CLOSED | No larger-text switch and no projector mode, the direct answer to the Gombe complaint. | `3dfbfbb` |
 | UXA-06 | P0 | CLOSED | No skip-to-content link; the phone drawer neither traps nor returns focus nor stops the page behind it from scrolling. | `7f83e8e` |
 | UXA-08 | P0 | CLOSED | The web manifest has no icons, so the app cannot be installed to a phone's home screen. | `3dfbfbb` |
-| UXA-05 | P1 | OPEN | Record values and ranking reasons are clipped with an ellipsis, so names, amounts and reasons can be unreadable. | src/components/app/page-shell.tsx:100; src/app/facility/shifts/[id]/page.tsx:403 — Detail values still use truncate and ranking reasons a w-28 truncate; names, amounts and reasons can still be clipped. |
-| UXA-07 | P1 | OPEN | Static notices are announced as alerts on every mount, so a screen reader hears the same banner each time a page opens. | src/components/ui/alert.tsx:25 — Alert still renders role=alert unconditionally, so static notices are announced on every mount. |
-| UXA-09 | P1 | OPEN | No service worker, offline page or queued writes: a check-in or timesheet submitted with no signal fails. | src/lib/ui/providers.tsx:29-60; public/ (manifest and icons only) — No service worker, offline page or queued writes in src or public. Phase 0 added install icons only; mutations fail with no signal. |
-| UXA-10 | P1 | OPEN † | Photographs and scans upload at full size up to 10 MB, with no compression, over weak 4G. | src/components/app/document-upload.tsx:11-12,70 — Uploads still go at full size up to 10 MB; no compression or resize code anywhere in src. |
+| UXA-05 | P1 | CLOSED | Record values and ranking reasons are clipped with an ellipsis, so names, amounts and reasons can be unreadable. | `1fc8abb` — Values wrap instead of clipping: the truncating classes fell from 37 places to 5, and none is on a record value or a ranking reason. |
+| UXA-07 | P1 | CLOSED | Static notices are announced as alerts on every mount, so a screen reader hears the same banner each time a page opens. | `5f4ebab` — `Alert` announces only failures, or one marked `live`; a static notice is a plain region. |
+| UXA-09 | P1 | PARTIAL | No service worker, offline page or queued writes: a check-in or timesheet submitted with no signal fails. | `4973845` — A connection banner, a message that says the phone is offline instead of “Something went wrong”, and undo on removals. What remains: no service worker, offline page or queued writes, so a check-in or timesheet sent with no signal still fails. |
+| UXA-10 | P1 | CLOSED | Photographs and scans upload at full size up to 10 MB, with no compression, over weak 4G. | `4973845` — Photographs are redrawn at 2000 px and re-encoded in the browser before upload (`src/lib/ui/compress-image.ts`, used by `document-upload.tsx`); PDFs and anything the browser cannot decode go as they are. |
 | UXA-11 | P1 | PARTIAL | No in-app help; drafts are kept only by the profile wizard. | src/app/contact/page.tsx:17-19; src/app/(auth)/login/page.tsx:131 — Public /contact page with support line added, linked from login and landing. No in-app help or link from consoles; drafts still only in wizard. |
 | UXA-12 | P1 | OPEN | No Hausa and no i18n: every string is written inline in the screens, so translation starts with extracting them (the review counts about 108 files;… | package.json (no i18n library); src/app/layout.tsx:19 — Still no i18n library, message catalogue or Hausa; strings inline in screens; html lang is en-NG. |
-| UXA-16 | P1 | OPEN | No keyboard or screen-reader test exists anywhere, so none of the above is guarded against regression (see QAL-03). | package.json; tests/e2e/mobile.spec.ts; src/app/globals.contrast.test.ts — No axe, keyboard or screen-reader test. Only a stylesheet contrast test was added; skip link and focus trap untested. |
-| UXA-13 | P2 | OPEN | Dark mode is manual only, applied after first paint (a flash), and the system setting is ignored. | src/components/app/console-shell.tsx:136-146 — Theme still read from localStorage in a useEffect after first paint; no prefers-color-scheme handling anywhere in src. |
-| UXA-14 | P2 | OPEN | The menu marks only an exact path as active, so deep pages such as a shift highlight nothing; a breadcrumb component exists but is unused. | src/components/app/console-shell.tsx:226; src/components/ui/breadcrumb.tsx — Active item still pathname === item.href, so deep pages highlight nothing; breadcrumb component still unused. |
-| UXA-15 | P2 | OPEN | Whole-naira amounts print with ".00" and rate inputs have no thousands separators. | src/components/app/format.ts:105-110; src/app/facility/shifts/new-shift-dialog.tsx:262-270 — formatNaira still forces two decimals so whole naira print .00; rate input is still type=number with no thousands separators. |
+| UXA-16 | P1 | PARTIAL | No keyboard or screen-reader test exists anywhere, so none of the above is guarded against regression (see QAL-03). | `dfc8fae` — An axe scan (`tests/e2e/a11y.spec.ts`) of the public pages and the three console dashboards, in both themes, fails the run on serious or critical findings. What remains: no keyboard-navigation test, and the scan covers the first pages, not every screen. |
+| UXA-13 | P2 | CLOSED | Dark mode is manual only, applied after first paint (a flash), and the system setting is ignored. | `5f4ebab` — A pre-paint script applies the stored theme, or the device’s own setting when none is stored, so there is no flash. |
+| UXA-14 | P2 | CLOSED | The menu marks only an exact path as active, so deep pages such as a shift highlight nothing; a breadcrumb component exists but is unused. | `d091453` — The longest matching menu item is the active one, and the shell shows a breadcrumb on deep pages. |
+| UXA-15 | P2 | CLOSED | Whole-naira amounts print with ".00" and rate inputs have no thousands separators. | `1fc8abb` — `formatNaira` drops “.00” on whole naira, and money fields use `MoneyInput` (thousands separators, no spinner). |
 | UXA-17 | P2 | OPEN † | No Flutter client, no push notifications, no offline-tolerant check-in. | docs/adr/0003-flutter-mobile-client.md; no push or service-worker code in src or package.json — No Flutter client, push notifications or offline-tolerant check-in. Phase 0 added PWA manifest icons only. |
 
 ### Quality and delivery (`QAL`)
