@@ -133,6 +133,12 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # Advisories accepted on purpose are listed in package.json under pnpm.auditConfig.ignoreGhsas,
+      # and nothing else is: a new one still fails this step.
+      #   GHSA-mrhx-c7xc-m3w5, zod 3.25.76 (high): memory exhaustion validating oversized
+      #   constrained collections. The only fix is zod 4.6.6, a major upgrade that means migrating
+      #   every validation schema. Accepted on 24 October 2026 and to be revisited by 24 November
+      #   2026: migrate to zod 4, or renew this with a reason.
       - name: dependency audit
         run: pnpm audit --audit-level high
       - name: secret scan
