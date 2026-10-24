@@ -601,7 +601,14 @@ describe('what the facility sees', () => {
       actorId: owner.id,
       now: new Date('2026-10-17T10:00:00Z'),
     });
-    await cancelStaffInvitation({ invitationId: first.id, facilityId, actorId: owner.id });
+    // At the test's own time: left to the real clock, the first one (sent on the 16th) runs out a
+    // week later and cannot be cancelled, which is how this started failing on the 24th.
+    await cancelStaffInvitation({
+      invitationId: first.id,
+      facilityId,
+      actorId: owner.id,
+      now: new Date('2026-10-17T10:30:00Z'),
+    });
 
     const listed = await listStaffInvitations({ facilityId, now: new Date('2026-10-17T11:00:00Z') });
 
