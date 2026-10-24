@@ -11,6 +11,8 @@ test-results/
 .env
 .env.local
 .env.*.local
+# A copy of .env set aside while the suites run as CI runs them, without it.
+.env.aside
 *.log
 .DS_Store
 .vscode/
