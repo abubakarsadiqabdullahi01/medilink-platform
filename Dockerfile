@@ -29,16 +29,23 @@ COPY . .
 RUN pnpm prisma generate && pnpm build
 
 # ---- production runtime -----------------------------------------------------
-# One image, three jobs, chosen by the command it is started with:
+# One image, four jobs, chosen by the command it is started with:
 #
 #   web      (default)  node_modules/.bin/next start
 #   worker              node_modules/.bin/tsx src/worker/index.ts
 #   migrate             node_modules/.bin/prisma migrate deploy
+#   seed                node_modules/.bin/tsx prisma/seed.ts
 #
 # and one command run by hand, once, on a new system - there is nobody to sign
 # in as until it has been:
 #
 #   node_modules/.bin/tsx scripts/create-first-administrator.ts --phone ... --name ...
+#
+# Run migrate and then seed on every new system and after every release. The seed
+# is idempotent, and it is the only thing that creates the scheduled jobs
+# (audit.scheduled_jobs): a worker started on a database that was only migrated
+# starts, logs nothing wrong, and never runs a single sweep. scripts/check-image.sh,
+# which CI runs against the built image, walks this order.
 #
 # The worker and the seed import from src/, and tsx needs tsconfig.json to
 # resolve '@/'; next start reads next.config.mjs for the security headers. None
